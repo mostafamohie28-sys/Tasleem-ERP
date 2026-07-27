@@ -584,9 +584,16 @@ function LoginScreen({
         </div>
 
         <div className="login-visual__content">
+          <div className="login-hero-logo">
+            <img
+              src="/tasleem-brand-board.png"
+              alt={lang === "ar" ? "شعار شركة تسليم للشحن الداخلي" : "Tasleem Domestic Shipping logo"}
+            />
+          </div>
+
           <div className="login-hero-copy">
             <p className="eyebrow">
-              {lang === "ar" ? "مركز التشغيل اللحظي" : "LIVE OPERATIONS CENTER"}
+              {lang === "ar" ? "نظام شركة تسليم" : "TASLEEM COMPANY SYSTEM"}
             </p>
             <h1>
               {lang === "ar" ? (
@@ -606,75 +613,6 @@ function LoginScreen({
                 ? "شاهد الحيازة والتحصيل والعمل المطلوب لحظة بلحظة، من شاشة واحدة واضحة."
                 : "See custody, collections and required actions in real time, from one clear workspace."}
             </p>
-          </div>
-
-          <div className="login-operations-card">
-            <div className="operations-card__header">
-              <div>
-                <span>
-                  {lang === "ar" ? "التشغيل الآن" : "Operations now"}
-                </span>
-                <strong>
-                  {lang === "ar" ? "الفرع الرئيسي" : "Main branch"}
-                </strong>
-              </div>
-              <span className="live-badge">
-                <i />
-                {lang === "ar" ? "مباشر" : "Live"}
-              </span>
-            </div>
-
-            <div className="operations-card__metrics">
-              <div>
-                <span className="operation-icon operation-icon--blue">
-                  <Warehouse size={17} />
-                </span>
-                <small>{t.inWarehouse}</small>
-                <strong>184</strong>
-              </div>
-              <div>
-                <span className="operation-icon operation-icon--green">
-                  <Truck size={17} />
-                </span>
-                <small>{t.withCourier}</small>
-                <strong>123</strong>
-              </div>
-              <div>
-                <span className="operation-icon operation-icon--orange">
-                  <CircleAlert size={17} />
-                </span>
-                <small>{t.needAction}</small>
-                <strong>36</strong>
-              </div>
-            </div>
-
-            <div className="operations-card__queue">
-              <div>
-                <span className="queue-dot queue-dot--orange" />
-                <span>
-                  {lang === "ar"
-                    ? "شحنات جاهزة للإسناد"
-                    : "Ready for assignment"}
-                </span>
-                <strong>24</strong>
-              </div>
-              <div>
-                <span className="queue-dot queue-dot--blue" />
-                <span>
-                  {lang === "ar"
-                    ? "تحصيلات تنتظر التسوية"
-                    : "Collections awaiting settlement"}
-                </span>
-                <strong>18</strong>
-              </div>
-              <div>
-                <span className="queue-dot queue-dot--green" />
-                <span>
-                  {lang === "ar" ? "تم تسليمها اليوم" : "Delivered today"}
-                </span>
-                <strong>96</strong>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -704,15 +642,14 @@ function LoginScreen({
           />
         </div>
 
-        <div className="login-company-identity">
-          <div className="login-company-logo">
+        <div className="login-mobile-company">
+          <div className="login-mobile-company__logo">
             <img
               src="/tasleem-brand-board.png"
               alt={lang === "ar" ? "شعار شركة تسليم للشحن الداخلي" : "Tasleem Domestic Shipping logo"}
             />
           </div>
-          <span className="login-company-identity__caption">
-            <i />
+          <span>
             {lang === "ar" ? "نظام إدارة شركة تسليم" : "Tasleem company management system"}
           </span>
         </div>

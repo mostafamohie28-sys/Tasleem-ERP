@@ -233,9 +233,11 @@ select:focus-visible {
 }
 
 .login-shell {
+  height: 100vh;
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(600px, 1.18fr) minmax(410px, 0.82fr);
+  overflow: hidden;
   background: var(--surface);
 }
 
@@ -383,45 +385,46 @@ select:focus-visible {
 }
 
 .login-visual__content {
-  width: min(900px, 100%);
+  width: min(860px, 100%);
   margin: 25px auto 10px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
   align-items: center;
   gap: 44px;
 }
 
 [dir="ltr"] .login-visual__content {
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  grid-template-columns: minmax(320px, 390px) minmax(0, 1fr);
 }
 
-.brand-art {
+.login-hero-logo {
   position: relative;
-  width: 184px;
-  height: 196px;
-  border-radius: 26px;
+  width: 100%;
+  height: 318px;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 28px;
   background: #fff;
   box-shadow:
-    0 24px 60px rgba(0, 0, 0, 0.28),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.8);
-  transform: rotate(-2deg);
+    0 30px 75px rgba(0, 0, 0, 0.28),
+    0 0 0 8px rgba(255, 255, 255, 0.045);
+  transform: rotate(-1deg);
 }
 
-.brand-art::after {
+.login-hero-logo::after {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 35px rgba(13, 27, 61, 0.06);
+  pointer-events: none;
+  box-shadow: inset 0 0 40px rgba(13, 27, 61, 0.06);
 }
 
-.brand-art img {
+.login-hero-logo img {
   position: absolute;
-  width: 410px;
-  height: 410px;
+  width: 650px;
   max-width: none;
-  top: 0;
+  top: -4px;
   left: 50%;
   transform: translateX(-50%);
 }
@@ -645,8 +648,7 @@ select:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 16px;
-  padding: 72px 44px 56px;
+  padding: 34px 44px;
   background:
     radial-gradient(circle at 50% 10%, rgba(37, 81, 185, 0.06), transparent 27%),
     var(--background);
@@ -723,59 +725,8 @@ select:focus-visible {
   box-shadow: 0 20px 54px rgba(19, 45, 82, 0.1);
 }
 
-.login-company-identity {
-  width: min(440px, 100%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 9px;
-}
-
-.login-company-logo {
-  position: relative;
-  width: 252px;
-  height: 210px;
-  overflow: hidden;
-  border-radius: 18px;
-  background: #fff;
-  box-shadow:
-    0 14px 38px rgba(12, 36, 76, 0.1),
-    inset 0 0 0 1px rgba(7, 30, 69, 0.06);
-}
-
-.login-company-logo::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  border-radius: inherit;
-  box-shadow: inset 0 0 28px rgba(7, 30, 69, 0.04);
-}
-
-.login-company-logo img {
-  position: absolute;
-  width: 420px;
-  max-width: none;
-  top: -2px;
-  left: 50%;
-  transform: translateX(-50%);
-}
-
-.login-company-identity__caption {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--text-soft);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.login-company-identity__caption i {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--orange-500);
-  box-shadow: 0 0 0 4px rgba(255, 107, 0, 0.1);
+.login-mobile-company {
+  display: none;
 }
 
 .login-card__security {
@@ -2663,18 +2614,18 @@ tbody tr:hover {
   }
 
   .login-visual__content {
-    grid-template-columns: minmax(0, 1fr) minmax(270px, 320px);
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
     gap: 24px;
   }
 
   [dir="ltr"] .login-visual__content {
-    grid-template-columns: minmax(0, 1fr) minmax(270px, 320px);
+    grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
   }
 }
 
 @media (max-width: 1040px) {
   .login-shell {
-    grid-template-columns: minmax(430px, 0.9fr) minmax(510px, 1.1fr);
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
   }
 
   .login-visual__content {
@@ -2686,8 +2637,23 @@ tbody tr:hover {
     font-size: 38px;
   }
 
-  .login-operations-card {
-    margin-top: 26px;
+  .login-hero-logo {
+    width: min(320px, 100%);
+    height: 258px;
+    margin-inline: auto;
+  }
+
+  .login-hero-logo img {
+    width: 530px;
+  }
+
+  .login-hero-copy {
+    margin: 24px auto 0;
+    text-align: center;
+  }
+
+  .login-visual__description {
+    margin-inline: auto;
   }
 
   th:nth-child(3),
@@ -2923,7 +2889,9 @@ tbody tr:hover {
 
 @media (max-width: 760px) {
   .login-shell {
+    height: auto;
     display: block;
+    overflow: visible;
     background: var(--surface);
   }
 
@@ -2947,13 +2915,39 @@ tbody tr:hover {
     margin: 0;
   }
 
-  .login-company-logo {
-    width: 220px;
-    height: 174px;
+  .login-mobile-company {
+    width: min(440px, 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    margin-bottom: 14px;
   }
 
-  .login-company-logo img {
-    width: 366px;
+  .login-mobile-company__logo {
+    position: relative;
+    width: 210px;
+    height: 164px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: var(--shadow-md);
+  }
+
+  .login-mobile-company__logo img {
+    position: absolute;
+    width: 350px;
+    max-width: none;
+    top: -2px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .login-mobile-company > span {
+    color: var(--text-soft);
+    font-size: 10px;
+    font-weight: 700;
   }
 
   .login-card__heading h2 {
@@ -3153,13 +3147,13 @@ tbody tr:hover {
     padding-inline: 20px;
   }
 
-  .login-company-logo {
-    width: 194px;
-    height: 154px;
+  .login-mobile-company__logo {
+    width: 186px;
+    height: 148px;
   }
 
-  .login-company-logo img {
-    width: 324px;
+  .login-mobile-company__logo img {
+    width: 310px;
   }
 
   .login-card {
