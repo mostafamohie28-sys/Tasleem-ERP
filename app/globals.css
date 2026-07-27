@@ -1780,8 +1780,13 @@ select:focus-visible {
 }
 
 .table-wrap {
-  overflow: clip;
+  max-height: 430px;
+  overflow-x: clip;
+  overflow-y: auto;
   border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  scrollbar-color: var(--border-strong) transparent;
+  scrollbar-width: thin;
 }
 
 table {
@@ -1798,7 +1803,7 @@ thead {
 th {
   position: sticky;
   z-index: 6;
-  top: 60px;
+  top: 0;
   height: 44px;
   padding: 6px 8px;
   border-bottom: 1px solid var(--table-grid);
@@ -1851,7 +1856,7 @@ th:nth-child(6) {
 }
 
 th:nth-child(7) {
-  width: 14%;
+  width: 18%;
 }
 
 th:nth-child(8) {
@@ -1860,10 +1865,6 @@ th:nth-child(8) {
 
 th:nth-child(9) {
   width: 11%;
-}
-
-th:nth-child(10) {
-  width: 4%;
 }
 
 tbody tr {
@@ -2030,60 +2031,56 @@ tbody tr:hover {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
+  gap: 2px;
 }
 
-.financial-cell__total {
+.financial-cell__line {
   width: 100%;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 5px;
+  gap: 6px;
+  min-height: 16px;
 }
 
-.financial-cell__total small {
+.financial-cell__line small {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   overflow: hidden;
   color: var(--text-faint);
-  font-size: 8px;
+  font-size: 8.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.financial-cell__total strong {
-  color: var(--text);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.financial-cell__breakdown {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-soft);
-  font-size: 8px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.financial-cell__breakdown i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: var(--border-strong);
-}
-
-.financial-cell__payer {
-  min-height: 17px;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 6px;
+.financial-cell__line small em {
+  padding: 1px 4px;
   border-radius: 99px;
   background: rgba(37, 81, 185, 0.08);
   color: var(--blue-600);
-  font-size: 7.5px;
+  font-size: 7px;
+  font-style: normal;
   font-weight: 800;
+}
+
+.financial-cell__line strong {
+  color: var(--text);
+  font-size: 10px;
   white-space: nowrap;
+}
+
+.financial-cell__line--total {
+  margin-top: 1px;
+  padding-top: 3px;
+  border-top: 1px dashed var(--border);
+}
+
+.financial-cell__line--total small,
+.financial-cell__line--total strong {
+  color: var(--blue-600);
+  font-weight: 800;
 }
 
 .event-cell {
@@ -2642,33 +2639,31 @@ tbody tr:hover {
   }
 
   th:nth-child(1) {
-    width: 10%;
+    width: 11%;
   }
 
   th:nth-child(2) {
-    width: 17%;
+    width: 18%;
   }
 
-  th:nth-child(4),
-  th:nth-child(7) {
-    width: 9%;
+  th:nth-child(4) {
+    width: 10%;
   }
 
-  th:nth-child(5),
-  th:nth-child(8) {
-    width: 15%;
-  }
-
-  th:nth-child(6) {
+  th:nth-child(5) {
     width: 16%;
   }
 
-  th:nth-child(7) {
-    width: 14%;
+  th:nth-child(6) {
+    width: 17%;
   }
 
-  th:nth-child(10) {
-    width: 4%;
+  th:nth-child(7) {
+    width: 18%;
+  }
+
+  th:nth-child(8) {
+    width: 10%;
   }
 }
 
@@ -2744,15 +2739,15 @@ tbody tr:hover {
   }
 
   th:nth-child(1) {
-    width: 11%;
+    width: 12%;
   }
 
   th:nth-child(2) {
-    width: 18%;
+    width: 20%;
   }
 
   th:nth-child(5) {
-    width: 16%;
+    width: 17%;
   }
 
   th:nth-child(6) {
@@ -2760,15 +2755,11 @@ tbody tr:hover {
   }
 
   th:nth-child(7) {
-    width: 18%;
+    width: 22%;
   }
 
   th:nth-child(8) {
-    width: 14%;
-  }
-
-  th:nth-child(10) {
-    width: 4%;
+    width: 10%;
   }
 
   .trust-row {

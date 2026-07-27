@@ -181,6 +181,8 @@ const copy = {
     totalDue: "إجمالي المطلوب",
     senderDue: "مستحق الراسل",
     shippingPayer: "تحمّل الشحن",
+    shipmentPrice: "سعر الشحنة",
+    shippingPrice: "سعر الشحن",
     payerRecipient: "على المستلم",
     payerSender: "على الراسل",
     collectionShort: "تحصيل",
@@ -307,6 +309,8 @@ const copy = {
     totalDue: "Total due",
     senderDue: "Sender due",
     shippingPayer: "Shipping paid by",
+    shipmentPrice: "Shipment price",
+    shippingPrice: "Shipping price",
     payerRecipient: "Recipient",
     payerSender: "Sender",
     collectionShort: "COD",
@@ -1615,7 +1619,6 @@ function ShipmentsScreen({
                             <th>{t.amount}</th>
                             <th>{t.requiredNow}</th>
                             <th>{t.lastEvent}</th>
-                            <th aria-label={t.details} />
                           </tr>
                         </thead>
                         <tbody>
@@ -1667,7 +1670,22 @@ function ShipmentsScreen({
                               </td>
                               <td>
                                 <span className="financial-cell">
-                                  <span className="financial-cell__total">
+                                  <span className="financial-cell__line">
+                                    <small>{t.shipmentPrice}</small>
+                                    <strong>{money.format(shipment.amount)}</strong>
+                                  </span>
+                                  <span className="financial-cell__line">
+                                    <small>
+                                      {t.shippingPrice}
+                                      <em>
+                                        {shipment.shippingPayer === "recipient"
+                                          ? t.payerRecipient
+                                          : t.payerSender}
+                                      </em>
+                                    </small>
+                                    <strong>{money.format(shipment.shippingFee)}</strong>
+                                  </span>
+                                  <span className="financial-cell__line financial-cell__line--total">
                                     <small>{t.totalDue}</small>
                                     <strong>
                                       {money.format(
@@ -1677,16 +1695,6 @@ function ShipmentsScreen({
                                             : 0),
                                       )}
                                     </strong>
-                                  </span>
-                                  <small className="financial-cell__breakdown">
-                                    {t.collectionShort} {money.format(shipment.amount)}
-                                    <i />
-                                    {t.shippingShort} {money.format(shipment.shippingFee)}
-                                  </small>
-                                  <span className="financial-cell__payer">
-                                    {shipment.shippingPayer === "recipient"
-                                      ? t.payerRecipient
-                                      : t.payerSender}
                                   </span>
                                 </span>
                               </td>
@@ -1701,19 +1709,6 @@ function ShipmentsScreen({
                                 <span className="event-cell">
                                   {shipment.lastEvent[lang]}
                                 </span>
-                              </td>
-                              <td>
-                                <button
-                                  className="row-action"
-                                  type="button"
-                                  aria-label={t.details}
-                                >
-                                  {lang === "ar" ? (
-                                    <ChevronLeft size={17} />
-                                  ) : (
-                                    <ChevronRight size={17} />
-                                  )}
-                                </button>
                               </td>
                             </tr>
                           ))}
@@ -1749,7 +1744,12 @@ function ShipmentsScreen({
                               <small dir="ltr">{shipment.phone}</small>
                             </span>
                             <strong className="money">
-                              {money.format(shipment.amount)}
+                              {money.format(
+                                shipment.amount +
+                                  (shipment.shippingPayer === "recipient"
+                                    ? shipment.shippingFee
+                                    : 0),
+                              )}
                             </strong>
                           </div>
                           <div className="shipment-mobile-card__facts">
@@ -1776,28 +1776,6 @@ function ShipmentsScreen({
                           </div>
                         </button>
                       ))}
-                    </div>
-
-                    <div className="pagination">
-                      <span>{t.page}</span>
-                      <div>
-                        <button type="button" disabled>
-                          {lang === "ar" ? (
-                            <ChevronRight size={16} />
-                          ) : (
-                            <ChevronLeft size={16} />
-                          )}
-                          {t.previous}
-                        </button>
-                        <button type="button">
-                          {t.next}
-                          {lang === "ar" ? (
-                            <ChevronLeft size={16} />
-                          ) : (
-                            <ChevronRight size={16} />
-                          )}
-                        </button>
-                      </div>
                     </div>
                   </>
                 ) : (
