@@ -578,20 +578,97 @@ function LoginScreen({
         </div>
 
         <div className="login-visual__content">
-          <div className="brand-art">
-            <img
-              src="/tasleem-brand-board.png"
-              alt={lang === "ar" ? "هوية تسليم" : "Tasleem brand"}
-            />
-          </div>
-          <div>
-            <p className="eyebrow">{t.liveValue}</p>
+          <div className="login-hero-copy">
+            <p className="eyebrow">
+              {lang === "ar" ? "مركز التشغيل اللحظي" : "LIVE OPERATIONS CENTER"}
+            </p>
             <h1>
-              {t.heroTitle.split("\n").map((line) => (
-                <span key={line}>{line}</span>
-              ))}
+              {lang === "ar" ? (
+                <>
+                  <span>كل شحنة</span>
+                  <span>تحت السيطرة.</span>
+                </>
+              ) : (
+                <>
+                  <span>Every shipment.</span>
+                  <span>Under control.</span>
+                </>
+              )}
             </h1>
-            <p className="login-visual__description">{t.heroText}</p>
+            <p className="login-visual__description">
+              {lang === "ar"
+                ? "شاهد الحيازة والتحصيل والعمل المطلوب لحظة بلحظة، من شاشة واحدة واضحة."
+                : "See custody, collections and required actions in real time, from one clear workspace."}
+            </p>
+          </div>
+
+          <div className="login-operations-card">
+            <div className="operations-card__header">
+              <div>
+                <span>
+                  {lang === "ar" ? "التشغيل الآن" : "Operations now"}
+                </span>
+                <strong>
+                  {lang === "ar" ? "الفرع الرئيسي" : "Main branch"}
+                </strong>
+              </div>
+              <span className="live-badge">
+                <i />
+                {lang === "ar" ? "مباشر" : "Live"}
+              </span>
+            </div>
+
+            <div className="operations-card__metrics">
+              <div>
+                <span className="operation-icon operation-icon--blue">
+                  <Warehouse size={17} />
+                </span>
+                <small>{t.inWarehouse}</small>
+                <strong>184</strong>
+              </div>
+              <div>
+                <span className="operation-icon operation-icon--green">
+                  <Truck size={17} />
+                </span>
+                <small>{t.withCourier}</small>
+                <strong>123</strong>
+              </div>
+              <div>
+                <span className="operation-icon operation-icon--orange">
+                  <CircleAlert size={17} />
+                </span>
+                <small>{t.needAction}</small>
+                <strong>36</strong>
+              </div>
+            </div>
+
+            <div className="operations-card__queue">
+              <div>
+                <span className="queue-dot queue-dot--orange" />
+                <span>
+                  {lang === "ar"
+                    ? "شحنات جاهزة للإسناد"
+                    : "Ready for assignment"}
+                </span>
+                <strong>24</strong>
+              </div>
+              <div>
+                <span className="queue-dot queue-dot--blue" />
+                <span>
+                  {lang === "ar"
+                    ? "تحصيلات تنتظر التسوية"
+                    : "Collections awaiting settlement"}
+                </span>
+                <strong>18</strong>
+              </div>
+              <div>
+                <span className="queue-dot queue-dot--green" />
+                <span>
+                  {lang === "ar" ? "تم تسليمها اليوم" : "Delivered today"}
+                </span>
+                <strong>96</strong>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1322,10 +1399,13 @@ function ShipmentsScreen({
         </header>
 
         <main className="page-content">
-          <div className="welcome-row">
+          <div className="welcome-row page-heading-row">
             <div>
-              <h1>{t.welcome}</h1>
-              <p>{t.today}</p>
+              <div className="page-title-line">
+                <h1>{t.pageTitle}</h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>{t.pageSubtitle}</p>
             </div>
             <div className="welcome-row__actions">
               <span className="updated-chip">
@@ -1408,35 +1488,6 @@ function ShipmentsScreen({
           </section>
 
           <section className="shipments-section">
-            <div className="section-heading">
-              <div>
-                <div className="title-line">
-                  <h2>{t.pageTitle}</h2>
-                  <span className="demo-chip">{t.demoData}</span>
-                </div>
-                <p>{t.pageSubtitle}</p>
-              </div>
-              <label className="scenario-control">
-                <span>{t.screenState}</span>
-                <span className="select-wrap select-wrap--compact">
-                  <select
-                    value={scenario}
-                    onChange={(event) =>
-                      setScenario(event.target.value as Scenario)
-                    }
-                  >
-                    <option value="ready">{t.ready}</option>
-                    <option value="loading">{t.loading}</option>
-                    <option value="empty">{t.empty}</option>
-                    <option value="delayed">{t.delayed}</option>
-                    <option value="unavailable">{t.unavailable}</option>
-                    <option value="conflict">{t.conflict}</option>
-                  </select>
-                  <ChevronDown size={15} />
-                </span>
-              </label>
-            </div>
-
             <div className="shipment-toolbar">
               <label className="shipment-search">
                 <Search size={18} />
@@ -1456,6 +1507,25 @@ function ShipmentsScreen({
                 )}
               </label>
               <div className="toolbar-actions">
+                <label className="scenario-control">
+                  <span>{t.screenState}</span>
+                  <span className="select-wrap select-wrap--compact">
+                    <select
+                      value={scenario}
+                      onChange={(event) =>
+                        setScenario(event.target.value as Scenario)
+                      }
+                    >
+                      <option value="ready">{t.ready}</option>
+                      <option value="loading">{t.loading}</option>
+                      <option value="empty">{t.empty}</option>
+                      <option value="delayed">{t.delayed}</option>
+                      <option value="unavailable">{t.unavailable}</option>
+                      <option value="conflict">{t.conflict}</option>
+                    </select>
+                    <ChevronDown size={15} />
+                  </span>
+                </label>
                 <button
                   className={`secondary-button ${
                     statusFilter || custodyFilter
@@ -1545,9 +1615,7 @@ function ShipmentsScreen({
                             <th>{t.region}</th>
                             <th>{t.status}</th>
                             <th>{t.custody}</th>
-                            <th>{t.courier}</th>
                             <th>{t.amount}</th>
-                            <th>{t.delivery}</th>
                             <th>{t.requiredNow}</th>
                             <th>{t.lastEvent}</th>
                             <th aria-label={t.details} />
@@ -1592,22 +1660,19 @@ function ShipmentsScreen({
                                   ) : (
                                     <Truck size={15} />
                                   )}
-                                  {shipment.custody[lang]}
+                                  <span className="custody-cell__copy">
+                                    <strong>{shipment.custody[lang]}</strong>
+                                    <small>
+                                      {shipment.courier?.[lang] ?? t.noCourier}
+                                    </small>
+                                  </span>
                                 </span>
-                              </td>
-                              <td>
-                                {shipment.courier ? (
-                                  shipment.courier[lang]
-                                ) : (
-                                  <span className="muted">{t.noCourier}</span>
-                                )}
                               </td>
                               <td>
                                 <strong className="money">
                                   {money.format(shipment.amount)}
                                 </strong>
                               </td>
-                              <td>{shipment.deliveryDate[lang]}</td>
                               <td>
                                 <span
                                   className={`required-badge required-badge--${shipment.requiredType}`}
