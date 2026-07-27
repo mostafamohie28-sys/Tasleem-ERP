@@ -570,7 +570,13 @@ function LoginScreen({
         <div className="login-visual__glow login-visual__glow--one" />
         <div className="login-visual__glow login-visual__glow--two" />
         <div className="login-visual__top">
-          <Brand lang={lang} />
+          <span className="login-product-label">
+            <Boxes size={19} />
+            <span>
+              <strong>{lang === "ar" ? "منظومة التشغيل" : "OPERATIONS SYSTEM"}</strong>
+              <small>{lang === "ar" ? "إدارة الشحن الداخلي" : "Domestic shipping management"}</small>
+            </span>
+          </span>
           <span className="system-pill">
             <span className="system-pill__dot" />
             {t.live}
@@ -698,12 +704,23 @@ function LoginScreen({
           />
         </div>
 
-        <div className="login-card">
-          <div className="login-mobile-brand">
-            <Brand lang={lang} />
+        <div className="login-company-identity">
+          <div className="login-company-logo">
+            <img
+              src="/tasleem-brand-board.png"
+              alt={lang === "ar" ? "شعار شركة تسليم للشحن الداخلي" : "Tasleem Domestic Shipping logo"}
+            />
           </div>
-          <div className="login-card__icon">
-            <LockKeyhole size={22} />
+          <span className="login-company-identity__caption">
+            <i />
+            {lang === "ar" ? "نظام إدارة شركة تسليم" : "Tasleem company management system"}
+          </span>
+        </div>
+
+        <div className="login-card">
+          <div className="login-card__security">
+            <ShieldCheck size={16} />
+            <span>{lang === "ar" ? "بوابة تشغيل آمنة" : "Secure operations portal"}</span>
           </div>
           <div className="login-card__heading">
             <h2>{t.loginTitle}</h2>

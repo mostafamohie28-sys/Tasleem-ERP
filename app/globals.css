@@ -327,6 +327,38 @@ select:focus-visible {
   gap: 24px;
 }
 
+.login-product-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  color: #fff;
+}
+
+.login-product-label > svg {
+  width: 38px;
+  height: 38px;
+  padding: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 11px;
+  color: #ff9a54;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.login-product-label > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.login-product-label strong {
+  font-size: 12px;
+}
+
+.login-product-label small {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 9px;
+}
+
 .system-pill {
   display: inline-flex;
   align-items: center;
@@ -613,7 +645,8 @@ select:focus-visible {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 34px 44px;
+  gap: 16px;
+  padding: 72px 44px 56px;
   background:
     radial-gradient(circle at 50% 10%, rgba(37, 81, 185, 0.06), transparent 27%),
     var(--background);
@@ -683,31 +716,97 @@ select:focus-visible {
 
 .login-card {
   width: min(440px, 100%);
-  padding: 28px 30px;
+  padding: 25px 30px 27px;
   border: 1px solid var(--border);
   border-radius: 20px;
   background: var(--surface-raised);
   box-shadow: 0 20px 54px rgba(19, 45, 82, 0.1);
 }
 
-.login-mobile-brand {
-  display: none;
+.login-company-identity {
+  width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
 }
 
-.login-card__icon {
-  width: 48px;
-  height: 48px;
-  display: grid;
-  place-items: center;
-  border-radius: 14px;
-  background: rgba(37, 81, 185, 0.09);
-  color: var(--blue-600);
-  margin-bottom: 22px;
+.login-company-logo {
+  position: relative;
+  width: 252px;
+  height: 210px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow:
+    0 14px 38px rgba(12, 36, 76, 0.1),
+    inset 0 0 0 1px rgba(7, 30, 69, 0.06);
+}
+
+.login-company-logo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  box-shadow: inset 0 0 28px rgba(7, 30, 69, 0.04);
+}
+
+.login-company-logo img {
+  position: absolute;
+  width: 420px;
+  max-width: none;
+  top: -2px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.login-company-identity__caption {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.login-company-identity__caption i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--orange-500);
+  box-shadow: 0 0 0 4px rgba(255, 107, 0, 0.1);
+}
+
+.login-card__security {
+  width: fit-content;
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 15px;
+  padding: 0 10px;
+  border: 1px solid rgba(7, 131, 90, 0.16);
+  border-radius: 99px;
+  background: rgba(7, 131, 90, 0.07);
+  color: var(--green-600);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.login-card__security svg {
+  flex: 0 0 auto;
+}
+
+.app-root[data-theme="dark"] .login-card__security {
+  border-color: rgba(65, 211, 157, 0.22);
+  background: rgba(65, 211, 157, 0.09);
+  color: #74dcb5;
 }
 
 .login-card__heading h2 {
   margin: 0;
-  color: var(--text);
+  color: var(--blue-600);
   font-size: 30px;
   letter-spacing: -0.6px;
 }
@@ -2834,6 +2933,7 @@ tbody tr:hover {
 
   .login-panel {
     min-height: 100svh;
+    overflow-y: auto;
     padding: 88px 24px 60px;
     justify-content: flex-start;
   }
@@ -2844,28 +2944,16 @@ tbody tr:hover {
   }
 
   .login-card {
-    margin: auto 0;
+    margin: 0;
   }
 
-  .login-mobile-brand {
-    display: block;
-    margin-bottom: 42px;
+  .login-company-logo {
+    width: 220px;
+    height: 174px;
   }
 
-  .login-mobile-brand .brand {
-    color: var(--text);
-  }
-
-  .login-mobile-brand .brand__words strong {
-    color: var(--navy-900);
-  }
-
-  .app-root[data-theme="dark"] .login-mobile-brand .brand__words strong {
-    color: #fff;
-  }
-
-  .login-mobile-brand .brand__words small {
-    color: var(--text-soft);
+  .login-company-logo img {
+    width: 366px;
   }
 
   .login-card__heading h2 {
@@ -3063,6 +3151,19 @@ tbody tr:hover {
 @media (max-width: 440px) {
   .login-panel {
     padding-inline: 20px;
+  }
+
+  .login-company-logo {
+    width: 194px;
+    height: 154px;
+  }
+
+  .login-company-logo img {
+    width: 324px;
+  }
+
+  .login-card {
+    padding-inline: 22px;
   }
 
   .login-options {
