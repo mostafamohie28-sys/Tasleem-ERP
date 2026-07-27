@@ -79,6 +79,7 @@ type Shipment = {
   confirmation: Localized;
   pieces: number;
   shippingFee: number;
+  shippingPayer: "recipient" | "sender";
   address: Localized;
 };
 
@@ -154,7 +155,7 @@ const copy = {
     status: "الحالة الحالية",
     custody: "الحيازة",
     courier: "المندوب",
-    amount: "المبلغ",
+    amount: "البيانات المالية",
     delivery: "موعد التسليم",
     requiredNow: "مطلوب الآن",
     lastEvent: "آخر حركة",
@@ -177,6 +178,13 @@ const copy = {
     financial: "التحصيل ومصاريف الشحن",
     codAllowed: "المطلوب تحصيله",
     shippingFee: "مصاريف الشحن",
+    totalDue: "إجمالي المطلوب",
+    senderDue: "مستحق الراسل",
+    shippingPayer: "تحمّل الشحن",
+    payerRecipient: "على المستلم",
+    payerSender: "على الراسل",
+    collectionShort: "تحصيل",
+    shippingShort: "شحن",
     pieces: "عدد القطع",
     address: "عنوان التسليم",
     currentCustody: "الحيازة الحالية",
@@ -273,7 +281,7 @@ const copy = {
     status: "Current status",
     custody: "Custody",
     courier: "Courier",
-    amount: "Amount",
+    amount: "Financial details",
     delivery: "Delivery date",
     requiredNow: "Required now",
     lastEvent: "Last event",
@@ -296,6 +304,13 @@ const copy = {
     financial: "Collection & shipping fee",
     codAllowed: "Amount to collect",
     shippingFee: "Shipping fee",
+    totalDue: "Total due",
+    senderDue: "Sender due",
+    shippingPayer: "Shipping paid by",
+    payerRecipient: "Recipient",
+    payerSender: "Sender",
+    collectionShort: "COD",
+    shippingShort: "Shipping",
     pieces: "Piece count",
     address: "Delivery address",
     currentCustody: "Current custody",
@@ -345,6 +360,7 @@ const shipments: Shipment[] = [
     confirmation: { ar: "تم التأكيد", en: "Confirmed" },
     pieces: 2,
     shippingFee: 55,
+    shippingPayer: "recipient",
     address: {
       ar: "١٢ شارع الطيران، مدينة نصر، القاهرة",
       en: "12 El Tayaran St., Nasr City, Cairo",
@@ -371,6 +387,7 @@ const shipments: Shipment[] = [
     confirmation: { ar: "تم التأكيد", en: "Confirmed" },
     pieces: 1,
     shippingFee: 60,
+    shippingPayer: "recipient",
     address: {
       ar: "٨ شارع مصدق، الدقي، الجيزة",
       en: "8 Mossadak St., Dokki, Giza",
@@ -397,6 +414,7 @@ const shipments: Shipment[] = [
     confirmation: { ar: "غير مستخدم", en: "Not used" },
     pieces: 3,
     shippingFee: 70,
+    shippingPayer: "sender",
     address: {
       ar: "شارع المشير أحمد إسماعيل، سيدي جابر",
       en: "El Mosheer Ahmed Ismail St., Sidi Gaber",
@@ -423,6 +441,7 @@ const shipments: Shipment[] = [
     confirmation: { ar: "تم التأكيد", en: "Confirmed" },
     pieces: 1,
     shippingFee: 55,
+    shippingPayer: "recipient",
     address: {
       ar: "٢١ شارع النصر، المعادي، القاهرة",
       en: "21 El Nasr St., Maadi, Cairo",
@@ -449,6 +468,7 @@ const shipments: Shipment[] = [
     confirmation: { ar: "تواصل لاحقًا", en: "Contact later" },
     pieces: 2,
     shippingFee: 65,
+    shippingPayer: "sender",
     address: {
       ar: "شارع سعد زغلول، الزقازيق، الشرقية",
       en: "Saad Zaghloul St., Zagazig, Sharqia",
@@ -475,6 +495,7 @@ const shipments: Shipment[] = [
     confirmation: { ar: "لم يرد", en: "No answer" },
     pieces: 1,
     shippingFee: 50,
+    shippingPayer: "recipient",
     address: {
       ar: "١٥ شارع شبرا، القاهرة",
       en: "15 Shubra St., Cairo",
@@ -633,15 +654,6 @@ function LoginScreen({
       </section>
 
       <section className="login-panel">
-        <div className="login-panel__top">
-          <LanguageThemeControls
-            lang={lang}
-            theme={theme}
-            onLang={onLang}
-            onTheme={onTheme}
-          />
-        </div>
-
         <div className="login-mobile-company">
           <div className="login-mobile-company__logo">
             <img
@@ -655,9 +667,18 @@ function LoginScreen({
         </div>
 
         <div className="login-card">
-          <div className="login-card__security">
-            <ShieldCheck size={16} />
-            <span>{lang === "ar" ? "بوابة تشغيل آمنة" : "Secure operations portal"}</span>
+          <div className="login-card__topline">
+            <div className="login-card__security">
+              <ShieldCheck size={16} />
+              <span>{lang === "ar" ? "بوابة تشغيل آمنة" : "Secure operations portal"}</span>
+            </div>
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
           </div>
           <div className="login-card__heading">
             <h2>{t.loginTitle}</h2>
@@ -1019,8 +1040,30 @@ function ShipmentDrawer({
                 <strong>{money.format(shipment.shippingFee)}</strong>
               </div>
               <div>
-                <small>{t.pieces}</small>
-                <strong>{shipment.pieces}</strong>
+                <small>{t.totalDue}</small>
+                <strong>
+                  {money.format(
+                    shipment.amount +
+                      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
+                  )}
+                </strong>
+              </div>
+              <div>
+                <small>{t.senderDue}</small>
+                <strong>
+                  {money.format(
+                    shipment.amount -
+                      (shipment.shippingPayer === "sender" ? shipment.shippingFee : 0),
+                  )}
+                </strong>
+              </div>
+              <div>
+                <small>{t.shippingPayer}</small>
+                <strong>
+                  {shipment.shippingPayer === "recipient"
+                    ? t.payerRecipient
+                    : t.payerSender}
+                </strong>
               </div>
             </div>
           </section>
@@ -1623,9 +1666,29 @@ function ShipmentsScreen({
                                 </span>
                               </td>
                               <td>
-                                <strong className="money">
-                                  {money.format(shipment.amount)}
-                                </strong>
+                                <span className="financial-cell">
+                                  <span className="financial-cell__total">
+                                    <small>{t.totalDue}</small>
+                                    <strong>
+                                      {money.format(
+                                        shipment.amount +
+                                          (shipment.shippingPayer === "recipient"
+                                            ? shipment.shippingFee
+                                            : 0),
+                                      )}
+                                    </strong>
+                                  </span>
+                                  <small className="financial-cell__breakdown">
+                                    {t.collectionShort} {money.format(shipment.amount)}
+                                    <i />
+                                    {t.shippingShort} {money.format(shipment.shippingFee)}
+                                  </small>
+                                  <span className="financial-cell__payer">
+                                    {shipment.shippingPayer === "recipient"
+                                      ? t.payerRecipient
+                                      : t.payerSender}
+                                  </span>
+                                </span>
                               </td>
                               <td>
                                 <span
