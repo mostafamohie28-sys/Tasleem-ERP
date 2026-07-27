@@ -1,5 +1,12 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
+import "@fontsource/inter/500.css";
+import "@fontsource/inter/600.css";
+import "@fontsource/inter/700.css";
+import "@fontsource/tajawal/400.css";
+import "@fontsource/tajawal/500.css";
+import "@fontsource/tajawal/700.css";
+import "@fontsource/tajawal/800.css";
 import "./globals.css";
 
 export async function generateMetadata(): Promise<Metadata> {
