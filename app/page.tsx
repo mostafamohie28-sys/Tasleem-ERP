@@ -59,7 +59,8 @@ type Screen =
   | "statuses"
   | "areas"
   | "priceLists"
-  | "courierRates";
+  | "courierRates"
+  | "shipmentPolicies";
 type Scenario =
   | "ready"
   | "loading"
@@ -1698,6 +1699,413 @@ const courierRateCopy = {
   },
 } as const;
 
+type ShipmentFieldMode =
+  | "required_on_create"
+  | "optional"
+  | "required_before_assignment"
+  | "hidden";
+
+type ShipmentFieldGroup =
+  | "recipient"
+  | "address"
+  | "shipment"
+  | "financial"
+  | "sender";
+
+type ShipmentFieldPolicy = {
+  id: string;
+  name: Localized;
+  code: string;
+  group: ShipmentFieldGroup;
+  description: Localized;
+  mode: ShipmentFieldMode;
+  custom: boolean;
+  inExcel: boolean;
+  order: number;
+};
+
+type ShipmentDataSettings = {
+  confirmationMode: "off" | "optional" | "required_before_assignment";
+  incompleteRoute: "warehouse_and_queue" | "complete_before_warehouse";
+  trustsEnabled: boolean;
+  shippingPayerOverride: boolean;
+  phoneLookupEnabled: boolean;
+};
+
+const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
+  {
+    id: "field-primary-phone",
+    name: { ar: "رقم الهاتف الأساسي", en: "Primary phone" },
+    code: "RECIPIENT_PHONE",
+    group: "recipient",
+    description: {
+      ar: "أول حقل في التسجيل ويستخدم لاستدعاء بيانات المستلم المحفوظة.",
+      en: "First entry field; retrieves saved recipient details.",
+    },
+    mode: "required_on_create",
+    custom: false,
+    inExcel: true,
+    order: 1,
+  },
+  {
+    id: "field-recipient-name",
+    name: { ar: "اسم المستلم", en: "Recipient name" },
+    code: "RECIPIENT_NAME",
+    group: "recipient",
+    description: {
+      ar: "الاسم الظاهر للمندوب وفي ملف الشحنة.",
+      en: "Displayed to the courier and in the shipment file.",
+    },
+    mode: "required_on_create",
+    custom: false,
+    inExcel: true,
+    order: 2,
+  },
+  {
+    id: "field-secondary-phone",
+    name: { ar: "رقم هاتف إضافي", en: "Secondary phone" },
+    code: "SECONDARY_PHONE",
+    group: "recipient",
+    description: {
+      ar: "رقم بديل عند تعذر الوصول للرقم الأساسي.",
+      en: "Alternative number if the primary phone is unreachable.",
+    },
+    mode: "optional",
+    custom: false,
+    inExcel: true,
+    order: 3,
+  },
+  {
+    id: "field-governorate",
+    name: { ar: "المحافظة", en: "Governorate" },
+    code: "GOVERNORATE",
+    group: "address",
+    description: {
+      ar: "تُختار من المحافظات التي أنشأتها الشركة.",
+      en: "Selected from company-configured governorates.",
+    },
+    mode: "required_before_assignment",
+    custom: false,
+    inExcel: true,
+    order: 4,
+  },
+  {
+    id: "field-area",
+    name: { ar: "المنطقة", en: "Area" },
+    code: "AREA",
+    group: "address",
+    description: {
+      ar: "تحدد التغطية والتسعير والإسناد.",
+      en: "Determines coverage, pricing and assignment.",
+    },
+    mode: "required_before_assignment",
+    custom: false,
+    inExcel: true,
+    order: 5,
+  },
+  {
+    id: "field-address",
+    name: { ar: "العنوان التفصيلي", en: "Detailed address" },
+    code: "DELIVERY_ADDRESS",
+    group: "address",
+    description: {
+      ar: "العنوان الذي سيصل إليه المندوب.",
+      en: "The address the courier will visit.",
+    },
+    mode: "required_before_assignment",
+    custom: false,
+    inExcel: true,
+    order: 6,
+  },
+  {
+    id: "field-sender",
+    name: { ar: "الراسل", en: "Sender" },
+    code: "SENDER",
+    group: "sender",
+    description: {
+      ar: "يحدد قائمة الأسعار وسياسة تحمّل مصاريف الشحن الافتراضية.",
+      en: "Determines price list and default shipping-payer policy.",
+    },
+    mode: "required_on_create",
+    custom: false,
+    inExcel: true,
+    order: 7,
+  },
+  {
+    id: "field-sender-reference",
+    name: { ar: "مرجع الراسل", en: "Sender reference" },
+    code: "SENDER_REFERENCE",
+    group: "sender",
+    description: {
+      ar: "رقم الطلب داخل نظام أو متجر الراسل.",
+      en: "Order identifier in the sender’s store or system.",
+    },
+    mode: "optional",
+    custom: false,
+    inExcel: true,
+    order: 8,
+  },
+  {
+    id: "field-pieces",
+    name: { ar: "عدد القطع", en: "Piece count" },
+    code: "PIECE_COUNT",
+    group: "shipment",
+    description: {
+      ar: "عدد القطع داخل الشحنة ويستخدم عند التسليم الجزئي والمرتجع.",
+      en: "Pieces inside the shipment, used for partial delivery and returns.",
+    },
+    mode: "required_on_create",
+    custom: false,
+    inExcel: true,
+    order: 9,
+  },
+  {
+    id: "field-contents",
+    name: { ar: "وصف محتوى الشحنة", en: "Shipment contents" },
+    code: "CONTENTS",
+    group: "shipment",
+    description: {
+      ar: "وصف مختصر يساعد المخزن والمندوب.",
+      en: "Short description for warehouse and courier teams.",
+    },
+    mode: "optional",
+    custom: false,
+    inExcel: true,
+    order: 10,
+  },
+  {
+    id: "field-shipment-price",
+    name: { ar: "سعر الشحنة", en: "Shipment price" },
+    code: "SHIPMENT_PRICE",
+    group: "financial",
+    description: {
+      ar: "قيمة المنتج المطلوب تحصيلها بعيدًا عن مصاريف الشحن.",
+      en: "Product value to collect, excluding shipping fee.",
+    },
+    mode: "required_on_create",
+    custom: false,
+    inExcel: true,
+    order: 11,
+  },
+  {
+    id: "field-shipping-fee",
+    name: { ar: "مصاريف الشحن", en: "Shipping fee" },
+    code: "SHIPPING_FEE",
+    group: "financial",
+    description: {
+      ar: "تُستدعى من قائمة أسعار الراسل مع السماح بالتعديل حسب الصلاحية.",
+      en: "Loaded from the sender price list with permission-based override.",
+    },
+    mode: "required_on_create",
+    custom: false,
+    inExcel: false,
+    order: 12,
+  },
+  {
+    id: "field-shipping-payer",
+    name: { ar: "متحمّل مصاريف الشحن", en: "Shipping payer" },
+    code: "SHIPPING_PAYER",
+    group: "financial",
+    description: {
+      ar: "القيمة الافتراضية من سياسة الراسل ويمكن تغييرها أثناء التسجيل.",
+      en: "Defaults from sender policy and can be overridden during entry.",
+    },
+    mode: "optional",
+    custom: false,
+    inExcel: true,
+    order: 13,
+  },
+  {
+    id: "field-delivery-date",
+    name: { ar: "موعد التسليم المطلوب", en: "Requested delivery date" },
+    code: "DELIVERY_DATE",
+    group: "shipment",
+    description: {
+      ar: "موعد يطلبه الراسل أو المستلم إن وجد.",
+      en: "Requested date from sender or recipient, when available.",
+    },
+    mode: "optional",
+    custom: false,
+    inExcel: true,
+    order: 14,
+  },
+  {
+    id: "field-notes",
+    name: { ar: "ملاحظات الشحنة", en: "Shipment notes" },
+    code: "NOTES",
+    group: "shipment",
+    description: {
+      ar: "تعليمات أو معلومات إضافية لا تغيّر حالة الشحنة.",
+      en: "Extra instructions or information that do not change status.",
+    },
+    mode: "optional",
+    custom: false,
+    inExcel: true,
+    order: 15,
+  },
+];
+
+const shipmentDataSettingsDefault: ShipmentDataSettings = {
+  confirmationMode: "optional",
+  incompleteRoute: "warehouse_and_queue",
+  trustsEnabled: false,
+  shippingPayerOverride: true,
+  phoneLookupEnabled: true,
+};
+
+const shipmentPolicyCopy = {
+  ar: {
+    title: "سياسات بيانات الشحنات",
+    subtitle: "تحكم في الحقول ومسار البيانات الناقصة قبل بناء شاشة إضافة الشحنة.",
+    addField: "إضافة حقل مخصص",
+    requiredCreate: "مطلوب عند التسجيل",
+    optional: "اختياري",
+    requiredAssignment: "مطلوب قبل الإسناد",
+    hidden: "مخفي",
+    activeFields: "حقول مستخدمة",
+    hiddenFields: "حقول مخفية",
+    createRequiredCount: "مطلوبة عند التسجيل",
+    assignmentRequiredCount: "تمنع الإسناد عند نقصها",
+    controlNote:
+      "لا توجد شاشة إضافة شحنة ثابتة؛ الحقول وطريقة التعامل معها تُبنى من السياسات التي تحددها هنا.",
+    workflowTitle: "سياسات الدخول والاستكمال",
+    confirmationTitle: "تأكيد الطلب مع المستلم",
+    confirmationOff: "غير مستخدم",
+    confirmationOptional: "اختياري",
+    confirmationRequired: "إلزامي قبل الإسناد",
+    confirmationHint:
+      "التأكيد يسجل: تم التأكيد، لم يرد، أو تواصل لاحقًا؛ ولا يضيف حالات شحنة جديدة.",
+    incompleteTitle: "مسار الشحنة ناقصة البيانات",
+    warehouseQueue: "تدخل المخزن وتظهر بقائمة الاستكمال",
+    beforeWarehouse: "تتوقف بقائمة الاستكمال قبل المخزن",
+    incompleteHint:
+      "ينطبق عند نقص حقل محدد بأنه مطلوب قبل الإسناد، أما المطلوب عند التسجيل فيمنع الحفظ.",
+    trustsTitle: "الأمانات غير المعرّفة",
+    trustsHint:
+      "تفعيل قدرة مستقلة لتسجيل طرد وصل بلا بيانات إلى حين التعرف عليه، ولا يُعامل كشحنة.",
+    payerOverrideTitle: "تغيير متحمّل مصاريف الشحن",
+    payerOverrideHint:
+      "يظهر الاختيار الافتراضي من الراسل مع السماح بتغييره في الشحنة حسب صلاحية المستخدم.",
+    phoneLookupTitle: "استدعاء المستلم برقم الهاتف",
+    phoneLookupHint:
+      "يكون الهاتف الأساسي أول حقل، ويستدعي الأسماء والعناوين المحفوظة دون سؤال إضافي.",
+    excelTitle: "سلامة استيراد Excel والمجموعات",
+    excelMode: "الكل أو لا شيء",
+    excelHint:
+      "إذا كان أي صف ناقصًا أو غير صحيح، لا تُحفظ المجموعة حتى تصحيح جميع الأخطاء.",
+    fieldsTitle: "حقول إضافة الشحنة",
+    fieldsSubtitle: "غيّر سياسة كل حقل أو أضف حقلًا جديدًا بدون تعديل الأكواد.",
+    search: "ابحث باسم الحقل أو الكود...",
+    allGroups: "كل المجموعات",
+    field: "الحقل",
+    group: "المجموعة",
+    behavior: "سياسة الاستخدام",
+    excel: "في نموذج Excel",
+    included: "موجود",
+    excluded: "غير موجود",
+    custom: "حقل مخصص",
+    system: "حقل أساسي",
+    recipient: "بيانات المستلم",
+    address: "العنوان والتغطية",
+    shipment: "بيانات الشحنة",
+    financial: "البيانات المالية",
+    sender: "بيانات الراسل",
+    unsaved: "تعديلات غير محفوظة",
+    savePolicies: "حفظ السياسات",
+    saved: "تم حفظ سياسات بيانات الشحنات",
+    noResults: "لا توجد حقول تطابق البحث الحالي.",
+    editorTitle: "إعدادات الحقل",
+    newFieldTitle: "إضافة حقل مخصص",
+    arabicName: "اسم الحقل بالعربية",
+    englishName: "اسم الحقل بالإنجليزية",
+    code: "الكود الداخلي",
+    fieldGroup: "مجموعة الحقل",
+    description: "وصف الاستخدام",
+    defaultBehavior: "سياسة الحقل",
+    excelToggle: "إظهاره داخل نموذج Excel",
+    excelToggleHint:
+      "عند التفعيل يظهر كعمود في النموذج ويخضع لنفس سياسة التحقق.",
+    cancel: "إلغاء",
+    saveField: "حفظ الحقل",
+    demo: "تغييرات تجريبية داخل نموذج التصميم فقط",
+  },
+  en: {
+    title: "Shipment data policies",
+    subtitle: "Control fields and incomplete-data routing before building shipment entry.",
+    addField: "Add custom field",
+    requiredCreate: "Required on entry",
+    optional: "Optional",
+    requiredAssignment: "Required before assignment",
+    hidden: "Hidden",
+    activeFields: "Used fields",
+    hiddenFields: "Hidden fields",
+    createRequiredCount: "Required on entry",
+    assignmentRequiredCount: "Block assignment if missing",
+    controlNote:
+      "Shipment entry is not fixed; its fields and behavior are generated from the policies you define here.",
+    workflowTitle: "Intake and completion policies",
+    confirmationTitle: "Recipient order confirmation",
+    confirmationOff: "Not used",
+    confirmationOptional: "Optional",
+    confirmationRequired: "Required before assignment",
+    confirmationHint:
+      "Confirmation records Confirmed, No answer or Contact later; it does not create shipment statuses.",
+    incompleteTitle: "Incomplete shipment route",
+    warehouseQueue: "Enter warehouse and completion queue",
+    beforeWarehouse: "Hold in completion queue before warehouse",
+    incompleteHint:
+      "Applies to fields required before assignment; fields required on entry block saving.",
+    trustsTitle: "Unidentified entrusted parcels",
+    trustsHint:
+      "Enable a separate capability for a parcel received without details until identified; it is not treated as a shipment.",
+    payerOverrideTitle: "Override shipping payer",
+    payerOverrideHint:
+      "Loads the sender default and allows authorized users to override it per shipment.",
+    phoneLookupTitle: "Recipient lookup by phone",
+    phoneLookupHint:
+      "Primary phone appears first and loads saved names and addresses without an extra prompt.",
+    excelTitle: "Excel and batch import safety",
+    excelMode: "All or nothing",
+    excelHint:
+      "If any row is incomplete or invalid, the batch is not saved until every error is corrected.",
+    fieldsTitle: "Shipment entry fields",
+    fieldsSubtitle: "Change each field policy or add a new field without code changes.",
+    search: "Search field name or code...",
+    allGroups: "All groups",
+    field: "Field",
+    group: "Group",
+    behavior: "Usage policy",
+    excel: "In Excel template",
+    included: "Included",
+    excluded: "Excluded",
+    custom: "Custom field",
+    system: "Core field",
+    recipient: "Recipient data",
+    address: "Address & coverage",
+    shipment: "Shipment data",
+    financial: "Financial data",
+    sender: "Sender data",
+    unsaved: "Unsaved changes",
+    savePolicies: "Save policies",
+    saved: "Shipment data policies saved",
+    noResults: "No fields match the current search.",
+    editorTitle: "Field settings",
+    newFieldTitle: "Add custom field",
+    arabicName: "Arabic field name",
+    englishName: "English field name",
+    code: "Internal code",
+    fieldGroup: "Field group",
+    description: "Usage description",
+    defaultBehavior: "Field policy",
+    excelToggle: "Include in Excel template",
+    excelToggleHint:
+      "When enabled, the field appears as a column and follows the same validation policy.",
+    cancel: "Cancel",
+    saveField: "Save field",
+    demo: "Demo-only changes in the design prototype",
+  },
+} as const;
+
 function Brand({
   compact = false,
   lang,
@@ -2015,6 +2423,11 @@ function Sidebar({
           label: lang === "ar" ? "عمولات المناديب" : "Courier commissions",
           icon: Truck,
           screen: "courierRates" as const,
+        },
+        {
+          label: lang === "ar" ? "سياسات بيانات الشحنات" : "Shipment data policies",
+          icon: ClipboardCheck,
+          screen: "shipmentPolicies" as const,
         },
         { label: t.settings, icon: Settings2 },
       ],
@@ -5799,6 +6212,793 @@ function CourierRatesScreen({
   );
 }
 
+function ShipmentFieldEditor({
+  field,
+  isNew,
+  lang,
+  onClose,
+  onSave,
+}: {
+  field: ShipmentFieldPolicy;
+  isNew: boolean;
+  lang: Lang;
+  onClose: () => void;
+  onSave: (field: ShipmentFieldPolicy) => void;
+}) {
+  const s = shipmentPolicyCopy[lang];
+  const [draft, setDraft] = useState(field);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(draft);
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={s.cancel}
+        onClick={onClose}
+      />
+      <aside className="policy-editor shipment-field-editor" aria-label={s.editorTitle}>
+        <form onSubmit={handleSubmit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span className="shipment-field-editor__badge">
+                <ClipboardCheck size={20} />
+              </span>
+              <span>
+                <small>{isNew ? s.newFieldTitle : s.editorTitle}</small>
+                <strong>{draft.name[lang] || s.newFieldTitle}</strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={s.cancel}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Pencil size={16} /></span>
+                <div>
+                  <strong>{isNew ? s.newFieldTitle : s.editorTitle}</strong>
+                  <small>{draft.custom ? s.custom : s.system}</small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{s.arabicName}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.name.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, ar: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{s.englishName}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.name.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, en: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{s.code}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.code}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          code: event.target.value.toUpperCase().replace(/\s+/g, "_"),
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{s.fieldGroup}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.group}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          group: event.target.value as ShipmentFieldGroup,
+                        }))
+                      }
+                    >
+                      <option value="recipient">{s.recipient}</option>
+                      <option value="address">{s.address}</option>
+                      <option value="shipment">{s.shipment}</option>
+                      <option value="financial">{s.financial}</option>
+                      <option value="sender">{s.sender}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{s.description} — AR</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.description.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          description: {
+                            ...current.description,
+                            ar: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{s.description} — EN</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.description.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          description: {
+                            ...current.description,
+                            en: event.target.value,
+                          },
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{s.defaultBehavior}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.mode}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          mode: event.target.value as ShipmentFieldMode,
+                        }))
+                      }
+                    >
+                      <option value="required_on_create">{s.requiredCreate}</option>
+                      <option value="optional">{s.optional}</option>
+                      <option value="required_before_assignment">
+                        {s.requiredAssignment}
+                      </option>
+                      <option value="hidden">{s.hidden}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+              </div>
+
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.inExcel}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    inExcel: !current.inExcel,
+                  }))
+                }
+              >
+                <span>
+                  <strong>{s.excelToggle}</strong>
+                  <small>{s.excelToggleHint}</small>
+                </span>
+                <i className={draft.inExcel ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+            </section>
+
+            <div className="policy-demo-note">
+              <CircleAlert size={15} />
+              {s.demo}
+            </div>
+          </div>
+
+          <div className="drawer__footer drawer__footer--split">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {s.cancel}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {s.saveField}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function ShipmentPoliciesScreen({
+  lang,
+  theme,
+  fields,
+  settings,
+  onLang,
+  onTheme,
+  onSave,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  fields: ShipmentFieldPolicy[];
+  settings: ShipmentDataSettings;
+  onLang: () => void;
+  onTheme: () => void;
+  onSave: (
+    fields: ShipmentFieldPolicy[],
+    settings: ShipmentDataSettings,
+  ) => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const s = shipmentPolicyCopy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [draftFields, setDraftFields] = useState(fields);
+  const [draftSettings, setDraftSettings] = useState(settings);
+  const [search, setSearch] = useState("");
+  const [groupFilter, setGroupFilter] = useState("all");
+  const [editing, setEditing] = useState<ShipmentFieldPolicy | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [toast, setToast] = useState("");
+
+  const modeOptions: Array<{
+    value: ShipmentFieldMode;
+    label: string;
+  }> = [
+    { value: "required_on_create", label: s.requiredCreate },
+    { value: "optional", label: s.optional },
+    {
+      value: "required_before_assignment",
+      label: s.requiredAssignment,
+    },
+    { value: "hidden", label: s.hidden },
+  ];
+
+  function groupLabel(group: ShipmentFieldGroup) {
+    return group === "recipient"
+      ? s.recipient
+      : group === "address"
+        ? s.address
+        : group === "shipment"
+          ? s.shipment
+          : group === "financial"
+            ? s.financial
+            : s.sender;
+  }
+
+  const filteredFields = useMemo(() => {
+    const normalized = search.trim().toLowerCase();
+    return draftFields
+      .filter((field) => {
+        const matchesSearch =
+          !normalized ||
+          [field.name.ar, field.name.en, field.code].some((value) =>
+            value.toLowerCase().includes(normalized),
+          );
+        const matchesGroup = groupFilter === "all" || field.group === groupFilter;
+        return matchesSearch && matchesGroup;
+      })
+      .sort((a, b) => a.order - b.order);
+  }, [draftFields, groupFilter, search]);
+
+  function updateSetting<K extends keyof ShipmentDataSettings>(
+    key: K,
+    value: ShipmentDataSettings[K],
+  ) {
+    setDraftSettings((current) => ({ ...current, [key]: value }));
+    setDirty(true);
+  }
+
+  function setFieldMode(id: string, mode: ShipmentFieldMode) {
+    setDraftFields((current) =>
+      current.map((field) => (field.id === id ? { ...field, mode } : field)),
+    );
+    setDirty(true);
+  }
+
+  function toggleExcel(id: string) {
+    setDraftFields((current) =>
+      current.map((field) =>
+        field.id === id ? { ...field, inExcel: !field.inExcel } : field,
+      ),
+    );
+    setDirty(true);
+  }
+
+  function openNew() {
+    setIsNew(true);
+    setEditing({
+      id: `custom-field-${Date.now()}`,
+      name: { ar: "", en: "" },
+      code: "",
+      group: "shipment",
+      description: { ar: "", en: "" },
+      mode: "optional",
+      custom: true,
+      inExcel: true,
+      order: draftFields.length + 1,
+    });
+  }
+
+  function saveField(field: ShipmentFieldPolicy) {
+    setDraftFields((current) =>
+      current.some((item) => item.id === field.id)
+        ? current.map((item) => (item.id === field.id ? field : item))
+        : [...current, field],
+    );
+    setEditing(null);
+    setIsNew(false);
+    setDirty(true);
+  }
+
+  function savePolicies() {
+    onSave(draftFields, draftSettings);
+    setDirty(false);
+    setToast(s.saved);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  const requiredCreateCount = draftFields.filter(
+    (field) => field.mode === "required_on_create",
+  ).length;
+  const requiredAssignmentCount = draftFields.filter(
+    (field) => field.mode === "required_before_assignment",
+  ).length;
+  const hiddenCount = draftFields.filter((field) => field.mode === "hidden").length;
+  const activeCount = draftFields.length - hiddenCount;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="shipmentPolicies"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><ClipboardCheck size={20} /></span>
+            <span>
+              <strong>{t.workspace}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button
+              className="square-button notification-button"
+              type="button"
+              aria-label={t.notifications}
+            >
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content shipment-policies-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{s.title}</h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>{s.subtitle}</p>
+            </div>
+            <div className="shipment-policy-actions">
+              {dirty && (
+                <span className="unsaved-chip">
+                  <CircleAlert size={14} />
+                  {s.unsaved}
+                </span>
+              )}
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={openNew}
+              >
+                <Plus size={17} />
+                {s.addField}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!dirty}
+                onClick={savePolicies}
+              >
+                <Check size={17} />
+                {s.savePolicies}
+              </button>
+            </div>
+          </div>
+
+          <section className="status-summary-grid">
+            <article>
+              <span className="status-summary-icon status-summary-icon--green">
+                <ClipboardCheck size={18} />
+              </span>
+              <div><small>{s.activeFields}</small><strong>{activeCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue">
+                <LockKeyhole size={18} />
+              </span>
+              <div><small>{s.createRequiredCount}</small><strong>{requiredCreateCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange">
+                <Truck size={18} />
+              </span>
+              <div><small>{s.assignmentRequiredCount}</small><strong>{requiredAssignmentCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--gray">
+                <Eye size={18} />
+              </span>
+              <div><small>{s.hiddenFields}</small><strong>{hiddenCount}</strong></div>
+            </article>
+          </section>
+
+          <div className="status-control-note shipment-policy-note">
+            <SlidersHorizontal size={18} />
+            <span>{s.controlNote}</span>
+          </div>
+
+          <section className="shipment-workflow-panel">
+            <div className="shipment-workflow-panel__heading">
+              <span>
+                <strong>{s.workflowTitle}</strong>
+                <small>{s.incompleteHint}</small>
+              </span>
+            </div>
+            <div className="shipment-workflow-grid">
+              <article>
+                <span className="workflow-policy-icon workflow-policy-icon--blue">
+                  <Phone size={17} />
+                </span>
+                <div>
+                  <strong>{s.confirmationTitle}</strong>
+                  <small>{s.confirmationHint}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    value={draftSettings.confirmationMode}
+                    onChange={(event) =>
+                      updateSetting(
+                        "confirmationMode",
+                        event.target.value as ShipmentDataSettings["confirmationMode"],
+                      )
+                    }
+                  >
+                    <option value="off">{s.confirmationOff}</option>
+                    <option value="optional">{s.confirmationOptional}</option>
+                    <option value="required_before_assignment">
+                      {s.confirmationRequired}
+                    </option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <article>
+                <span className="workflow-policy-icon workflow-policy-icon--orange">
+                  <Warehouse size={17} />
+                </span>
+                <div>
+                  <strong>{s.incompleteTitle}</strong>
+                  <small>{s.incompleteHint}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    value={draftSettings.incompleteRoute}
+                    onChange={(event) =>
+                      updateSetting(
+                        "incompleteRoute",
+                        event.target.value as ShipmentDataSettings["incompleteRoute"],
+                      )
+                    }
+                  >
+                    <option value="warehouse_and_queue">{s.warehouseQueue}</option>
+                    <option value="complete_before_warehouse">
+                      {s.beforeWarehouse}
+                    </option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <button
+                className="workflow-toggle-card"
+                type="button"
+                role="switch"
+                aria-checked={draftSettings.phoneLookupEnabled}
+                onClick={() =>
+                  updateSetting(
+                    "phoneLookupEnabled",
+                    !draftSettings.phoneLookupEnabled,
+                  )
+                }
+              >
+                <span className="workflow-policy-icon workflow-policy-icon--green">
+                  <Search size={17} />
+                </span>
+                <span>
+                  <strong>{s.phoneLookupTitle}</strong>
+                  <small>{s.phoneLookupHint}</small>
+                </span>
+                <i className={draftSettings.phoneLookupEnabled ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+              <button
+                className="workflow-toggle-card"
+                type="button"
+                role="switch"
+                aria-checked={draftSettings.shippingPayerOverride}
+                onClick={() =>
+                  updateSetting(
+                    "shippingPayerOverride",
+                    !draftSettings.shippingPayerOverride,
+                  )
+                }
+              >
+                <span className="workflow-policy-icon workflow-policy-icon--blue">
+                  <HandCoins size={17} />
+                </span>
+                <span>
+                  <strong>{s.payerOverrideTitle}</strong>
+                  <small>{s.payerOverrideHint}</small>
+                </span>
+                <i className={draftSettings.shippingPayerOverride ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+              <button
+                className="workflow-toggle-card"
+                type="button"
+                role="switch"
+                aria-checked={draftSettings.trustsEnabled}
+                onClick={() =>
+                  updateSetting("trustsEnabled", !draftSettings.trustsEnabled)
+                }
+              >
+                <span className="workflow-policy-icon workflow-policy-icon--orange">
+                  <PackagePlus size={17} />
+                </span>
+                <span>
+                  <strong>{s.trustsTitle}</strong>
+                  <small>{s.trustsHint}</small>
+                </span>
+                <i className={draftSettings.trustsEnabled ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+              <article className="excel-safety-card">
+                <span className="workflow-policy-icon workflow-policy-icon--green">
+                  <ShieldCheck size={17} />
+                </span>
+                <div>
+                  <strong>{s.excelTitle}</strong>
+                  <small>{s.excelHint}</small>
+                </div>
+                <em>{s.excelMode}</em>
+              </article>
+            </div>
+          </section>
+
+          <section className="shipment-fields-panel">
+            <div className="shipment-fields-panel__heading">
+              <div>
+                <strong>{s.fieldsTitle}</strong>
+                <small>{s.fieldsSubtitle}</small>
+              </div>
+              <div>
+                {modeOptions.map((mode) => (
+                  <span className={`field-mode-legend field-mode-legend--${mode.value}`} key={mode.value}>
+                    {mode.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="shipment-fields-toolbar">
+              <label className="shipment-search">
+                <Search size={18} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={s.search}
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")} aria-label={t.clear}>
+                    <X size={16} />
+                  </button>
+                )}
+              </label>
+              <label className="select-wrap status-filter">
+                <select
+                  value={groupFilter}
+                  onChange={(event) => setGroupFilter(event.target.value)}
+                >
+                  <option value="all">{s.allGroups}</option>
+                  <option value="recipient">{s.recipient}</option>
+                  <option value="address">{s.address}</option>
+                  <option value="shipment">{s.shipment}</option>
+                  <option value="financial">{s.financial}</option>
+                  <option value="sender">{s.sender}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="shipment-fields-table">
+              <div className="shipment-fields-table__head">
+                <span>{s.field}</span>
+                <span>{s.group}</span>
+                <span>{s.behavior}</span>
+                <span>{s.excel}</span>
+                <span />
+              </div>
+              <div className="shipment-fields-table__body">
+                {filteredFields.map((field) => (
+                  <article className="shipment-field-row" key={field.id}>
+                    <div className="shipment-field-identity">
+                      <span>
+                        {field.custom ? <Plus size={15} /> : <ClipboardCheck size={15} />}
+                      </span>
+                      <span>
+                        <strong>{field.name[lang]}</strong>
+                        <small>{field.description[lang]}</small>
+                        <em>{field.custom ? s.custom : s.system}</em>
+                      </span>
+                    </div>
+                    <div className="shipment-field-group">
+                      <strong>{groupLabel(field.group)}</strong>
+                      <small dir="ltr">{field.code}</small>
+                    </div>
+                    <div className="field-mode-selector">
+                      {modeOptions.map((mode) => (
+                        <button
+                          className={
+                            field.mode === mode.value
+                              ? `field-mode-button field-mode-button--active field-mode-button--${mode.value}`
+                              : "field-mode-button"
+                          }
+                          type="button"
+                          key={mode.value}
+                          onClick={() => setFieldMode(field.id, mode.value)}
+                        >
+                          {mode.label}
+                        </button>
+                      ))}
+                    </div>
+                    <button
+                      className="field-excel-toggle"
+                      type="button"
+                      role="switch"
+                      aria-checked={field.inExcel}
+                      onClick={() => toggleExcel(field.id)}
+                    >
+                      <i className={field.inExcel ? "switch switch--on" : "switch"}>
+                        <b />
+                      </i>
+                      <small>{field.inExcel ? s.included : s.excluded}</small>
+                    </button>
+                    <button
+                      className="status-edit-button"
+                      type="button"
+                      aria-label={s.editorTitle}
+                      title={s.editorTitle}
+                      onClick={() => {
+                        setIsNew(false);
+                        setEditing(field);
+                      }}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  </article>
+                ))}
+                {filteredFields.length === 0 && (
+                  <div className="status-empty">
+                    <Search size={22} />
+                    <span>{s.noResults}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editing && (
+        <ShipmentFieldEditor
+          key={editing.id}
+          field={editing}
+          isNew={isNew}
+          lang={lang}
+          onClose={() => {
+            setEditing(null);
+            setIsNew(false);
+          }}
+          onSave={saveField}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ShipmentsScreen({
   lang,
   theme,
@@ -6391,6 +7591,12 @@ export default function Home() {
   const [sharedCourierPlans, setSharedCourierPlans] = useState(
     courierRatePlansData,
   );
+  const [sharedShipmentFields, setSharedShipmentFields] = useState(
+    shipmentFieldPoliciesData,
+  );
+  const [sharedShipmentSettings, setSharedShipmentSettings] = useState(
+    shipmentDataSettingsDefault,
+  );
   const [controlCenterReady, setControlCenterReady] = useState(false);
 
   useEffect(() => {
@@ -6407,6 +7613,8 @@ export default function Home() {
           governorates?: GovernorateRecord[];
           priceLists?: PriceListRecord[];
           courierPlans?: CourierRatePlan[];
+          shipmentFields?: ShipmentFieldPolicy[];
+          shipmentSettings?: ShipmentDataSettings;
         };
         if (Array.isArray(parsed.statuses)) {
           setSharedStatuses(
@@ -6423,6 +7631,12 @@ export default function Home() {
         if (Array.isArray(parsed.priceLists)) setSharedPriceLists(parsed.priceLists);
         if (Array.isArray(parsed.courierPlans)) {
           setSharedCourierPlans(parsed.courierPlans);
+        }
+        if (Array.isArray(parsed.shipmentFields)) {
+          setSharedShipmentFields(parsed.shipmentFields);
+        }
+        if (parsed.shipmentSettings) {
+          setSharedShipmentSettings(parsed.shipmentSettings);
         }
       }
     } catch {
@@ -6540,6 +7754,8 @@ export default function Home() {
         governorates: sharedGovernorates,
         priceLists: sharedPriceLists,
         courierPlans: sharedCourierPlans,
+        shipmentFields: sharedShipmentFields,
+        shipmentSettings: sharedShipmentSettings,
       }),
     );
   }, [
@@ -6547,6 +7763,8 @@ export default function Home() {
     sharedGovernorates,
     sharedCourierPlans,
     sharedPriceLists,
+    sharedShipmentFields,
+    sharedShipmentSettings,
     sharedStatuses,
   ]);
 
@@ -6616,7 +7834,7 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
-      ) : (
+      ) : screen === "courierRates" ? (
         <CourierRatesScreen
           lang={lang}
           theme={theme}
@@ -6628,6 +7846,23 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onPlansChange={setSharedCourierPlans}
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : (
+        <ShipmentPoliciesScreen
+          lang={lang}
+          theme={theme}
+          fields={sharedShipmentFields}
+          settings={sharedShipmentSettings}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onSave={(nextFields, nextSettings) => {
+            setSharedShipmentFields(nextFields);
+            setSharedShipmentSettings(nextSettings);
+          }}
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
