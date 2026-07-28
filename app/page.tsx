@@ -66,7 +66,8 @@ type Screen =
   | "courierRates"
   | "shipmentPolicies"
   | "addShipment"
-  | "confirmation";
+  | "confirmation"
+  | "assignment";
 type Scenario =
   | "ready"
   | "loading"
@@ -549,6 +550,7 @@ type StatusPolicy = {
   assignmentEffect: Localized;
   pieceEffect: Localized;
   financialEffect: Localized;
+  appearsInAssignment: boolean;
   appearsInPricing: boolean;
   appearsInCourierRates: boolean;
   requiredFields: Localized[];
@@ -572,6 +574,7 @@ const statusPolicies: StatusPolicy[] = [
     assignmentEffect: { ar: "إنهاء التكليف", en: "End assignment" },
     pieceEffect: { ar: "كل القطع مسلّمة", en: "All pieces delivered" },
     financialEffect: { ar: "مبلغ فقط", en: "Money only" },
+    appearsInAssignment: false,
     appearsInPricing: true,
     appearsInCourierRates: true,
     requiredFields: [
@@ -595,6 +598,7 @@ const statusPolicies: StatusPolicy[] = [
     assignmentEffect: { ar: "مسار مرتجع", en: "Return route" },
     pieceEffect: { ar: "إدخال المسلّم واشتقاق الراجع", en: "Enter delivered; derive return" },
     financialEffect: { ar: "مبلغ ومرتجع", en: "Money and return" },
+    appearsInAssignment: false,
     appearsInPricing: true,
     appearsInCourierRates: true,
     requiredFields: [
@@ -621,6 +625,7 @@ const statusPolicies: StatusPolicy[] = [
     assignmentEffect: { ar: "إنهاء + قائمة متابعة", en: "End + follow-up queue" },
     pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
     financialEffect: { ar: "مبلغ فقط", en: "Money only" },
+    appearsInAssignment: false,
     appearsInPricing: true,
     appearsInCourierRates: true,
     requiredFields: [
@@ -644,6 +649,7 @@ const statusPolicies: StatusPolicy[] = [
     assignmentEffect: { ar: "مسار مرتجع", en: "Return route" },
     pieceEffect: { ar: "كل القطع راجعة", en: "All pieces returned" },
     financialEffect: { ar: "مرتجع فقط", en: "Return only" },
+    appearsInAssignment: false,
     appearsInPricing: true,
     appearsInCourierRates: true,
     requiredFields: [
@@ -667,6 +673,7 @@ const statusPolicies: StatusPolicy[] = [
     },
     pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
     financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInAssignment: false,
     appearsInPricing: false,
     appearsInCourierRates: false,
     requiredFields: [{ ar: "ملاحظة", en: "Note" }],
@@ -687,6 +694,7 @@ const statusPolicies: StatusPolicy[] = [
     },
     pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
     financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInAssignment: false,
     appearsInPricing: false,
     appearsInCourierRates: false,
     requiredFields: [
@@ -751,6 +759,9 @@ const statusCopy = {
     keepAssignment: "إبقاء التكليف",
     followUp: "إنهاء التكليف وإرسالها للمتابعة",
     returnRoute: "إنهاء التكليف وإدخال مسار المرتجع",
+    assignmentVisibilityToggle: "إظهار شحنات هذه الحالة في صفحة الإسناد",
+    assignmentVisibilityHint:
+      "عند الإيقاف لن تظهر أي شحنة تحمل هذه الحالة ضمن الشحنات المتاحة للمندوب، مع بقاء الشحنة محفوظة في مكانها الصحيح.",
     pieces: "سياسة القطع والمرتجع",
     ignorePieces: "لا تستخدم عدد القطع",
     allDelivered: "كل القطع مسلمة",
@@ -832,6 +843,9 @@ const statusCopy = {
     keepAssignment: "Keep assignment",
     followUp: "End assignment and send to follow-up",
     returnRoute: "End assignment and start return route",
+    assignmentVisibilityToggle: "Show shipments with this status in assignment",
+    assignmentVisibilityHint:
+      "When disabled, shipments with this status are excluded from available courier assignment while remaining safely stored in their current workflow.",
     pieces: "Pieces and return policy",
     ignorePieces: "Ignore piece count",
     allDelivered: "All pieces delivered",
@@ -2461,7 +2475,11 @@ function Sidebar({
           icon: ClipboardCheck,
           screen: "confirmation" as const,
         },
-        { label: t.assignment, icon: Truck },
+        {
+          label: t.assignment,
+          icon: Truck,
+          screen: "assignment" as const,
+        },
         { label: t.warehouse, icon: Warehouse },
       ],
     },
@@ -3250,6 +3268,30 @@ function StatusPolicyDrawer({
                   </span>
                 </label>
               </div>
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.appearsInAssignment}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    appearsInAssignment: !current.appearsInAssignment,
+                  }))
+                }
+              >
+                <span>
+                  <strong>{s.assignmentVisibilityToggle}</strong>
+                  <small>{s.assignmentVisibilityHint}</small>
+                </span>
+                <i
+                  className={
+                    draft.appearsInAssignment ? "switch switch--on" : "switch"
+                  }
+                >
+                  <b />
+                </i>
+              </button>
             </section>
 
             <section className="policy-form-section">
@@ -3451,6 +3493,7 @@ function StatusesScreen({
       assignmentEffect: { ar: "إنهاء التكليف", en: "End assignment" },
       pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
       financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+      appearsInAssignment: false,
       appearsInPricing: false,
       appearsInCourierRates: false,
       requiredFields: [{ ar: "ملاحظة", en: "Note" }],
@@ -7123,6 +7166,625 @@ type ConfirmationFilter =
   | "no_answer"
   | "later";
 
+const assignmentCourierProfiles = availableCouriers.map((courier, index) => ({
+  courier,
+  phone: [
+    "0100 842 1975",
+    "0111 304 8821",
+    "0122 507 6140",
+    "0109 118 3302",
+    "0112 670 9415",
+    "0155 204 7811",
+  ][index],
+  vehicle:
+    index === 2
+      ? ({ ar: "سيارة", en: "Car" } as Localized)
+      : index === 4
+        ? ({ ar: "فان", en: "Van" } as Localized)
+        : ({ ar: "دراجة نارية", en: "Motorbike" } as Localized),
+  code: `CR-${String(2001 + index)}`,
+}));
+
+function AssignmentScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  statuses,
+  governorates,
+  settings,
+  onShipmentsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  settings: ShipmentDataSettings;
+  onShipmentsChange: (records: Shipment[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [courierKey, setCourierKey] = useState(availableCouriers[0].en);
+  const [search, setSearch] = useState("");
+  const [governorateFilter, setGovernorateFilter] = useState("");
+  const [senderFilter, setSenderFilter] = useState("");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [lastAssigned, setLastAssigned] = useState(0);
+  const [toast, setToast] = useState("");
+
+  const selectedCourier =
+    assignmentCourierProfiles.find(
+      (profile) => profile.courier.en === courierKey,
+    ) ?? assignmentCourierProfiles[0];
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const allAreas = governorates.flatMap((governorate) =>
+    governorate.areas.map((area) => ({ ...area, governorate })),
+  );
+  const eligibleShipments = useMemo(
+    () =>
+      shipmentRecords.filter((shipment) => {
+        if (shipment.custodyType !== "warehouse") return false;
+        if (shipment.requiredType === "incomplete") return false;
+        const area = allAreas.find(
+          (record) =>
+            record.name.ar === shipment.area.ar ||
+            record.name.en === shipment.area.en,
+        );
+        if (!area || area.state !== "active" || !area.assignmentAllowed) {
+          return false;
+        }
+        const matchingPolicy = statuses.find(
+          (status) =>
+            status.state === "published" &&
+            (status.name.ar === shipment.status.ar ||
+              status.name.en === shipment.status.en),
+        );
+        if (matchingPolicy && !matchingPolicy.appearsInAssignment) return false;
+        if (
+          settings.confirmationMode === "required_before_assignment" &&
+          getShipmentConfirmationCode(shipment) !== "confirmed"
+        ) {
+          return false;
+        }
+        return true;
+      }),
+    [allAreas, settings.confirmationMode, shipmentRecords, statuses],
+  );
+  const normalized = search.trim().toLowerCase();
+  const visibleShipments = eligibleShipments.filter((shipment) => {
+    const matchesSearch =
+      !normalized ||
+      [
+        shipment.id,
+        shipment.reference,
+        shipment.phone,
+        shipment.recipient.ar,
+        shipment.recipient.en,
+        shipment.sender.ar,
+        shipment.sender.en,
+        shipment.area.ar,
+        shipment.area.en,
+      ].some((value) => value.toLowerCase().includes(normalized));
+    const matchesGovernorate =
+      !governorateFilter ||
+      shipment.governorate.en === governorateFilter;
+    const matchesSender = !senderFilter || shipment.sender.en === senderFilter;
+    return matchesSearch && matchesGovernorate && matchesSender;
+  });
+  const selectedShipments = eligibleShipments.filter((shipment) =>
+    selectedIds.includes(shipment.id),
+  );
+  const currentCourierShipments = shipmentRecords.filter(
+    (shipment) =>
+      shipment.custodyType === "courier" &&
+      shipment.courier?.en === selectedCourier.courier.en,
+  );
+  const totalPieces = selectedShipments.reduce(
+    (sum, shipment) => sum + shipment.pieces,
+    0,
+  );
+  const totalCollection = selectedShipments.reduce(
+    (sum, shipment) =>
+      sum +
+      shipment.amount +
+      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
+    0,
+  );
+  const senderOptions = Array.from(
+    new Map(
+      eligibleShipments.map((shipment) => [shipment.sender.en, shipment.sender]),
+    ).values(),
+  );
+
+  function toggleShipment(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((shipmentId) => shipmentId !== id)
+        : [...current, id],
+    );
+    setLastAssigned(0);
+  }
+
+  function assignAndHandOver() {
+    if (!selectedShipments.length) return;
+    const assignedIds = new Set(selectedShipments.map((shipment) => shipment.id));
+    const nextRecords = shipmentRecords.map((shipment) => {
+      if (!assignedIds.has(shipment.id)) return shipment;
+      const assignmentTask =
+        shipment.required.ar.includes("مندوب") ||
+        shipment.required.en.toLowerCase().includes("assign") ||
+        shipment.required.en.toLowerCase().includes("courier");
+      return {
+        ...shipment,
+        custody: { ar: "مع المندوب", en: "With courier" },
+        custodyType: "courier" as const,
+        courier: selectedCourier.courier,
+        required: assignmentTask
+          ? { ar: "لا يوجد", en: "None" }
+          : shipment.required,
+        requiredType: assignmentTask ? ("none" as const) : shipment.requiredType,
+        lastEvent: {
+          ar: `أُسندت وسُلّمت للمندوب ${selectedCourier.courier.ar} الآن`,
+          en: `Assigned and handed to ${selectedCourier.courier.en} just now`,
+        },
+      };
+    });
+    const count = selectedShipments.length;
+    onShipmentsChange(nextRecords);
+    setSelectedIds([]);
+    setLastAssigned(count);
+    setToast(
+      lang === "ar"
+        ? `تم إسناد وتسليم ${count} شحنة للمندوب`
+        : `${count} shipment(s) assigned and handed to courier`,
+    );
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="assignment"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <Truck size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar" ? "التوزيع والإسناد" : "Distribution & assignment"}
+              </strong>
+              <small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content assignment-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar" ? "التوزيع والإسناد" : "Distribution & assignment"}
+                </h1>
+                <span className="demo-chip">
+                  {eligibleShipments.length}{" "}
+                  {lang === "ar" ? "شحنة متاحة" : "available"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "اختر المندوب والشحنات التي ستُسلّم له فعليًا في نفس اللحظة."
+                  : "Choose the courier and shipments physically handed over now."}
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("statuses")}
+            >
+              <SlidersHorizontal size={17} />
+              {lang === "ar" ? "تحكم ظهور الحالات" : "Status visibility"}
+            </button>
+          </div>
+
+          <section className="assignment-truth">
+            <ShieldCheck size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "الإسناد هنا يعني أن الطرود أصبحت مع المندوب فعليًا"
+                  : "Assignment here means the parcels are physically with the courier"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "لا توجد خطوة استلام إضافية؛ التنفيذ يغيّر الحيازة ويسجل الحدث فورًا."
+                  : "There is no extra acceptance step; custody and the event update immediately."}
+              </small>
+            </span>
+          </section>
+
+          <div className="assignment-layout">
+            <aside className="courier-selection-panel">
+              <div className="assignment-panel-title">
+                <span className="entry-step">1</span>
+                <span>
+                  <strong>{lang === "ar" ? "اختر المندوب" : "Choose courier"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "الشحنات الحالية تظل ظاهرة في عهدته"
+                      : "Existing custody remains visible"}
+                  </small>
+                </span>
+              </div>
+              <div className="courier-assignment-list">
+                {assignmentCourierProfiles.map((profile) => {
+                  const load = shipmentRecords.filter(
+                    (shipment) =>
+                      shipment.custodyType === "courier" &&
+                      shipment.courier?.en === profile.courier.en,
+                  ).length;
+                  const selected = profile.courier.en === courierKey;
+                  return (
+                    <button
+                      type="button"
+                      key={profile.code}
+                      className={selected ? "courier-choice courier-choice--selected" : "courier-choice"}
+                      onClick={() => {
+                        setCourierKey(profile.courier.en);
+                        setLastAssigned(0);
+                      }}
+                    >
+                      <span className="mini-avatar">
+                        {profile.courier[lang].slice(0, 1)}
+                      </span>
+                      <span>
+                        <strong>{profile.courier[lang]}</strong>
+                        <small>
+                          {profile.code} · {profile.vehicle[lang]}
+                        </small>
+                      </span>
+                      <span className="courier-load">
+                        <strong>{load}</strong>
+                        <small>{lang === "ar" ? "معه الآن" : "with courier"}</small>
+                      </span>
+                      {selected && <Check size={16} />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="selected-courier-summary">
+                <div>
+                  <span className="mini-avatar">
+                    {selectedCourier.courier[lang].slice(0, 1)}
+                  </span>
+                  <span>
+                    <strong>{selectedCourier.courier[lang]}</strong>
+                    <small dir="ltr">{selectedCourier.phone}</small>
+                  </span>
+                </div>
+                <span>
+                  <small>{lang === "ar" ? "الحيازة الحالية" : "Current custody"}</small>
+                  <strong>
+                    {currentCourierShipments.length}{" "}
+                    {lang === "ar" ? "شحنة" : "shipments"}
+                  </strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "بعد الإسناد" : "After assignment"}</small>
+                  <strong>
+                    {currentCourierShipments.length + selectedShipments.length}{" "}
+                    {lang === "ar" ? "شحنة" : "shipments"}
+                  </strong>
+                </span>
+              </div>
+            </aside>
+
+            <section className="assignment-shipments-panel">
+              <div className="assignment-panel-title assignment-panel-title--shipments">
+                <div>
+                  <span className="entry-step">2</span>
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? "اختر الشحنات التي أمامك"
+                        : "Choose the parcels in front of you"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "لا تظهر هنا إلا الشحنات الجاهزة فعليًا"
+                        : "Only actually eligible shipments appear here"}
+                    </small>
+                  </span>
+                </div>
+                <span className="assignment-selected-chip">
+                  {selectedShipments.length}{" "}
+                  {lang === "ar" ? "محددة" : "selected"}
+                </span>
+              </div>
+
+              <div className="assignment-filters">
+                <label className="assignment-search">
+                  <Search size={17} />
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "رقم الشحنة، الهاتف، المستلم، الراسل أو المنطقة..."
+                        : "Shipment, phone, recipient, sender or area..."
+                    }
+                  />
+                  {search && (
+                    <button type="button" onClick={() => setSearch("")}>
+                      <X size={15} />
+                    </button>
+                  )}
+                </label>
+                <label className="entry-select">
+                  <select
+                    value={governorateFilter}
+                    onChange={(event) => setGovernorateFilter(event.target.value)}
+                  >
+                    <option value="">
+                      {lang === "ar" ? "كل المحافظات" : "All governorates"}
+                    </option>
+                    {governorates
+                      .filter((governorate) => governorate.state === "active")
+                      .map((governorate) => (
+                        <option key={governorate.id} value={governorate.name.en}>
+                          {governorate.name[lang]}
+                        </option>
+                      ))}
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+                <label className="entry-select">
+                  <select
+                    value={senderFilter}
+                    onChange={(event) => setSenderFilter(event.target.value)}
+                  >
+                    <option value="">
+                      {lang === "ar" ? "كل الرسل" : "All senders"}
+                    </option>
+                    {senderOptions.map((sender) => (
+                      <option key={sender.en} value={sender.en}>
+                        {sender[lang]}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </div>
+
+              <div className="assignment-eligibility-note">
+                <span>
+                  <Warehouse size={15} />
+                  {lang === "ar" ? "داخل المخزن" : "In warehouse"}
+                </span>
+                <span>
+                  <ClipboardCheck size={15} />
+                  {lang === "ar" ? "بيانات مكتملة" : "Complete data"}
+                </span>
+                <span>
+                  <MapPin size={15} />
+                  {lang === "ar" ? "منطقة تسمح بالإسناد" : "Assignable area"}
+                </span>
+                <span>
+                  <SlidersHorizontal size={15} />
+                  {lang === "ar" ? "حالة تسمح بالظهور" : "Status allows display"}
+                </span>
+              </div>
+
+              <div className="assignment-shipment-list">
+                {visibleShipments.map((shipment) => {
+                  const checked = selectedIds.includes(shipment.id);
+                  const total =
+                    shipment.amount +
+                    (shipment.shippingPayer === "recipient"
+                      ? shipment.shippingFee
+                      : 0);
+                  return (
+                    <label
+                      className={
+                        checked
+                          ? "assignment-shipment assignment-shipment--selected"
+                          : "assignment-shipment"
+                      }
+                      key={shipment.id}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleShipment(shipment.id)}
+                      />
+                      <span className="assignment-check">
+                        {checked && <Check size={14} />}
+                      </span>
+                      <span className="assignment-shipment__id">
+                        <strong>{shipment.id}</strong>
+                        <small>{shipment.reference}</small>
+                      </span>
+                      <span className="assignment-shipment__recipient">
+                        <span className="mini-avatar">
+                          {shipment.recipient[lang].slice(0, 1)}
+                        </span>
+                        <span>
+                          <strong>{shipment.recipient[lang]}</strong>
+                          <small dir="ltr">{shipment.phone}</small>
+                        </span>
+                      </span>
+                      <span className="assignment-shipment__route">
+                        <strong>{shipment.area[lang]}</strong>
+                        <small>{shipment.governorate[lang]}</small>
+                      </span>
+                      <span className="assignment-shipment__sender">
+                        <strong>{shipment.sender[lang]}</strong>
+                        <small>
+                          {shipment.pieces} {lang === "ar" ? "قطعة" : "pcs"}
+                        </small>
+                      </span>
+                      <span className="assignment-shipment__money">
+                        <strong>{money.format(total)}</strong>
+                        <small>{lang === "ar" ? "مطلوب تحصيله" : "To collect"}</small>
+                      </span>
+                      <span
+                        className={`status-badge status-badge--${shipment.statusTone}`}
+                      >
+                        {shipment.status[lang]}
+                      </span>
+                    </label>
+                  );
+                })}
+                {visibleShipments.length === 0 && (
+                  <div className="assignment-empty">
+                    <PackageCheck size={29} />
+                    <strong>
+                      {lang === "ar"
+                        ? "لا توجد شحنات جاهزة تطابق البحث الحالي"
+                        : "No eligible shipments match the current search"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "الشحنات غير الصالحة لا تظهر هنا؛ ستجد الناقصة في قائمة استكمال البيانات."
+                        : "Ineligible shipments stay out of this page; incomplete ones remain in data completion."}
+                    </small>
+                    {(search || governorateFilter || senderFilter) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearch("");
+                          setGovernorateFilter("");
+                          setSenderFilter("");
+                        }}
+                      >
+                        {lang === "ar" ? "مسح الفلاتر" : "Clear filters"}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {lastAssigned > 0 && (
+                <div className="assignment-success">
+                  <PackageCheck size={20} />
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? `تم تسليم ${lastAssigned} شحنة للمندوب`
+                        : `${lastAssigned} shipment(s) handed to courier`}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "اختفت من المتاح وأصبحت ظاهرة في حيازة المندوب."
+                        : "They left the available list and now appear in courier custody."}
+                    </small>
+                  </span>
+                </div>
+              )}
+
+              <div className="assignment-action-bar">
+                <div>
+                  <span>
+                    <small>{lang === "ar" ? "الشحنات" : "Shipments"}</small>
+                    <strong>{selectedShipments.length}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "القطع" : "Pieces"}</small>
+                    <strong>{totalPieces}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "إجمالي التحصيل" : "Total collection"}</small>
+                    <strong>{money.format(totalCollection)}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "المندوب" : "Courier"}</small>
+                    <strong>{selectedCourier.courier[lang]}</strong>
+                  </span>
+                </div>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={!selectedShipments.length}
+                  onClick={assignAndHandOver}
+                >
+                  <Truck size={18} />
+                  {lang === "ar"
+                    ? "إسناد وتسليم للمندوب الآن"
+                    : "Assign and hand over now"}
+                </button>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function getShipmentConfirmationCode(
   shipment: Shipment,
 ): "confirmed" | "no_answer" | "later" | "not_recorded" {
@@ -9725,6 +10387,7 @@ export default function Home() {
           setSharedStatuses(
             parsed.statuses.map((status) => ({
               ...status,
+              appearsInAssignment: status.appearsInAssignment ?? false,
               appearsInCourierRates:
                 status.appearsInCourierRates ?? status.appearsInPricing,
             })),
@@ -9895,6 +10558,22 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "assignment" ? (
+        <AssignmentScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          settings={sharedShipmentSettings}
+          onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
