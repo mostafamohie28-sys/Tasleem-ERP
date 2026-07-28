@@ -4138,6 +4138,134 @@ tbody tr:hover {
   margin-bottom: 12px;
 }
 
+.courier-rates-page {
+  padding-bottom: 44px;
+}
+
+.courier-control-note svg {
+  color: var(--orange-600);
+}
+
+.courier-plan-item {
+  min-height: 118px;
+}
+
+.price-list-item__badges .courier-pay-type {
+  background: rgba(37, 81, 185, 0.09);
+  color: var(--blue-600);
+}
+
+.courier-editor-badge,
+.courier-workspace-icon {
+  display: grid;
+  place-items: center;
+  color: var(--blue-600);
+  background: rgba(37, 81, 185, 0.09);
+}
+
+.courier-editor-badge {
+  width: 39px;
+  height: 39px;
+  flex: 0 0 auto;
+  border-radius: 11px;
+}
+
+.courier-workspace-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+}
+
+.courier-plan-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-soft) 55%, transparent);
+}
+
+.courier-plan-facts > span {
+  min-width: 0;
+  min-height: 46px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 8px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.courier-plan-facts svg {
+  grid-row: span 2;
+  color: var(--orange-600);
+}
+
+.courier-plan-facts small {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 7.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.courier-plan-facts strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.courier-salary-panel {
+  min-height: 330px;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 34px;
+  text-align: start;
+}
+
+.courier-salary-panel > span {
+  width: 58px;
+  height: 58px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: rgba(37, 81, 185, 0.09);
+  color: var(--blue-600);
+}
+
+.courier-salary-panel > div {
+  max-width: 390px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.courier-salary-panel small {
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.courier-salary-panel strong {
+  color: var(--text);
+  font-size: 24px;
+}
+
+.courier-salary-panel p {
+  color: var(--text-soft);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
 .toast {
   position: fixed;
   z-index: 100;
@@ -5387,6 +5515,17 @@ tbody tr:hover {
     max-width: 82%;
     line-height: 1.5;
   }
+
+  .courier-plan-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .courier-salary-panel {
+    min-height: 280px;
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 26px 20px;
+  }
 }
 
 @media (max-width: 520px) {
@@ -5411,6 +5550,14 @@ tbody tr:hover {
   }
 
   .price-list-editor .drawer__footer button {
+    flex: 1;
+  }
+
+  .courier-plan-editor .drawer__footer--split {
+    justify-content: stretch;
+  }
+
+  .courier-plan-editor .drawer__footer button {
     flex: 1;
   }
 }

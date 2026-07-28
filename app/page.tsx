@@ -53,7 +53,13 @@ import {
 
 type Lang = "ar" | "en";
 type Theme = "light" | "dark";
-type Screen = "login" | "shipments" | "statuses" | "areas" | "priceLists";
+type Screen =
+  | "login"
+  | "shipments"
+  | "statuses"
+  | "areas"
+  | "priceLists"
+  | "courierRates";
 type Scenario =
   | "ready"
   | "loading"
@@ -529,6 +535,7 @@ type StatusPolicy = {
   pieceEffect: Localized;
   financialEffect: Localized;
   appearsInPricing: boolean;
+  appearsInCourierRates: boolean;
   requiredFields: Localized[];
   usage: number;
   version: number;
@@ -551,6 +558,7 @@ const statusPolicies: StatusPolicy[] = [
     pieceEffect: { ar: "كل القطع مسلّمة", en: "All pieces delivered" },
     financialEffect: { ar: "مبلغ فقط", en: "Money only" },
     appearsInPricing: true,
+    appearsInCourierRates: true,
     requiredFields: [
       { ar: "المبلغ المحصل", en: "Collected amount" },
       { ar: "عدد القطع المسلمة", en: "Delivered pieces" },
@@ -573,6 +581,7 @@ const statusPolicies: StatusPolicy[] = [
     pieceEffect: { ar: "إدخال المسلّم واشتقاق الراجع", en: "Enter delivered; derive return" },
     financialEffect: { ar: "مبلغ ومرتجع", en: "Money and return" },
     appearsInPricing: true,
+    appearsInCourierRates: true,
     requiredFields: [
       { ar: "المبلغ المحصل", en: "Collected amount" },
       { ar: "عدد القطع المسلمة", en: "Delivered pieces" },
@@ -598,6 +607,7 @@ const statusPolicies: StatusPolicy[] = [
     pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
     financialEffect: { ar: "مبلغ فقط", en: "Money only" },
     appearsInPricing: true,
+    appearsInCourierRates: true,
     requiredFields: [
       { ar: "الموعد الجديد", en: "New date" },
       { ar: "سبب الحالة", en: "Status reason" },
@@ -620,6 +630,7 @@ const statusPolicies: StatusPolicy[] = [
     pieceEffect: { ar: "كل القطع راجعة", en: "All pieces returned" },
     financialEffect: { ar: "مرتجع فقط", en: "Return only" },
     appearsInPricing: true,
+    appearsInCourierRates: true,
     requiredFields: [
       { ar: "سبب الحالة", en: "Status reason" },
       { ar: "ملاحظة", en: "Note" },
@@ -642,6 +653,7 @@ const statusPolicies: StatusPolicy[] = [
     pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
     financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
     appearsInPricing: false,
+    appearsInCourierRates: false,
     requiredFields: [{ ar: "ملاحظة", en: "Note" }],
     usage: 671,
     version: 2,
@@ -661,6 +673,7 @@ const statusPolicies: StatusPolicy[] = [
     pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
     financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
     appearsInPricing: false,
+    appearsInCourierRates: false,
     requiredFields: [
       { ar: "العنوان الصحيح", en: "Correct address" },
       { ar: "ملاحظة", en: "Note" },
@@ -697,6 +710,8 @@ const statusCopy = {
     draftBadge: "مسودة",
     pricingBadge: "ضمن قائمة الأسعار",
     noPricing: "خارج قائمة الأسعار",
+    courierRatesBadge: "ضمن عمولات المناديب",
+    noCourierRates: "خارج عمولات المناديب",
     noResults: "لا توجد حالات تطابق البحث الحالي.",
     controlNote:
       "لا توجد حالة مفروضة داخل النظام؛ كل حالة بالأسفل هي سياسة قابلة للتعديل أو التعطيل حسب طريقة عمل شركتك.",
@@ -735,6 +750,9 @@ const statusCopy = {
     pricingToggle: "إظهار الحالة في قوائم الأسعار",
     pricingHint:
       "عند التفعيل ستظهر الحالة بجوار كل منطقة داخل قائمة الأسعار لتحديد سعر مستقل لها.",
+    courierPricingToggle: "إظهار الحالة في قوائم عمولات المناديب",
+    courierPricingHint:
+      "عند التفعيل ستظهر الحالة في خطط العمولة لتحديد مستحق المندوب عنها بكل منطقة.",
     fields: "البيانات المطلوبة عند تسجيل الحالة",
     reason: "سبب الحالة",
     note: "ملاحظة",
@@ -773,6 +791,8 @@ const statusCopy = {
     draftBadge: "Draft",
     pricingBadge: "In price lists",
     noPricing: "Outside price lists",
+    courierRatesBadge: "In courier commissions",
+    noCourierRates: "Outside courier commissions",
     noResults: "No statuses match the current search.",
     controlNote:
       "The system imposes no built-in status; every status below is a policy you can edit or disable to match your company.",
@@ -811,6 +831,9 @@ const statusCopy = {
     pricingToggle: "Show status in price lists",
     pricingHint:
       "When enabled, the status appears beside every area in price lists with its own configurable price.",
+    courierPricingToggle: "Show status in courier commission lists",
+    courierPricingHint:
+      "When enabled, the status appears in commission plans with a configurable courier due per area.",
     fields: "Required data when recording the status",
     reason: "Status reason",
     note: "Note",
@@ -1418,6 +1441,263 @@ const priceListCopy = {
   },
 } as const;
 
+type CourierCompensationType = "commission" | "salary" | "mixed";
+type CourierSettlementCycle = "instant" | "daily" | "weekly" | "monthly";
+
+type CourierRatePlan = {
+  id: string;
+  name: Localized;
+  code: string;
+  state: "active" | "draft";
+  isDefault: boolean;
+  compensationType: CourierCompensationType;
+  settlementCycle: CourierSettlementCycle;
+  fixedSalary: number | null;
+  couriers: Localized[];
+  version: number;
+  rates: PriceMatrix;
+};
+
+const availableCouriers: Localized[] = [
+  { ar: "أحمد رجب", en: "Ahmed Ragab" },
+  { ar: "محمود سمير", en: "Mahmoud Samir" },
+  { ar: "كريم فؤاد", en: "Karim Fouad" },
+  { ar: "مصطفى عادل", en: "Mostafa Adel" },
+  { ar: "عمر خالد", en: "Omar Khaled" },
+  { ar: "محمد صابر", en: "Mohamed Saber" },
+];
+
+function createCourierRateMatrix(
+  base: number,
+  missing: string[] = [],
+): PriceMatrix {
+  const matrix: PriceMatrix = {};
+  governoratesData.forEach((governorate, governorateIndex) => {
+    governorate.areas.forEach((area, areaIndex) => {
+      const delivered = base + governorateIndex * 2 + Math.floor(areaIndex / 2);
+      matrix[area.id] = {
+        "status-delivered": missing.includes(`${area.id}:status-delivered`)
+          ? null
+          : delivered,
+        "status-partial": missing.includes(`${area.id}:status-partial`)
+          ? null
+          : Math.max(0, delivered - 5),
+        "status-deferred": missing.includes(`${area.id}:status-deferred`)
+          ? null
+          : 5,
+        "status-cancelled": missing.includes(`${area.id}:status-cancelled`)
+          ? null
+          : 8,
+      };
+    });
+  });
+  return matrix;
+}
+
+const courierRatePlansData: CourierRatePlan[] = [
+  {
+    id: "courier-plan-standard",
+    name: { ar: "عمولة المناديب الأساسية", en: "Standard courier commission" },
+    code: "COURIER-STANDARD",
+    state: "active",
+    isDefault: true,
+    compensationType: "commission",
+    settlementCycle: "weekly",
+    fixedSalary: null,
+    couriers: [
+      availableCouriers[0],
+      availableCouriers[1],
+      availableCouriers[2],
+    ],
+    version: 6,
+    rates: createCourierRateMatrix(20, [
+      "area-talkha:status-partial",
+      "area-agami:status-deferred",
+    ]),
+  },
+  {
+    id: "courier-plan-distance",
+    name: { ar: "عمولة المناطق البعيدة", en: "Long-distance commission" },
+    code: "COURIER-DISTANCE",
+    state: "active",
+    isDefault: false,
+    compensationType: "commission",
+    settlementCycle: "daily",
+    fixedSalary: null,
+    couriers: [availableCouriers[3]],
+    version: 3,
+    rates: createCourierRateMatrix(27),
+  },
+  {
+    id: "courier-plan-salary",
+    name: { ar: "مندوبو الراتب الشهري", en: "Monthly salary couriers" },
+    code: "COURIER-SALARY",
+    state: "active",
+    isDefault: false,
+    compensationType: "salary",
+    settlementCycle: "monthly",
+    fixedSalary: 6500,
+    couriers: [availableCouriers[4]],
+    version: 2,
+    rates: createCourierRateMatrix(0),
+  },
+  {
+    id: "courier-plan-mixed",
+    name: { ar: "راتب مع عمولة", en: "Salary plus commission" },
+    code: "COURIER-MIXED",
+    state: "draft",
+    isDefault: false,
+    compensationType: "mixed",
+    settlementCycle: "monthly",
+    fixedSalary: 3000,
+    couriers: [availableCouriers[5]],
+    version: 1,
+    rates: createCourierRateMatrix(10, [
+      "area-new-cairo:status-delivered",
+      "area-agami:status-delivered",
+    ]),
+  },
+];
+
+const courierRateCopy = {
+  ar: {
+    title: "قوائم عمولات المناديب",
+    subtitle: "حدّد طريقة أجر كل مجموعة مناديب ومستحق كل حالة في كل منطقة.",
+    add: "إضافة خطة أجر",
+    activePlans: "خطط مفعّلة",
+    assignedCouriers: "مناديب مرتبطون",
+    commissionPlans: "خطط عمولة",
+    salaryPlans: "خطط راتب",
+    controlNote:
+      "عمولة المندوب مستقلة عن سعر شحن الراسل: سعر الشحن إيراد للشركة، ومستحق المندوب مصروف تشغيلي يُحسب حسب خطة أجره.",
+    plans: "خطط الأجر",
+    searchPlans: "ابحث عن خطة...",
+    defaultBadge: "الافتراضية",
+    activeBadge: "مفعّلة",
+    draftBadge: "مسودة",
+    courier: "مندوب",
+    couriers: "مناديب",
+    noCourier: "لا يوجد مندوب مرتبط",
+    completion: "اكتمال",
+    planFor: "مستحقات",
+    settings: "إعدادات الخطة",
+    unsaved: "تعديلات غير محفوظة",
+    saveRates: "حفظ العمولات",
+    linkedStatuses: "الحالات المحتسبة للمندوب",
+    linkedStatusesHint:
+      "تتحكم فيها من صفحة حالات الشحنات، وأي حالة جديدة تظهر هنا تلقائيًا بسعر غير محدد.",
+    searchArea: "ابحث عن منطقة أو محافظة...",
+    allGovernorates: "كل المحافظات",
+    area: "المنطقة",
+    priceCurrency: "ج.م",
+    missing: "غير محدد",
+    stoppedArea: "منطقة موقوفة",
+    noAreas: "لا توجد مناطق تطابق البحث الحالي.",
+    savedRates: "تم حفظ عمولات الخطة",
+    salaryOnlyTitle: "هذه الخطة تعمل بالراتب فقط",
+    salaryOnlyHint:
+      "لا يُحسب مستحق لكل شحنة في هذه الخطة؛ الراتب يُثبت كمصروف على الشركة حسب دورية الصرف.",
+    monthlySalary: "الراتب الثابت",
+    instant: "فوري بعد التسوية",
+    daily: "يومي",
+    weekly: "أسبوعي",
+    monthly: "شهري",
+    commission: "عمولة حسب الشحنة",
+    salary: "راتب ثابت",
+    mixed: "راتب مع عمولة",
+    snapshotHint:
+      "عند تسجيل حالة الشحنة يُحفظ مستحق المندوب المستخدم وقتها؛ تعديل الخطة لا يغيّر العمليات السابقة.",
+    editorTitle: "إعدادات خطة الأجر",
+    newTitle: "إضافة خطة أجر جديدة",
+    arabicName: "اسم الخطة بالعربية",
+    englishName: "اسم الخطة بالإنجليزية",
+    code: "الكود الداخلي",
+    state: "حالة الاستخدام",
+    compensationType: "نظام الأجر",
+    settlementCycle: "دورية صرف المستحق",
+    fixedSalary: "قيمة الراتب الثابت",
+    defaultPlan: "استخدامها كخطة افتراضية للمناديب",
+    defaultHint:
+      "تُطبق على المندوب الذي لم يُربط بخطة خاصة، ويمكن تغييرها من بيانات المندوب.",
+    courierLink: "المناديب المرتبطون بهذه الخطة",
+    courierLinkHint:
+      "يمكن ربط عدة مناديب بالخطة؛ اختيار مندوب مرتبط بخطة أخرى ينقله إلى هذه الخطة.",
+    cancel: "إلغاء",
+    save: "حفظ الإعدادات",
+    savedPlan: "تم حفظ إعدادات خطة الأجر",
+    createdPlan: "تمت إضافة خطة الأجر",
+    demo: "تغييرات تجريبية داخل نموذج التصميم فقط",
+  },
+  en: {
+    title: "Courier commission lists",
+    subtitle: "Define each courier group’s pay model and due per status in every area.",
+    add: "Add pay plan",
+    activePlans: "Active plans",
+    assignedCouriers: "Assigned couriers",
+    commissionPlans: "Commission plans",
+    salaryPlans: "Salary plans",
+    controlNote:
+      "Courier dues are independent from sender shipping prices: shipping price is company revenue, while courier due is an operating expense calculated from the courier’s pay plan.",
+    plans: "Pay plans",
+    searchPlans: "Search plans...",
+    defaultBadge: "Default",
+    activeBadge: "Active",
+    draftBadge: "Draft",
+    courier: "courier",
+    couriers: "couriers",
+    noCourier: "No assigned courier",
+    completion: "Complete",
+    planFor: "Dues for",
+    settings: "Plan settings",
+    unsaved: "Unsaved changes",
+    saveRates: "Save commissions",
+    linkedStatuses: "Courier-compensated statuses",
+    linkedStatusesHint:
+      "Controlled in Shipment Statuses; any new enabled status appears here automatically without a price.",
+    searchArea: "Search area or governorate...",
+    allGovernorates: "All governorates",
+    area: "Area",
+    priceCurrency: "EGP",
+    missing: "Not set",
+    stoppedArea: "Paused area",
+    noAreas: "No areas match the current search.",
+    savedRates: "Plan commissions saved",
+    salaryOnlyTitle: "This is a salary-only plan",
+    salaryOnlyHint:
+      "No per-shipment due is calculated; salary is recorded as a company expense on its settlement cycle.",
+    monthlySalary: "Fixed salary",
+    instant: "Instant after settlement",
+    daily: "Daily",
+    weekly: "Weekly",
+    monthly: "Monthly",
+    commission: "Per-shipment commission",
+    salary: "Fixed salary",
+    mixed: "Salary plus commission",
+    snapshotHint:
+      "The courier due used is stored when the shipment status is recorded; later plan edits do not alter past operations.",
+    editorTitle: "Pay-plan settings",
+    newTitle: "Add new pay plan",
+    arabicName: "Arabic plan name",
+    englishName: "English plan name",
+    code: "Internal code",
+    state: "Usage state",
+    compensationType: "Pay model",
+    settlementCycle: "Settlement cycle",
+    fixedSalary: "Fixed salary amount",
+    defaultPlan: "Use as default courier plan",
+    defaultHint:
+      "Applied to couriers without a private plan and can be changed in courier details.",
+    courierLink: "Couriers assigned to this plan",
+    courierLinkHint:
+      "Assign multiple couriers; selecting a courier already assigned elsewhere moves them to this plan.",
+    cancel: "Cancel",
+    save: "Save settings",
+    savedPlan: "Pay-plan settings saved",
+    createdPlan: "Pay plan added",
+    demo: "Demo-only changes in the design prototype",
+  },
+} as const;
+
 function Brand({
   compact = false,
   lang,
@@ -1730,6 +2010,11 @@ function Sidebar({
           label: lang === "ar" ? "قوائم الأسعار" : "Price lists",
           icon: HandCoins,
           screen: "priceLists" as const,
+        },
+        {
+          label: lang === "ar" ? "عمولات المناديب" : "Courier commissions",
+          icon: Truck,
+          screen: "courierRates" as const,
         },
         { label: t.settings, icon: Settings2 },
       ],
@@ -2543,6 +2828,32 @@ function StatusPolicyDrawer({
                   <b />
                 </i>
               </button>
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.appearsInCourierRates}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    appearsInCourierRates: !current.appearsInCourierRates,
+                  }))
+                }
+              >
+                <span>
+                  <strong>{s.courierPricingToggle}</strong>
+                  <small>{s.courierPricingHint}</small>
+                </span>
+                <i
+                  className={
+                    draft.appearsInCourierRates
+                      ? "switch switch--on"
+                      : "switch"
+                  }
+                >
+                  <b />
+                </i>
+              </button>
             </section>
 
             <section className="policy-form-section">
@@ -2657,6 +2968,7 @@ function StatusesScreen({
       pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
       financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
       appearsInPricing: false,
+      appearsInCourierRates: false,
       requiredFields: [{ ar: "ملاحظة", en: "Note" }],
       usage: 0,
       version: 1,
@@ -2873,6 +3185,17 @@ function StatusesScreen({
                         }
                       >
                         {policy.appearsInPricing ? s.pricingBadge : s.noPricing}
+                      </span>
+                      <span
+                        className={
+                          policy.appearsInCourierRates
+                            ? "pricing-link pricing-link--active"
+                            : "pricing-link"
+                        }
+                      >
+                        {policy.appearsInCourierRates
+                          ? s.courierRatesBadge
+                          : s.noCourierRates}
                       </span>
                     </div>
                     <div className="visibility-chips">
@@ -4542,6 +4865,940 @@ function PriceListsScreen({
   );
 }
 
+function CourierPlanEditor({
+  plan,
+  isNew,
+  lang,
+  onClose,
+  onSave,
+}: {
+  plan: CourierRatePlan;
+  isNew: boolean;
+  lang: Lang;
+  onClose: () => void;
+  onSave: (plan: CourierRatePlan) => void;
+}) {
+  const c = courierRateCopy[lang];
+  const [draft, setDraft] = useState(plan);
+
+  function toggleCourier(courier: Localized) {
+    setDraft((current) => {
+      const exists = current.couriers.some((item) => item.en === courier.en);
+      return {
+        ...current,
+        couriers: exists
+          ? current.couriers.filter((item) => item.en !== courier.en)
+          : [...current.couriers, courier],
+      };
+    });
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(draft);
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={c.cancel}
+        onClick={onClose}
+      />
+      <aside className="policy-editor courier-plan-editor" aria-label={c.editorTitle}>
+        <form onSubmit={handleSubmit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span className="courier-editor-badge">
+                <Truck size={20} />
+              </span>
+              <span>
+                <small>{isNew ? c.newTitle : c.editorTitle}</small>
+                <strong>{draft.name[lang] || c.newTitle}</strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={c.cancel}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Pencil size={16} /></span>
+                <div>
+                  <strong>{isNew ? c.newTitle : c.editorTitle}</strong>
+                  <small>{c.code}</small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{c.arabicName}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.name.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, ar: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{c.englishName}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.name.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, en: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{c.code}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.code}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          code: event.target.value.toUpperCase().replace(/\s+/g, "-"),
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{c.state}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.state}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          state: event.target.value as "active" | "draft",
+                        }))
+                      }
+                    >
+                      <option value="active">{c.activeBadge}</option>
+                      <option value="draft">{c.draftBadge}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{c.compensationType}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.compensationType}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          compensationType:
+                            event.target.value as CourierCompensationType,
+                          fixedSalary:
+                            event.target.value === "commission"
+                              ? null
+                              : current.fixedSalary ?? 0,
+                        }))
+                      }
+                    >
+                      <option value="commission">{c.commission}</option>
+                      <option value="salary">{c.salary}</option>
+                      <option value="mixed">{c.mixed}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{c.settlementCycle}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.settlementCycle}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          settlementCycle:
+                            event.target.value as CourierSettlementCycle,
+                        }))
+                      }
+                    >
+                      <option value="instant">{c.instant}</option>
+                      <option value="daily">{c.daily}</option>
+                      <option value="weekly">{c.weekly}</option>
+                      <option value="monthly">{c.monthly}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                {draft.compensationType !== "commission" && (
+                  <label className="field">
+                    <span>{c.fixedSalary}</span>
+                    <span className="field__control">
+                      <input
+                        type="number"
+                        min="0"
+                        value={draft.fixedSalary ?? 0}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            fixedSalary: Math.max(0, Number(event.target.value) || 0),
+                          }))
+                        }
+                      />
+                    </span>
+                  </label>
+                )}
+              </div>
+
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.isDefault}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    isDefault: !current.isDefault,
+                  }))
+                }
+              >
+                <span>
+                  <strong>{c.defaultPlan}</strong>
+                  <small>{c.defaultHint}</small>
+                </span>
+                <i className={draft.isDefault ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><UserRound size={16} /></span>
+                <div>
+                  <strong>{c.courierLink}</strong>
+                  <small>{c.courierLinkHint}</small>
+                </div>
+              </div>
+              <div className="policy-choice-grid">
+                {availableCouriers.map((courier) => {
+                  const checked = draft.couriers.some(
+                    (item) => item.en === courier.en,
+                  );
+                  return (
+                    <label className="policy-check" key={courier.en}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleCourier(courier)}
+                      />
+                      <span><Check size={13} /></span>
+                      {courier[lang]}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="geo-safety-card">
+              <ShieldCheck size={18} />
+              <div>
+                <strong>{c.compensationType}</strong>
+                <p>{c.snapshotHint}</p>
+              </div>
+            </section>
+
+            <div className="policy-demo-note">
+              <CircleAlert size={15} />
+              {c.demo}
+            </div>
+          </div>
+
+          <div className="drawer__footer drawer__footer--split">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {c.cancel}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {c.save}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function CourierRatesScreen({
+  lang,
+  theme,
+  plans,
+  statuses,
+  governorates,
+  onLang,
+  onTheme,
+  onPlansChange,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  plans: CourierRatePlan[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  onLang: () => void;
+  onTheme: () => void;
+  onPlansChange: (
+    updater: (current: CourierRatePlan[]) => CourierRatePlan[],
+  ) => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const c = courierRateCopy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState(plans[0]?.id ?? "");
+  const [planSearch, setPlanSearch] = useState("");
+  const [areaSearch, setAreaSearch] = useState("");
+  const [governorateFilter, setGovernorateFilter] = useState("all");
+  const [editing, setEditing] = useState<CourierRatePlan | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [dirtyPlans, setDirtyPlans] = useState<string[]>([]);
+  const [toast, setToast] = useState("");
+
+  const courierStatuses = statuses.filter(
+    (status) =>
+      status.state === "published" && status.appearsInCourierRates,
+  );
+  const areasWithGovernorates = governorates.flatMap((governorate) =>
+    governorate.areas.map((area) => ({ area, governorate })),
+  );
+  const selected = plans.find((plan) => plan.id === selectedId) ?? plans[0];
+
+  const filteredPlans = useMemo(() => {
+    const normalized = planSearch.trim().toLowerCase();
+    return plans.filter(
+      (plan) =>
+        !normalized ||
+        [plan.name.ar, plan.name.en, plan.code].some((value) =>
+          value.toLowerCase().includes(normalized),
+        ),
+    );
+  }, [planSearch, plans]);
+
+  const filteredAreas = useMemo(() => {
+    const normalized = areaSearch.trim().toLowerCase();
+    return areasWithGovernorates.filter(({ area, governorate }) => {
+      const matchesGovernorate =
+        governorateFilter === "all" || governorate.id === governorateFilter;
+      const matchesSearch =
+        !normalized ||
+        [
+          area.name.ar,
+          area.name.en,
+          area.code,
+          governorate.name.ar,
+          governorate.name.en,
+          ...area.aliases,
+        ].some((value) => value.toLowerCase().includes(normalized));
+      return matchesGovernorate && matchesSearch;
+    });
+  }, [areaSearch, governorateFilter, governorates]);
+
+  function planCompletion(plan: CourierRatePlan) {
+    if (plan.compensationType === "salary") {
+      return { filled: 1, total: 1, percent: 100 };
+    }
+    const total = areasWithGovernorates.length * courierStatuses.length;
+    const filled = areasWithGovernorates.reduce(
+      (count, { area }) =>
+        count +
+        courierStatuses.filter(
+          (status) => plan.rates[area.id]?.[status.id] != null,
+        ).length,
+      0,
+    );
+    return {
+      filled,
+      total,
+      percent: total ? Math.round((filled / total) * 100) : 0,
+    };
+  }
+
+  function compensationLabel(type: CourierCompensationType) {
+    return type === "commission"
+      ? c.commission
+      : type === "salary"
+        ? c.salary
+        : c.mixed;
+  }
+
+  function cycleLabel(cycle: CourierSettlementCycle) {
+    return cycle === "instant"
+      ? c.instant
+      : cycle === "daily"
+        ? c.daily
+        : cycle === "weekly"
+          ? c.weekly
+          : c.monthly;
+  }
+
+  function setRate(areaId: string, statusId: string, rawValue: string) {
+    if (!selected) return;
+    const value = rawValue === "" ? null : Math.max(0, Number(rawValue));
+    onPlansChange((current) =>
+      current.map((plan) =>
+        plan.id === selected.id
+          ? {
+              ...plan,
+              rates: {
+                ...plan.rates,
+                [areaId]: {
+                  ...(plan.rates[areaId] ?? {}),
+                  [statusId]: Number.isNaN(value) ? null : value,
+                },
+              },
+            }
+          : plan,
+      ),
+    );
+    setDirtyPlans((current) =>
+      current.includes(selected.id) ? current : [...current, selected.id],
+    );
+  }
+
+  function saveRates() {
+    if (!selected) return;
+    onPlansChange((current) =>
+      current.map((plan) =>
+        plan.id === selected.id
+          ? { ...plan, version: plan.version + 1 }
+          : plan,
+      ),
+    );
+    setDirtyPlans((current) => current.filter((id) => id !== selected.id));
+    setToast(c.savedRates);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  function openNew() {
+    const rates: PriceMatrix = {};
+    areasWithGovernorates.forEach(({ area }) => {
+      rates[area.id] = Object.fromEntries(
+        courierStatuses.map((status) => [status.id, null]),
+      );
+    });
+    setIsNew(true);
+    setEditing({
+      id: `courier-plan-${Date.now()}`,
+      name: { ar: "", en: "" },
+      code: "",
+      state: "draft",
+      isDefault: false,
+      compensationType: "commission",
+      settlementCycle: "weekly",
+      fixedSalary: null,
+      couriers: [],
+      version: 1,
+      rates,
+    });
+  }
+
+  function savePlan(next: CourierRatePlan) {
+    onPlansChange((current) => {
+      const chosenCouriers = new Set(next.couriers.map((courier) => courier.en));
+      const exists = current.some((plan) => plan.id === next.id);
+      const prepared = current.map((plan) => ({
+        ...plan,
+        isDefault: next.isDefault ? false : plan.isDefault,
+        couriers:
+          plan.id === next.id
+            ? plan.couriers
+            : plan.couriers.filter(
+                (courier) => !chosenCouriers.has(courier.en),
+              ),
+      }));
+      if (exists) {
+        return prepared.map((plan) =>
+          plan.id === next.id
+            ? { ...next, version: plan.version + 1 }
+            : plan,
+        );
+      }
+      return [next, ...prepared];
+    });
+    setSelectedId(next.id);
+    setEditing(null);
+    setToast(isNew ? c.createdPlan : c.savedPlan);
+    setIsNew(false);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  const assignedCourierCount = new Set(
+    plans.flatMap((plan) => plan.couriers.map((courier) => courier.en)),
+  ).size;
+  const selectedCompletion = selected
+    ? planCompletion(selected)
+    : { filled: 0, total: 0, percent: 0 };
+  const selectedDirty = selected ? dirtyPlans.includes(selected.id) : false;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="courierRates"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><Truck size={20} /></span>
+            <span>
+              <strong>{t.workspace}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button
+              className="square-button notification-button"
+              type="button"
+              aria-label={t.notifications}
+            >
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content courier-rates-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{c.title}</h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>{c.subtitle}</p>
+            </div>
+            <button className="primary-button" type="button" onClick={openNew}>
+              <Plus size={18} />
+              {c.add}
+            </button>
+          </div>
+
+          <section className="status-summary-grid">
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue">
+                <Truck size={18} />
+              </span>
+              <div><small>{c.activePlans}</small><strong>{plans.filter((plan) => plan.state === "active").length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--green">
+                <UserRound size={18} />
+              </span>
+              <div><small>{c.assignedCouriers}</small><strong>{assignedCourierCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange">
+                <HandCoins size={18} />
+              </span>
+              <div><small>{c.commissionPlans}</small><strong>{plans.filter((plan) => plan.compensationType !== "salary").length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--gray">
+                <CalendarDays size={18} />
+              </span>
+              <div><small>{c.salaryPlans}</small><strong>{plans.filter((plan) => plan.compensationType !== "commission").length}</strong></div>
+            </article>
+          </section>
+
+          <div className="status-control-note courier-control-note">
+            <GitBranch size={18} />
+            <span>{c.controlNote}</span>
+          </div>
+
+          <section className="pricing-layout courier-rate-layout">
+            <aside className="price-lists-panel">
+              <div className="geo-panel-heading">
+                <span>
+                  <strong>{c.plans}</strong>
+                  <small>{plans.length}</small>
+                </span>
+                <button
+                  className="status-edit-button"
+                  type="button"
+                  title={c.add}
+                  onClick={openNew}
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+              <label className="shipment-search price-list-search">
+                <Search size={15} />
+                <input
+                  value={planSearch}
+                  onChange={(event) => setPlanSearch(event.target.value)}
+                  placeholder={c.searchPlans}
+                />
+                {planSearch && (
+                  <button type="button" onClick={() => setPlanSearch("")} aria-label={t.clear}>
+                    <X size={15} />
+                  </button>
+                )}
+              </label>
+              <div className="price-list-items">
+                {filteredPlans.map((plan) => {
+                  const completion = planCompletion(plan);
+                  return (
+                    <button
+                      className={`price-list-item courier-plan-item ${
+                        plan.id === selected?.id ? "price-list-item--active" : ""
+                      }`}
+                      type="button"
+                      key={plan.id}
+                      onClick={() => setSelectedId(plan.id)}
+                    >
+                      <span className="price-list-item__top">
+                        <span>
+                          <strong>{plan.name[lang]}</strong>
+                          <small dir="ltr">{plan.code}</small>
+                        </span>
+                        {dirtyPlans.includes(plan.id) && (
+                          <i className="price-dirty-dot" title={c.unsaved} />
+                        )}
+                      </span>
+                      <span className="price-list-item__badges">
+                        {plan.isDefault && <em>{c.defaultBadge}</em>}
+                        <em
+                          className={
+                            plan.state === "active"
+                              ? "price-list-state price-list-state--active"
+                              : "price-list-state"
+                          }
+                        >
+                          {plan.state === "active" ? c.activeBadge : c.draftBadge}
+                        </em>
+                        <em className="courier-pay-type">
+                          {compensationLabel(plan.compensationType)}
+                        </em>
+                      </span>
+                      <span className="price-list-item__meta">
+                        <small>
+                          {plan.couriers.length || c.noCourier}{" "}
+                          {plan.couriers.length
+                            ? plan.couriers.length === 1
+                              ? c.courier
+                              : c.couriers
+                            : ""}
+                        </small>
+                        <small>{cycleLabel(plan.settlementCycle)}</small>
+                      </span>
+                      <span className="price-list-progress">
+                        <b style={{ width: `${completion.percent}%` }} />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            <div className="pricing-workspace">
+              {selected && (
+                <>
+                  <div className="pricing-workspace__heading">
+                    <div>
+                      <span className="courier-workspace-icon"><Truck size={19} /></span>
+                      <span>
+                        <small>{c.planFor}</small>
+                        <strong>{selected.name[lang]}</strong>
+                      </span>
+                      <em
+                        className={
+                          selected.state === "active"
+                            ? "policy-state policy-state--published"
+                            : "policy-state policy-state--draft"
+                        }
+                      >
+                        {selected.state === "active" ? c.activeBadge : c.draftBadge}
+                      </em>
+                    </div>
+                    <div>
+                      {selectedDirty && (
+                        <span className="unsaved-chip">
+                          <CircleAlert size={14} />
+                          {c.unsaved}
+                        </span>
+                      )}
+                      <button
+                        className="secondary-button pricing-settings-button"
+                        type="button"
+                        onClick={() => {
+                          setIsNew(false);
+                          setEditing(selected);
+                        }}
+                      >
+                        <Settings2 size={15} />
+                        {c.settings}
+                      </button>
+                      {selected.compensationType !== "salary" && (
+                        <button
+                          className="primary-button"
+                          type="button"
+                          disabled={!selectedDirty}
+                          onClick={saveRates}
+                        >
+                          <Check size={16} />
+                          {c.saveRates}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="courier-plan-facts">
+                    <span>
+                      <HandCoins size={15} />
+                      <small>{c.compensationType}</small>
+                      <strong>{compensationLabel(selected.compensationType)}</strong>
+                    </span>
+                    <span>
+                      <CalendarDays size={15} />
+                      <small>{c.settlementCycle}</small>
+                      <strong>{cycleLabel(selected.settlementCycle)}</strong>
+                    </span>
+                    {selected.compensationType !== "commission" && (
+                      <span>
+                        <HandCoins size={15} />
+                        <small>{c.monthlySalary}</small>
+                        <strong>{selected.fixedSalary?.toLocaleString(lang === "ar" ? "ar-EG" : "en-US")} {c.priceCurrency}</strong>
+                      </span>
+                    )}
+                  </div>
+
+                  {selected.compensationType === "salary" ? (
+                    <div className="courier-salary-panel">
+                      <span><CalendarDays size={26} /></span>
+                      <div>
+                        <small>{c.salaryOnlyTitle}</small>
+                        <strong>
+                          {selected.fixedSalary?.toLocaleString(
+                            lang === "ar" ? "ar-EG" : "en-US",
+                          )}{" "}
+                          {c.priceCurrency}
+                        </strong>
+                        <p>{c.salaryOnlyHint}</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="pricing-status-strip">
+                        <div>
+                          <strong>{c.linkedStatuses}</strong>
+                          <small>{c.linkedStatusesHint}</small>
+                        </div>
+                        <div>
+                          {courierStatuses.map((status) => (
+                            <span key={status.id}>
+                              <i style={{ backgroundColor: status.color }} />
+                              {status.name[lang]}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="pricing-toolbar">
+                        <label className="shipment-search">
+                          <Search size={18} />
+                          <input
+                            value={areaSearch}
+                            onChange={(event) => setAreaSearch(event.target.value)}
+                            placeholder={c.searchArea}
+                          />
+                          {areaSearch && (
+                            <button type="button" onClick={() => setAreaSearch("")} aria-label={t.clear}>
+                              <X size={16} />
+                            </button>
+                          )}
+                        </label>
+                        <label className="select-wrap status-filter">
+                          <select
+                            value={governorateFilter}
+                            onChange={(event) =>
+                              setGovernorateFilter(event.target.value)
+                            }
+                          >
+                            <option value="all">{c.allGovernorates}</option>
+                            {governorates.map((governorate) => (
+                              <option key={governorate.id} value={governorate.id}>
+                                {governorate.name[lang]}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={15} />
+                        </label>
+                      </div>
+
+                      <div
+                        className="pricing-matrix courier-rate-matrix"
+                        style={
+                          {
+                            "--pricing-column-count": Math.max(
+                              courierStatuses.length,
+                              1,
+                            ),
+                          } as CSSProperties
+                        }
+                      >
+                        <div className="pricing-matrix__head">
+                          <span>{c.area}</span>
+                          {courierStatuses.map((status) => (
+                            <span key={status.id}>
+                              <i style={{ backgroundColor: status.color }} />
+                              {status.name[lang]}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="pricing-matrix__body">
+                          {filteredAreas.map(({ area, governorate }) => (
+                            <article className="pricing-row" key={area.id}>
+                              <div className="pricing-area">
+                                <span className="geo-area-pin"><MapPin size={15} /></span>
+                                <span>
+                                  <strong>{area.name[lang]}</strong>
+                                  <small>{governorate.name[lang]}</small>
+                                </span>
+                                {area.state === "paused" && <em>{c.stoppedArea}</em>}
+                              </div>
+                              {courierStatuses.map((status) => {
+                                const value = selected.rates[area.id]?.[status.id];
+                                return (
+                                  <label
+                                    className={`price-cell ${value == null ? "price-cell--missing" : ""}`}
+                                    key={status.id}
+                                  >
+                                    <span className="price-cell__mobile-label">
+                                      <i style={{ backgroundColor: status.color }} />
+                                      {status.name[lang]}
+                                    </span>
+                                    <span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        inputMode="decimal"
+                                        value={value ?? ""}
+                                        placeholder={c.missing}
+                                        onChange={(event) =>
+                                          setRate(
+                                            area.id,
+                                            status.id,
+                                            event.target.value,
+                                          )
+                                        }
+                                        aria-label={`${area.name[lang]} - ${status.name[lang]}`}
+                                      />
+                                      <small>{c.priceCurrency}</small>
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </article>
+                          ))}
+                          {filteredAreas.length === 0 && (
+                            <div className="status-empty">
+                              <Search size={22} />
+                              <span>{c.noAreas}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pricing-footer">
+                        <span>
+                          <ShieldCheck size={16} />
+                          {c.snapshotHint}
+                        </span>
+                        <strong>{selectedCompletion.filled}/{selectedCompletion.total}</strong>
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editing && (
+        <CourierPlanEditor
+          key={editing.id}
+          plan={editing}
+          isNew={isNew}
+          lang={lang}
+          onClose={() => {
+            setEditing(null);
+            setIsNew(false);
+          }}
+          onSave={savePlan}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ShipmentsScreen({
   lang,
   theme,
@@ -5131,6 +6388,9 @@ export default function Home() {
   const [sharedStatuses, setSharedStatuses] = useState(statusPolicies);
   const [sharedGovernorates, setSharedGovernorates] = useState(governoratesData);
   const [sharedPriceLists, setSharedPriceLists] = useState(priceListsData);
+  const [sharedCourierPlans, setSharedCourierPlans] = useState(
+    courierRatePlansData,
+  );
   const [controlCenterReady, setControlCenterReady] = useState(false);
 
   useEffect(() => {
@@ -5146,12 +6406,24 @@ export default function Home() {
           statuses?: StatusPolicy[];
           governorates?: GovernorateRecord[];
           priceLists?: PriceListRecord[];
+          courierPlans?: CourierRatePlan[];
         };
-        if (Array.isArray(parsed.statuses)) setSharedStatuses(parsed.statuses);
+        if (Array.isArray(parsed.statuses)) {
+          setSharedStatuses(
+            parsed.statuses.map((status) => ({
+              ...status,
+              appearsInCourierRates:
+                status.appearsInCourierRates ?? status.appearsInPricing,
+            })),
+          );
+        }
         if (Array.isArray(parsed.governorates)) {
           setSharedGovernorates(parsed.governorates);
         }
         if (Array.isArray(parsed.priceLists)) setSharedPriceLists(parsed.priceLists);
+        if (Array.isArray(parsed.courierPlans)) {
+          setSharedCourierPlans(parsed.courierPlans);
+        }
       }
     } catch {
       window.localStorage.removeItem("tasleem-control-center-v2");
@@ -5210,6 +6482,56 @@ export default function Home() {
   }, [sharedGovernorates, sharedStatuses]);
 
   useEffect(() => {
+    const courierStatusIds = sharedStatuses
+      .filter(
+        (status) =>
+          status.state === "published" && status.appearsInCourierRates,
+      )
+      .map((status) => status.id);
+    const areaIds = sharedGovernorates.flatMap((governorate) =>
+      governorate.areas.map((area) => area.id),
+    );
+
+    setSharedCourierPlans((current) => {
+      let anyPlanChanged = false;
+      const next = current.map((plan) => {
+        let nextRates = plan.rates;
+        let planChanged = false;
+
+        areaIds.forEach((areaId) => {
+          const currentArea = nextRates[areaId];
+          if (!currentArea) {
+            if (!planChanged) nextRates = { ...nextRates };
+            nextRates[areaId] = Object.fromEntries(
+              courierStatusIds.map((statusId) => [statusId, null]),
+            );
+            planChanged = true;
+            return;
+          }
+
+          const missingStatuses = courierStatusIds.filter(
+            (statusId) => !(statusId in currentArea),
+          );
+          if (missingStatuses.length) {
+            if (!planChanged) nextRates = { ...nextRates };
+            nextRates[areaId] = { ...currentArea };
+            missingStatuses.forEach((statusId) => {
+              nextRates[areaId][statusId] = null;
+            });
+            planChanged = true;
+          }
+        });
+
+        if (!planChanged) return plan;
+        anyPlanChanged = true;
+        return { ...plan, rates: nextRates };
+      });
+
+      return anyPlanChanged ? next : current;
+    });
+  }, [sharedGovernorates, sharedStatuses]);
+
+  useEffect(() => {
     if (!controlCenterReady) return;
     window.localStorage.setItem(
       "tasleem-control-center-v2",
@@ -5217,11 +6539,13 @@ export default function Home() {
         statuses: sharedStatuses,
         governorates: sharedGovernorates,
         priceLists: sharedPriceLists,
+        courierPlans: sharedCourierPlans,
       }),
     );
   }, [
     controlCenterReady,
     sharedGovernorates,
+    sharedCourierPlans,
     sharedPriceLists,
     sharedStatuses,
   ]);
@@ -5277,7 +6601,7 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
-      ) : (
+      ) : screen === "priceLists" ? (
         <PriceListsScreen
           lang={lang}
           theme={theme}
@@ -5289,6 +6613,21 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onPriceListsChange={setSharedPriceLists}
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : (
+        <CourierRatesScreen
+          lang={lang}
+          theme={theme}
+          plans={sharedCourierPlans}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onPlansChange={setSharedCourierPlans}
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
