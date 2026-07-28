@@ -65,7 +65,8 @@ type Screen =
   | "priceLists"
   | "courierRates"
   | "shipmentPolicies"
-  | "addShipment";
+  | "addShipment"
+  | "confirmation";
 type Scenario =
   | "ready"
   | "loading"
@@ -99,6 +100,14 @@ type Shipment = {
   requiredType: "none" | "attention" | "incomplete";
   lastEvent: Localized;
   confirmation: Localized;
+  confirmationCode?: "confirmed" | "no_answer" | "later" | "not_recorded";
+  confirmationHistory?: {
+    id: string;
+    result: "confirmed" | "no_answer" | "later";
+    note: string;
+    nextContact: string;
+    timestamp: Localized;
+  }[];
   pieces: number;
   shippingFee: number;
   shippingPayer: "recipient" | "sender";
@@ -2447,7 +2456,11 @@ function Sidebar({
       label: t.operations,
       items: [
         { label: t.shipments, icon: Boxes, screen: "shipments" as const },
-        { label: t.confirmation, icon: ClipboardCheck },
+        {
+          label: t.confirmation,
+          icon: ClipboardCheck,
+          screen: "confirmation" as const,
+        },
         { label: t.assignment, icon: Truck },
         { label: t.warehouse, icon: Warehouse },
       ],
@@ -7103,6 +7116,752 @@ function makeShipmentEntryDraft(
   };
 }
 
+type ConfirmationFilter =
+  | "all"
+  | "pending"
+  | "confirmed"
+  | "no_answer"
+  | "later";
+
+function getShipmentConfirmationCode(
+  shipment: Shipment,
+): "confirmed" | "no_answer" | "later" | "not_recorded" {
+  if (shipment.confirmationCode) return shipment.confirmationCode;
+  if (
+    shipment.confirmation.ar.includes("تم التأكيد") ||
+    shipment.confirmation.en.toLowerCase().includes("confirmed")
+  ) {
+    return "confirmed";
+  }
+  if (
+    shipment.confirmation.ar.includes("لم يرد") ||
+    shipment.confirmation.en.toLowerCase().includes("no answer")
+  ) {
+    return "no_answer";
+  }
+  if (
+    shipment.confirmation.ar.includes("تواصل") ||
+    shipment.confirmation.en.toLowerCase().includes("later")
+  ) {
+    return "later";
+  }
+  return "not_recorded";
+}
+
+function ConfirmationScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  settings,
+  onShipmentsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  settings: ShipmentDataSettings;
+  onShipmentsChange: (records: Shipment[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<ConfirmationFilter>("pending");
+  const initialShipment =
+    shipmentRecords.find(
+      (shipment) => getShipmentConfirmationCode(shipment) !== "confirmed",
+    ) ?? shipmentRecords[0];
+  const [selectedId, setSelectedId] = useState(initialShipment?.id ?? "");
+  const [result, setResult] = useState<
+    "confirmed" | "no_answer" | "later" | ""
+  >("");
+  const [note, setNote] = useState("");
+  const [nextContact, setNextContact] = useState("");
+  const [toast, setToast] = useState("");
+
+  const selectedShipment =
+    shipmentRecords.find((shipment) => shipment.id === selectedId) ??
+    shipmentRecords[0];
+  const normalized = search.trim().toLowerCase();
+  const filteredRecords = shipmentRecords.filter((shipment) => {
+    const code = getShipmentConfirmationCode(shipment);
+    const matchesFilter =
+      filter === "all" ||
+      (filter === "pending" && code === "not_recorded") ||
+      code === filter;
+    const matchesSearch =
+      !normalized ||
+      [
+        shipment.id,
+        shipment.reference,
+        shipment.phone,
+        shipment.recipient.ar,
+        shipment.recipient.en,
+        shipment.sender.ar,
+        shipment.sender.en,
+      ].some((value) => value.toLowerCase().includes(normalized));
+    return matchesFilter && matchesSearch;
+  });
+  const counts = shipmentRecords.reduce(
+    (totals, shipment) => {
+      const code = getShipmentConfirmationCode(shipment);
+      totals[code] += 1;
+      return totals;
+    },
+    { confirmed: 0, no_answer: 0, later: 0, not_recorded: 0 },
+  );
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const filterItems: {
+    id: ConfirmationFilter;
+    label: Localized;
+    count: number;
+  }[] = [
+    {
+      id: "pending",
+      label: { ar: "بانتظار التواصل", en: "Awaiting contact" },
+      count: counts.not_recorded,
+    },
+    {
+      id: "no_answer",
+      label: { ar: "لم يرد", en: "No answer" },
+      count: counts.no_answer,
+    },
+    {
+      id: "later",
+      label: { ar: "تواصل لاحقًا", en: "Contact later" },
+      count: counts.later,
+    },
+    {
+      id: "confirmed",
+      label: { ar: "تم التأكيد", en: "Confirmed" },
+      count: counts.confirmed,
+    },
+    {
+      id: "all",
+      label: { ar: "كل الشحنات", en: "All shipments" },
+      count: shipmentRecords.length,
+    },
+  ];
+
+  function confirmationLabel(code: ReturnType<typeof getShipmentConfirmationCode>) {
+    if (code === "confirmed") {
+      return lang === "ar" ? "تم التأكيد" : "Confirmed";
+    }
+    if (code === "no_answer") return lang === "ar" ? "لم يرد" : "No answer";
+    if (code === "later") {
+      return lang === "ar" ? "تواصل لاحقًا" : "Contact later";
+    }
+    return lang === "ar" ? "لم يُسجل" : "Not recorded";
+  }
+
+  function selectShipment(shipment: Shipment) {
+    setSelectedId(shipment.id);
+    const code = getShipmentConfirmationCode(shipment);
+    setResult(code === "not_recorded" ? "" : code);
+    setNote("");
+    setNextContact("");
+  }
+
+  function saveConfirmation() {
+    if (!selectedShipment || !result) return;
+    if (result === "later" && !nextContact) {
+      setToast(
+        lang === "ar"
+          ? "حدد موعد التواصل التالي أولًا"
+          : "Set the next contact time first",
+      );
+      window.setTimeout(() => setToast(""), 2600);
+      return;
+    }
+    const now = new Date();
+    const timeAr = now.toLocaleString("ar-EG", {
+      day: "numeric",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const timeEn = now.toLocaleString("en-EG", {
+      day: "numeric",
+      month: "short",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    const nextRecords = shipmentRecords.map((shipment) => {
+      if (shipment.id !== selectedShipment.id) return shipment;
+      const confirmed = result === "confirmed";
+      const confirmation: Localized =
+        result === "confirmed"
+          ? { ar: "تم التأكيد", en: "Confirmed" }
+          : result === "no_answer"
+            ? { ar: "لم يرد", en: "No answer" }
+            : { ar: "تواصل لاحقًا", en: "Contact later" };
+      const confirmationWasRequired =
+        shipment.required.ar.includes("تأكيد") ||
+        shipment.required.en.toLowerCase().includes("confirm");
+      const needsRequiredConfirmation =
+        settings.confirmationMode === "required_before_assignment" && !confirmed;
+      return {
+        ...shipment,
+        confirmation,
+        confirmationCode: result,
+        confirmationHistory: [
+          {
+            id: `confirmation-${Date.now()}`,
+            result,
+            note,
+            nextContact,
+            timestamp: { ar: timeAr, en: timeEn },
+          },
+          ...(shipment.confirmationHistory ?? []),
+        ],
+        required:
+          confirmed && confirmationWasRequired
+            ? { ar: "لا يوجد", en: "None" }
+            : needsRequiredConfirmation && shipment.requiredType === "none"
+              ? { ar: "تأكيد الطلب", en: "Confirm order" }
+              : shipment.required,
+        requiredType:
+          confirmed && confirmationWasRequired
+            ? "none"
+            : needsRequiredConfirmation && shipment.requiredType === "none"
+              ? "incomplete"
+              : shipment.requiredType,
+        lastEvent: {
+          ar:
+            result === "confirmed"
+              ? "سُجّل تأكيد الطلب الآن"
+              : result === "no_answer"
+                ? "سُجّلت محاولة تواصل دون رد الآن"
+                : "تم تحديد تواصل لاحق الآن",
+          en:
+            result === "confirmed"
+              ? "Order confirmation recorded just now"
+              : result === "no_answer"
+                ? "No-answer attempt recorded just now"
+                : "Follow-up contact scheduled just now",
+        },
+      };
+    });
+    onShipmentsChange(nextRecords);
+    setToast(
+      lang === "ar"
+        ? "تم تسجيل نتيجة التواصل بدون تغيير حالة الشحنة"
+        : "Contact result saved without changing shipment status",
+    );
+    setNote("");
+    setNextContact("");
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="confirmation"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <ClipboardCheck size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar" ? "التأكيد والمتابعة" : "Confirmation & follow-up"}
+              </strong>
+              <small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content confirmation-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar" ? "التأكيد والمتابعة" : "Confirmation & follow-up"}
+                </h1>
+                <span className="demo-chip">
+                  {settings.confirmationMode === "required_before_assignment"
+                    ? lang === "ar"
+                      ? "مطلوب قبل الإسناد"
+                      : "Required before assignment"
+                    : settings.confirmationMode === "optional"
+                      ? lang === "ar"
+                        ? "اختياري"
+                        : "Optional"
+                      : lang === "ar"
+                        ? "غير مستخدم"
+                        : "Not used"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "سجّل نتيجة التواصل وجدول المحاولة التالية دون خلطها بحالة الشحنة."
+                  : "Record contact results and next attempts without mixing them with shipment status."}
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("shipmentPolicies")}
+            >
+              <SlidersHorizontal size={17} />
+              {lang === "ar" ? "سياسة التأكيد" : "Confirmation policy"}
+            </button>
+          </div>
+
+          {settings.confirmationMode === "off" ? (
+            <section className="confirmation-disabled">
+              <span>
+                <ClipboardCheck size={29} />
+              </span>
+              <div>
+                <h2>
+                  {lang === "ar"
+                    ? "التأكيد غير مستخدم في سياسة الشركة"
+                    : "Confirmation is disabled by company policy"}
+                </h2>
+                <p>
+                  {lang === "ar"
+                    ? "الشحنات تستمر في التشغيل والإسناد دون انتظار اتصال مسبق. يمكنك تفعيله كاختياري أو إلزامي من السياسات."
+                    : "Shipments continue to operations and assignment without a prior call. Enable it as optional or required from policies."}
+                </p>
+              </div>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => onNavigate("shipmentPolicies")}
+              >
+                {lang === "ar" ? "فتح السياسات" : "Open policies"}
+              </button>
+            </section>
+          ) : (
+            <>
+              <section className="confirmation-metrics">
+                <article className="confirmation-metric confirmation-metric--attention">
+                  <span><Phone size={18} /></span>
+                  <div>
+                    <small>{lang === "ar" ? "بانتظار التواصل" : "Awaiting contact"}</small>
+                    <strong>{counts.not_recorded}</strong>
+                  </div>
+                  <em>{lang === "ar" ? "الأولوية الآن" : "Current priority"}</em>
+                </article>
+                <article className="confirmation-metric confirmation-metric--success">
+                  <span><Check size={18} /></span>
+                  <div>
+                    <small>{lang === "ar" ? "تم التأكيد" : "Confirmed"}</small>
+                    <strong>{counts.confirmed}</strong>
+                  </div>
+                  <em>{lang === "ar" ? "جاهزة وفق السياسة" : "Policy-ready"}</em>
+                </article>
+                <article className="confirmation-metric">
+                  <span><CircleAlert size={18} /></span>
+                  <div>
+                    <small>{lang === "ar" ? "لم يرد" : "No answer"}</small>
+                    <strong>{counts.no_answer}</strong>
+                  </div>
+                  <em>{lang === "ar" ? "تحتاج محاولة" : "Needs retry"}</em>
+                </article>
+                <article className="confirmation-metric">
+                  <span><Clock3 size={18} /></span>
+                  <div>
+                    <small>{lang === "ar" ? "تواصل لاحقًا" : "Contact later"}</small>
+                    <strong>{counts.later}</strong>
+                  </div>
+                  <em>{lang === "ar" ? "مواعيد متابعة" : "Scheduled follow-up"}</em>
+                </article>
+              </section>
+
+              <section className="confirmation-principle">
+                <ShieldCheck size={18} />
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "نتيجة التواصل ليست حالة شحنة"
+                      : "A contact result is not a shipment status"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "لن تتغير الحالة التشغيلية أو آثارها المالية عند تسجيل أي نتيجة هنا."
+                      : "Operational status and financial effects never change when a result is recorded here."}
+                  </small>
+                </span>
+              </section>
+
+              <div className="confirmation-workspace">
+                <section className="confirmation-list-card">
+                  <div className="confirmation-list-tools">
+                    <label>
+                      <Search size={17} />
+                      <input
+                        value={search}
+                        onChange={(event) => setSearch(event.target.value)}
+                        placeholder={
+                          lang === "ar"
+                            ? "رقم الشحنة، الهاتف، المستلم أو الراسل..."
+                            : "Shipment, phone, recipient or sender..."
+                        }
+                      />
+                      {search && (
+                        <button type="button" onClick={() => setSearch("")}>
+                          <X size={15} />
+                        </button>
+                      )}
+                    </label>
+                    <span>
+                      {filteredRecords.length} {lang === "ar" ? "شحنة" : "shipments"}
+                    </span>
+                  </div>
+                  <div className="confirmation-tabs">
+                    {filterItems.map((item) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        className={filter === item.id ? "active" : ""}
+                        onClick={() => setFilter(item.id)}
+                      >
+                        {item.label[lang]}
+                        <span>{item.count}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="confirmation-records">
+                    {filteredRecords.map((shipment) => {
+                      const code = getShipmentConfirmationCode(shipment);
+                      const total =
+                        shipment.amount +
+                        (shipment.shippingPayer === "recipient"
+                          ? shipment.shippingFee
+                          : 0);
+                      return (
+                        <button
+                          className={`confirmation-record ${
+                            selectedShipment?.id === shipment.id
+                              ? "confirmation-record--selected"
+                              : ""
+                          }`}
+                          type="button"
+                          key={shipment.id}
+                          onClick={() => selectShipment(shipment)}
+                        >
+                          <span className="confirmation-record__identity">
+                            <strong>{shipment.id}</strong>
+                            <small>{shipment.reference}</small>
+                          </span>
+                          <span className="confirmation-record__recipient">
+                            <span className="mini-avatar">
+                              {shipment.recipient[lang].slice(0, 1)}
+                            </span>
+                            <span>
+                              <strong>{shipment.recipient[lang]}</strong>
+                              <small dir="ltr">{shipment.phone}</small>
+                            </span>
+                          </span>
+                          <span className="confirmation-record__route">
+                            <strong>{shipment.area[lang]}</strong>
+                            <small>{shipment.sender[lang]}</small>
+                          </span>
+                          <span className="confirmation-record__amount">
+                            <strong>{money.format(total)}</strong>
+                            <small>
+                              {shipment.pieces} {lang === "ar" ? "قطعة" : "pcs"}
+                            </small>
+                          </span>
+                          <span className={`confirmation-state confirmation-state--${code}`}>
+                            {confirmationLabel(code)}
+                          </span>
+                          <span className="confirmation-record__attempts">
+                            {(shipment.confirmationHistory ?? []).length}
+                            <small>{lang === "ar" ? "محاولة" : "attempts"}</small>
+                          </span>
+                          {lang === "ar" ? (
+                            <ChevronLeft size={17} />
+                          ) : (
+                            <ChevronRight size={17} />
+                          )}
+                        </button>
+                      );
+                    })}
+                    {filteredRecords.length === 0 && (
+                      <div className="confirmation-empty">
+                        <Search size={25} />
+                        <strong>
+                          {lang === "ar"
+                            ? "لا توجد شحنات تطابق العرض الحالي"
+                            : "No shipments match this view"}
+                        </strong>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSearch("");
+                            setFilter("all");
+                          }}
+                        >
+                          {lang === "ar" ? "عرض الكل" : "Show all"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                {selectedShipment && (
+                  <aside className="confirmation-action-card">
+                    <div className="confirmation-action__heading">
+                      <div>
+                        <span className="mini-avatar">
+                          {selectedShipment.recipient[lang].slice(0, 1)}
+                        </span>
+                        <span>
+                          <strong>{selectedShipment.recipient[lang]}</strong>
+                          <small>
+                            {selectedShipment.id} · {selectedShipment.sender[lang]}
+                          </small>
+                        </span>
+                      </div>
+                      <span
+                        className={`confirmation-state confirmation-state--${getShipmentConfirmationCode(
+                          selectedShipment,
+                        )}`}
+                      >
+                        {confirmationLabel(
+                          getShipmentConfirmationCode(selectedShipment),
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="confirmation-contact">
+                      <a href={`tel:${selectedShipment.phone}`} dir="ltr">
+                        <Phone size={17} />
+                        {selectedShipment.phone}
+                      </a>
+                      <span>
+                        <MapPin size={16} />
+                        {selectedShipment.area[lang]}،{" "}
+                        {selectedShipment.governorate[lang]}
+                      </span>
+                      <span>
+                        <Boxes size={16} />
+                        {selectedShipment.pieces}{" "}
+                        {lang === "ar" ? "قطعة داخل الطرد" : "pieces in parcel"}
+                      </span>
+                    </div>
+
+                    <div className="confirmation-status-lock">
+                      <span
+                        className={`status-badge status-badge--${selectedShipment.statusTone}`}
+                      >
+                        {selectedShipment.status[lang]}
+                      </span>
+                      <small>
+                        <LockKeyhole size={13} />
+                        {lang === "ar"
+                          ? "الحالة لن تتغير من هذه الصفحة"
+                          : "Status cannot change from this page"}
+                      </small>
+                    </div>
+
+                    <div className="confirmation-result-section">
+                      <strong>
+                        {lang === "ar" ? "نتيجة التواصل" : "Contact result"}
+                      </strong>
+                      <div className="confirmation-result-options">
+                        <button
+                          type="button"
+                          className={result === "confirmed" ? "active active--green" : ""}
+                          onClick={() => setResult("confirmed")}
+                        >
+                          <Check size={18} />
+                          <span>
+                            <strong>{lang === "ar" ? "تم التأكيد" : "Confirmed"}</strong>
+                            <small>
+                              {lang === "ar"
+                                ? "المستلم أكد الطلب"
+                                : "Recipient confirmed order"}
+                            </small>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={result === "no_answer" ? "active active--orange" : ""}
+                          onClick={() => setResult("no_answer")}
+                        >
+                          <Phone size={18} />
+                          <span>
+                            <strong>{lang === "ar" ? "لم يرد" : "No answer"}</strong>
+                            <small>
+                              {lang === "ar"
+                                ? "تُسجل كمحاولة"
+                                : "Recorded as an attempt"}
+                            </small>
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={result === "later" ? "active active--blue" : ""}
+                          onClick={() => setResult("later")}
+                        >
+                          <Clock3 size={18} />
+                          <span>
+                            <strong>
+                              {lang === "ar" ? "تواصل لاحقًا" : "Contact later"}
+                            </strong>
+                            <small>
+                              {lang === "ar"
+                                ? "حدد الموعد التالي"
+                                : "Schedule next contact"}
+                            </small>
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {result === "later" && (
+                      <label className="confirmation-followup-field">
+                        <span>
+                          {lang === "ar"
+                            ? "موعد التواصل التالي"
+                            : "Next contact time"}
+                          <em>*</em>
+                        </span>
+                        <span>
+                          <CalendarDays size={16} />
+                          <input
+                            type="datetime-local"
+                            value={nextContact}
+                            onChange={(event) => setNextContact(event.target.value)}
+                          />
+                        </span>
+                      </label>
+                    )}
+
+                    <label className="confirmation-note">
+                      <span>{lang === "ar" ? "ملاحظة المحاولة" : "Attempt note"}</span>
+                      <textarea
+                        value={note}
+                        onChange={(event) => setNote(event.target.value)}
+                        placeholder={
+                          lang === "ar"
+                            ? "اكتب المعلومة التي يحتاجها الموظف في المحاولة التالية..."
+                            : "Add context for the next employee or attempt..."
+                        }
+                      />
+                    </label>
+
+                    <button
+                      className="primary-button confirmation-save"
+                      type="button"
+                      disabled={!result}
+                      onClick={saveConfirmation}
+                    >
+                      <Save size={17} />
+                      {lang === "ar" ? "تسجيل نتيجة التواصل" : "Save contact result"}
+                    </button>
+
+                    <div className="confirmation-history">
+                      <div>
+                        <strong>{lang === "ar" ? "سجل المحاولات" : "Attempt history"}</strong>
+                        <span>{(selectedShipment.confirmationHistory ?? []).length}</span>
+                      </div>
+                      {(selectedShipment.confirmationHistory ?? []).length ? (
+                        (selectedShipment.confirmationHistory ?? [])
+                          .slice(0, 4)
+                          .map((event) => (
+                            <article key={event.id}>
+                              <i className={`history-dot history-dot--${event.result}`} />
+                              <span>
+                                <strong>
+                                  {confirmationLabel(event.result)}
+                                </strong>
+                                <small>{event.timestamp[lang]}</small>
+                                {event.note && <p>{event.note}</p>}
+                                {event.nextContact && (
+                                  <em>
+                                    <CalendarDays size={12} />
+                                    {event.nextContact.replace("T", " · ")}
+                                  </em>
+                                )}
+                              </span>
+                            </article>
+                          ))
+                      ) : (
+                        <p className="confirmation-history__empty">
+                          {lang === "ar"
+                            ? "لا توجد محاولات مسجلة لهذه الشحنة."
+                            : "No contact attempts recorded for this shipment."}
+                        </p>
+                      )}
+                    </div>
+                  </aside>
+                )}
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AddShipmentScreen({
   lang,
   theme,
@@ -7307,6 +8066,14 @@ function AddShipmentScreen({
         return !String(value ?? "").trim();
       })
       .map((field) => field.name[lang]);
+    if (
+      settings.confirmationMode === "required_before_assignment" &&
+      draft.confirmation !== "confirmed"
+    ) {
+      incompleteFields.push(
+        lang === "ar" ? "تأكيد الطلب مع المستلم" : "Recipient order confirmation",
+      );
+    }
     return {
       ...draft,
       localId: `prepared-${Date.now()}-${prepared.length}`,
@@ -7406,6 +8173,8 @@ function AddShipmentScreen({
           en: "Added just now through manual entry",
         },
         confirmation: confirmationText,
+        confirmationCode: item.confirmation,
+        confirmationHistory: [],
         pieces: Math.max(1, Number(item.pieces) || 1),
         shippingFee: item.shippingFee,
         shippingPayer: item.shippingPayer,
@@ -9126,6 +9895,20 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "confirmation" ? (
+        <ConfirmationScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          settings={sharedShipmentSettings}
+          onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
