@@ -1,6 +1,12 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  FormEvent,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Bell,
   Boxes,
@@ -2591,15 +2597,21 @@ function StatusPolicyDrawer({
 function StatusesScreen({
   lang,
   theme,
+  policies,
   onLang,
   onTheme,
+  onPoliciesChange,
   onNavigate,
   onLogout,
 }: {
   lang: Lang;
   theme: Theme;
+  policies: StatusPolicy[];
   onLang: () => void;
   onTheme: () => void;
+  onPoliciesChange: (
+    updater: (current: StatusPolicy[]) => StatusPolicy[],
+  ) => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
   onLogout: () => void;
 }) {
@@ -2607,7 +2619,6 @@ function StatusesScreen({
   const s = statusCopy[lang];
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [policies, setPolicies] = useState(statusPolicies);
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
   const [pricingFilter, setPricingFilter] = useState("all");
@@ -2653,7 +2664,7 @@ function StatusesScreen({
   }
 
   function savePolicy(policy: StatusPolicy) {
-    setPolicies((current) =>
+    onPoliciesChange((current) =>
       current.some((item) => item.id === policy.id)
         ? current.map((item) =>
             item.id === policy.id ? { ...policy, version: item.version + 1 } : item,
@@ -3165,26 +3176,35 @@ function GeoEditorDrawer({
 function AreasScreen({
   lang,
   theme,
+  governorates,
+  priceLists,
+  policies,
   onLang,
   onTheme,
+  onGovernoratesChange,
   onNavigate,
   onLogout,
 }: {
   lang: Lang;
   theme: Theme;
+  governorates: GovernorateRecord[];
+  priceLists: PriceListRecord[];
+  policies: StatusPolicy[];
   onLang: () => void;
   onTheme: () => void;
+  onGovernoratesChange: (
+    updater: (current: GovernorateRecord[]) => GovernorateRecord[],
+  ) => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
   onLogout: () => void;
 }) {
   const t = copy[lang];
   const g = geoCopy[lang];
-  const priceListCount = 5;
+  const priceListCount = priceLists.length;
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [governorates, setGovernorates] = useState(governoratesData);
   const [selectedGovernorateId, setSelectedGovernorateId] = useState(
-    governoratesData[0].id,
+    governorates[0]?.id ?? "",
   );
   const [governorateSearch, setGovernorateSearch] = useState("");
   const [areaSearch, setAreaSearch] = useState("");
@@ -3193,6 +3213,9 @@ function AreasScreen({
   const [toast, setToast] = useState("");
 
   const allAreas = governorates.flatMap((governorate) => governorate.areas);
+  const pricingPolicyIds = policies
+    .filter((policy) => policy.state === "published" && policy.appearsInPricing)
+    .map((policy) => policy.id);
   const selectedGovernorate =
     governorates.find((governorate) => governorate.id === selectedGovernorateId) ??
     governorates[0];
@@ -3292,7 +3315,7 @@ function AreasScreen({
   function saveGeo(nextEditor: GeoEditorState) {
     const { draft } = nextEditor;
     if (nextEditor.kind === "governorate") {
-      setGovernorates((current) => {
+      onGovernoratesChange((current) => {
         const exists = current.some((item) => item.id === draft.id);
         if (exists) {
           return current.map((item) =>
@@ -3322,7 +3345,7 @@ function AreasScreen({
       if (nextEditor.isNew) setSelectedGovernorateId(draft.id);
       setToast(g.savedGovernorate);
     } else {
-      setGovernorates((current) =>
+      onGovernoratesChange((current) =>
         current.map((governorate) => {
           if (governorate.id !== nextEditor.governorateId) return governorate;
           const existing = governorate.areas.find((area) => area.id === draft.id);
@@ -3355,8 +3378,14 @@ function AreasScreen({
 
   const activeAreaCount = allAreas.filter((area) => area.state === "active").length;
   const pausedAreaCount = allAreas.length - activeAreaCount;
+  const completedListsForArea = (areaId: string) =>
+    priceLists.filter((priceList) =>
+      pricingPolicyIds.every(
+        (statusId) => priceList.prices[areaId]?.[statusId] != null,
+      ),
+    ).length;
   const pendingPriceCount = allAreas.filter(
-    (area) => area.pricedLists < priceListCount,
+    (area) => completedListsForArea(area.id) < priceListCount,
   ).length;
 
   return (
@@ -3607,7 +3636,9 @@ function AreasScreen({
                       <span />
                     </div>
                     <div className="geo-area-table__body">
-                      {filteredAreas.map((area) => (
+                      {filteredAreas.map((area) => {
+                        const completedLists = completedListsForArea(area.id);
+                        return (
                         <article className="geo-area-row" key={area.id}>
                           <div className="geo-area-identity">
                             <span className="geo-area-pin"><MapPin size={15} /></span>
@@ -3643,9 +3674,9 @@ function AreasScreen({
                           </div>
                           <div className="geo-pricing">
                             <span>
-                              <strong dir="ltr">{area.pricedLists}/{priceListCount}</strong>
+                              <strong dir="ltr">{completedLists}/{priceListCount}</strong>
                               <small>
-                                {area.pricedLists === priceListCount
+                                {completedLists === priceListCount
                                   ? g.readyPricing
                                   : g.pendingPricing}
                               </small>
@@ -3653,7 +3684,11 @@ function AreasScreen({
                             <i>
                               <b
                                 style={{
-                                  width: `${(area.pricedLists / priceListCount) * 100}%`,
+                                  width: `${
+                                    priceListCount
+                                      ? (completedLists / priceListCount) * 100
+                                      : 0
+                                  }%`,
                                 }}
                               />
                             </i>
@@ -3672,7 +3707,7 @@ function AreasScreen({
                             <Pencil size={16} />
                           </button>
                         </article>
-                      ))}
+                      )})}
                       {filteredAreas.length === 0 && (
                         <div className="status-empty">
                           <MapPin size={22} />
@@ -3927,15 +3962,25 @@ function PriceListEditor({
 function PriceListsScreen({
   lang,
   theme,
+  priceLists,
+  statuses,
+  governorates,
   onLang,
   onTheme,
+  onPriceListsChange,
   onNavigate,
   onLogout,
 }: {
   lang: Lang;
   theme: Theme;
+  priceLists: PriceListRecord[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
   onLang: () => void;
   onTheme: () => void;
+  onPriceListsChange: (
+    updater: (current: PriceListRecord[]) => PriceListRecord[],
+  ) => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
   onLogout: () => void;
 }) {
@@ -3943,8 +3988,7 @@ function PriceListsScreen({
   const p = priceListCopy[lang];
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [priceLists, setPriceLists] = useState(priceListsData);
-  const [selectedId, setSelectedId] = useState(priceListsData[0].id);
+  const [selectedId, setSelectedId] = useState(priceLists[0]?.id ?? "");
   const [listSearch, setListSearch] = useState("");
   const [areaSearch, setAreaSearch] = useState("");
   const [governorateFilter, setGovernorateFilter] = useState("all");
@@ -3953,10 +3997,10 @@ function PriceListsScreen({
   const [dirtyLists, setDirtyLists] = useState<string[]>([]);
   const [toast, setToast] = useState("");
 
-  const pricingStatuses = statusPolicies.filter((status) =>
-    pricedStatusIds.includes(status.id as (typeof pricedStatusIds)[number]),
+  const pricingStatuses = statuses.filter(
+    (status) => status.state === "published" && status.appearsInPricing,
   );
-  const areasWithGovernorates = governoratesData.flatMap((governorate) =>
+  const areasWithGovernorates = governorates.flatMap((governorate) =>
     governorate.areas.map((area) => ({ area, governorate })),
   );
   const selected =
@@ -4012,7 +4056,7 @@ function PriceListsScreen({
   function setPrice(areaId: string, statusId: string, rawValue: string) {
     if (!selected) return;
     const value = rawValue === "" ? null : Math.max(0, Number(rawValue));
-    setPriceLists((current) =>
+    onPriceListsChange((current) =>
       current.map((priceList) =>
         priceList.id === selected.id
           ? {
@@ -4035,7 +4079,7 @@ function PriceListsScreen({
 
   function savePrices() {
     if (!selected) return;
-    setPriceLists((current) =>
+    onPriceListsChange((current) =>
       current.map((priceList) =>
         priceList.id === selected.id
           ? { ...priceList, version: priceList.version + 1 }
@@ -4068,7 +4112,7 @@ function PriceListsScreen({
   }
 
   function saveList(next: PriceListRecord) {
-    setPriceLists((current) => {
+    onPriceListsChange((current) => {
       const selectedSenderNames = new Set(next.senders.map((sender) => sender.en));
       const exists = current.some((priceList) => priceList.id === next.id);
       const prepared = current.map((priceList) => ({
@@ -4381,7 +4425,7 @@ function PriceListsScreen({
                         onChange={(event) => setGovernorateFilter(event.target.value)}
                       >
                         <option value="all">{p.allGovernorates}</option>
-                        {governoratesData.map((governorate) => (
+                        {governorates.map((governorate) => (
                           <option key={governorate.id} value={governorate.id}>
                             {governorate.name[lang]}
                           </option>
@@ -4391,7 +4435,17 @@ function PriceListsScreen({
                     </label>
                   </div>
 
-                  <div className="pricing-matrix">
+                  <div
+                    className="pricing-matrix"
+                    style={
+                      {
+                        "--pricing-column-count": Math.max(
+                          pricingStatuses.length,
+                          1,
+                        ),
+                      } as CSSProperties
+                    }
+                  >
                     <div className="pricing-matrix__head">
                       <span>{p.area}</span>
                       {pricingStatuses.map((status) => (
@@ -5074,11 +5128,103 @@ export default function Home() {
   const [lang, setLang] = useState<Lang>("ar");
   const [theme, setTheme] = useState<Theme>("light");
   const [screen, setScreen] = useState<Screen>("login");
+  const [sharedStatuses, setSharedStatuses] = useState(statusPolicies);
+  const [sharedGovernorates, setSharedGovernorates] = useState(governoratesData);
+  const [sharedPriceLists, setSharedPriceLists] = useState(priceListsData);
+  const [controlCenterReady, setControlCenterReady] = useState(false);
 
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   }, [lang]);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("tasleem-control-center-v2");
+      if (saved) {
+        const parsed = JSON.parse(saved) as {
+          statuses?: StatusPolicy[];
+          governorates?: GovernorateRecord[];
+          priceLists?: PriceListRecord[];
+        };
+        if (Array.isArray(parsed.statuses)) setSharedStatuses(parsed.statuses);
+        if (Array.isArray(parsed.governorates)) {
+          setSharedGovernorates(parsed.governorates);
+        }
+        if (Array.isArray(parsed.priceLists)) setSharedPriceLists(parsed.priceLists);
+      }
+    } catch {
+      window.localStorage.removeItem("tasleem-control-center-v2");
+    } finally {
+      setControlCenterReady(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const pricingStatusIds = sharedStatuses
+      .filter(
+        (status) => status.state === "published" && status.appearsInPricing,
+      )
+      .map((status) => status.id);
+    const areaIds = sharedGovernorates.flatMap((governorate) =>
+      governorate.areas.map((area) => area.id),
+    );
+
+    setSharedPriceLists((current) => {
+      let anyListChanged = false;
+      const next = current.map((priceList) => {
+        let nextPrices = priceList.prices;
+        let listChanged = false;
+
+        areaIds.forEach((areaId) => {
+          const currentArea = nextPrices[areaId];
+          if (!currentArea) {
+            if (!listChanged) nextPrices = { ...nextPrices };
+            nextPrices[areaId] = Object.fromEntries(
+              pricingStatusIds.map((statusId) => [statusId, null]),
+            );
+            listChanged = true;
+            return;
+          }
+
+          const missingStatuses = pricingStatusIds.filter(
+            (statusId) => !(statusId in currentArea),
+          );
+          if (missingStatuses.length) {
+            if (!listChanged) nextPrices = { ...nextPrices };
+            nextPrices[areaId] = { ...currentArea };
+            missingStatuses.forEach((statusId) => {
+              nextPrices[areaId][statusId] = null;
+            });
+            listChanged = true;
+          }
+        });
+
+        if (!listChanged) return priceList;
+        anyListChanged = true;
+        return { ...priceList, prices: nextPrices };
+      });
+
+      return anyListChanged ? next : current;
+    });
+  }, [sharedGovernorates, sharedStatuses]);
+
+  useEffect(() => {
+    if (!controlCenterReady) return;
+    window.localStorage.setItem(
+      "tasleem-control-center-v2",
+      JSON.stringify({
+        statuses: sharedStatuses,
+        governorates: sharedGovernorates,
+        priceLists: sharedPriceLists,
+      }),
+    );
+  }, [
+    controlCenterReady,
+    sharedGovernorates,
+    sharedPriceLists,
+    sharedStatuses,
+  ]);
 
   return (
     <div className="app-root" data-theme={theme} dir={lang === "ar" ? "rtl" : "ltr"}>
@@ -5107,10 +5253,12 @@ export default function Home() {
         <StatusesScreen
           lang={lang}
           theme={theme}
+          policies={sharedStatuses}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
+          onPoliciesChange={setSharedStatuses}
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
@@ -5118,10 +5266,14 @@ export default function Home() {
         <AreasScreen
           lang={lang}
           theme={theme}
+          governorates={sharedGovernorates}
+          priceLists={sharedPriceLists}
+          policies={sharedStatuses}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
+          onGovernoratesChange={setSharedGovernorates}
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
@@ -5129,10 +5281,14 @@ export default function Home() {
         <PriceListsScreen
           lang={lang}
           theme={theme}
+          priceLists={sharedPriceLists}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
+          onPriceListsChange={setSharedPriceLists}
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />

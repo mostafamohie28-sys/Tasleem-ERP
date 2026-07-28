@@ -3934,7 +3934,9 @@ tbody tr:hover {
 .pricing-matrix__head,
 .pricing-row {
   display: grid;
-  grid-template-columns: minmax(155px, 1.15fr) repeat(4, minmax(94px, 0.8fr));
+  grid-template-columns:
+    minmax(155px, 1.15fr)
+    repeat(var(--pricing-column-count, 4), minmax(0, 0.8fr));
   align-items: center;
 }
 
@@ -5213,7 +5215,9 @@ tbody tr:hover {
 
   .pricing-matrix__head,
   .pricing-row {
-    grid-template-columns: minmax(140px, 1.1fr) repeat(4, minmax(80px, 0.8fr));
+    grid-template-columns:
+      minmax(140px, 1.1fr)
+      repeat(var(--pricing-column-count, 4), minmax(0, 0.8fr));
   }
 
   .pricing-status-strip small {
@@ -5235,7 +5239,9 @@ tbody tr:hover {
 
   .pricing-matrix__head,
   .pricing-row {
-    grid-template-columns: minmax(125px, 1.05fr) repeat(4, minmax(72px, 0.8fr));
+    grid-template-columns:
+      minmax(125px, 1.05fr)
+      repeat(var(--pricing-column-count, 4), minmax(0, 0.8fr));
   }
 
   .pricing-matrix__head {
@@ -5284,7 +5290,9 @@ tbody tr:hover {
 
   .pricing-matrix__head,
   .pricing-row {
-    grid-template-columns: minmax(145px, 1.05fr) repeat(4, minmax(82px, 0.8fr));
+    grid-template-columns:
+      minmax(145px, 1.05fr)
+      repeat(var(--pricing-column-count, 4), minmax(0, 0.8fr));
   }
 }
 
