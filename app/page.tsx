@@ -47,7 +47,7 @@ import {
 
 type Lang = "ar" | "en";
 type Theme = "light" | "dark";
-type Screen = "login" | "shipments" | "statuses" | "areas";
+type Screen = "login" | "shipments" | "statuses" | "areas" | "priceLists";
 type Scenario =
   | "ready"
   | "loading"
@@ -1164,6 +1164,254 @@ const geoCopy = {
   },
 } as const;
 
+type PriceMatrix = Record<string, Record<string, number | null>>;
+
+type PriceListRecord = {
+  id: string;
+  name: Localized;
+  code: string;
+  state: "active" | "draft";
+  isDefault: boolean;
+  senders: Localized[];
+  version: number;
+  prices: PriceMatrix;
+};
+
+const availableSenders: Localized[] = [
+  { ar: "متجر لمسة", en: "Lamsa Store" },
+  { ar: "نواة", en: "Nawa" },
+  { ar: "هيبة", en: "Heba" },
+  { ar: "أوركيد", en: "Orchid" },
+  { ar: "بريق", en: "Bareeq" },
+  { ar: "أفينيو", en: "Avenue" },
+];
+
+const pricedStatusIds = [
+  "status-delivered",
+  "status-partial",
+  "status-deferred",
+  "status-cancelled",
+] as const;
+
+function createPriceMatrix(
+  base: number,
+  discount = 0,
+  missing: string[] = [],
+): PriceMatrix {
+  const matrix: PriceMatrix = {};
+  governoratesData.forEach((governorate, governorateIndex) => {
+    governorate.areas.forEach((area, areaIndex) => {
+      const deliveryPrice = Math.max(
+        0,
+        base + governorateIndex * 8 + areaIndex * 4 - discount,
+      );
+      matrix[area.id] = {
+        "status-delivered": missing.includes(`${area.id}:status-delivered`)
+          ? null
+          : deliveryPrice,
+        "status-partial": missing.includes(`${area.id}:status-partial`)
+          ? null
+          : Math.max(0, deliveryPrice - 8),
+        "status-deferred": missing.includes(`${area.id}:status-deferred`)
+          ? null
+          : 20 + governorateIndex * 2,
+        "status-cancelled": missing.includes(`${area.id}:status-cancelled`)
+          ? null
+          : 25 + governorateIndex * 3,
+      };
+    });
+  });
+  return matrix;
+}
+
+const priceListsData: PriceListRecord[] = [
+  {
+    id: "price-standard",
+    name: { ar: "القائمة القياسية", en: "Standard price list" },
+    code: "STANDARD-2026",
+    state: "active",
+    isDefault: true,
+    senders: [
+      availableSenders[0],
+      availableSenders[2],
+      availableSenders[3],
+      availableSenders[4],
+    ],
+    version: 8,
+    prices: createPriceMatrix(55, 0, [
+      "area-shubra:status-deferred",
+      "area-october:status-cancelled",
+      "area-talkha:status-partial",
+    ]),
+  },
+  {
+    id: "price-enterprise",
+    name: { ar: "عملاء المتاجر الكبار", en: "Enterprise stores" },
+    code: "ENTERPRISE-2026",
+    state: "active",
+    isDefault: false,
+    senders: [availableSenders[3], availableSenders[5]],
+    version: 4,
+    prices: createPriceMatrix(55, 8, [
+      "area-agami:status-partial",
+      "area-agami:status-deferred",
+    ]),
+  },
+  {
+    id: "price-nawa",
+    name: { ar: "قائمة متجر نواة", en: "Nawa private list" },
+    code: "NAWA-PRIVATE",
+    state: "active",
+    isDefault: false,
+    senders: [availableSenders[1]],
+    version: 3,
+    prices: createPriceMatrix(58, 4, [
+      "area-new-cairo:status-delivered",
+      "area-new-cairo:status-partial",
+      "area-new-cairo:status-deferred",
+      "area-new-cairo:status-cancelled",
+    ]),
+  },
+  {
+    id: "price-seasonal",
+    name: { ar: "قائمة الموسم الجديد", en: "New season list" },
+    code: "SEASON-DRAFT",
+    state: "draft",
+    isDefault: false,
+    senders: [],
+    version: 1,
+    prices: createPriceMatrix(60, 0, [
+      "area-shubra:status-delivered",
+      "area-october:status-delivered",
+      "area-agami:status-delivered",
+      "area-talkha:status-delivered",
+    ]),
+  },
+];
+
+const priceListCopy = {
+  ar: {
+    title: "قوائم الأسعار",
+    subtitle: "أنشئ سياسة سعر مستقلة لكل مجموعة رسل وحدد سعر كل حالة في كل منطقة.",
+    add: "إضافة قائمة أسعار",
+    activeLists: "قوائم مفعّلة",
+    assignedSenders: "رسل مرتبطون",
+    privateLists: "قوائم مخصصة",
+    missingPrices: "أسعار تحتاج استكمال",
+    controlNote:
+      "المناطق والحالات تظهر هنا تلقائيًا من صفحاتها المستقلة؛ كل سعر تعدله يخص القائمة المحددة فقط ولا يُعمم على باقي الرسل.",
+    lists: "قوائم الأسعار",
+    searchLists: "ابحث عن قائمة...",
+    defaultBadge: "الافتراضية",
+    draftBadge: "مسودة",
+    activeBadge: "مفعّلة",
+    sender: "راسل",
+    senders: "رسل",
+    completion: "اكتمال",
+    version: "نسخة",
+    pricingFor: "تسعير",
+    editList: "إعدادات القائمة",
+    addSender: "ربط الرسل",
+    searchArea: "ابحث عن منطقة أو محافظة...",
+    allGovernorates: "كل المحافظات",
+    area: "المنطقة",
+    listState: "حالة القائمة",
+    savedPrices: "تم حفظ أسعار القائمة",
+    unsaved: "تعديلات غير محفوظة",
+    savePrices: "حفظ الأسعار",
+    priceCurrency: "ج.م",
+    missing: "غير محدد",
+    stoppedArea: "منطقة موقوفة",
+    noAreas: "لا توجد مناطق تطابق البحث الحالي.",
+    linkedStatuses: "الحالات المالية المرتبطة",
+    linkedStatusesHint:
+      "أي حالة تُفعّل لها خاصية الظهور في قوائم الأسعار ستضاف هنا تلقائيًا.",
+    snapshotTitle: "حماية أسعار الشحنات القديمة",
+    snapshotHint:
+      "عند إنشاء الشحنة يُحفظ السعر المستخدم داخلها؛ تعديل القائمة يطبّق على الشحنات الجديدة فقط.",
+    editorTitle: "إعدادات قائمة الأسعار",
+    newTitle: "إضافة قائمة أسعار جديدة",
+    arabicName: "اسم القائمة بالعربية",
+    englishName: "اسم القائمة بالإنجليزية",
+    code: "الكود الداخلي",
+    publishState: "حالة الاستخدام",
+    active: "مفعّلة",
+    draft: "مسودة",
+    defaultList: "استخدامها كقائمة افتراضية",
+    defaultHint:
+      "تُستخدم تلقائيًا للراسل الذي لم تُربط به قائمة خاصة، ويمكن تغييرها من إعدادات الراسل.",
+    senderLink: "الرسل المرتبطون بهذه القائمة",
+    senderLinkHint:
+      "يمكن ربط أكثر من راسل بالقائمة نفسها أو إنشاء قائمة خاصة؛ اختيار راسل مرتبط بقائمة أخرى ينقله إلى هذه القائمة.",
+    noSender: "لا يوجد راسل مرتبط",
+    cancel: "إلغاء",
+    save: "حفظ الإعدادات",
+    savedList: "تم حفظ إعدادات قائمة الأسعار",
+    createdList: "تمت إضافة قائمة الأسعار",
+    demo: "تغييرات تجريبية داخل نموذج التصميم فقط",
+  },
+  en: {
+    title: "Price lists",
+    subtitle: "Create an independent pricing policy for any sender group and price each status by area.",
+    add: "Add price list",
+    activeLists: "Active lists",
+    assignedSenders: "Assigned senders",
+    privateLists: "Custom lists",
+    missingPrices: "Prices to complete",
+    controlNote:
+      "Areas and financial statuses flow here automatically from their independent pages; every edit affects only the selected list.",
+    lists: "Price lists",
+    searchLists: "Search price lists...",
+    defaultBadge: "Default",
+    draftBadge: "Draft",
+    activeBadge: "Active",
+    sender: "sender",
+    senders: "senders",
+    completion: "Complete",
+    version: "Version",
+    pricingFor: "Pricing",
+    editList: "List settings",
+    addSender: "Assign senders",
+    searchArea: "Search area or governorate...",
+    allGovernorates: "All governorates",
+    area: "Area",
+    listState: "List state",
+    savedPrices: "Price-list values saved",
+    unsaved: "Unsaved changes",
+    savePrices: "Save prices",
+    priceCurrency: "EGP",
+    missing: "Not set",
+    stoppedArea: "Paused area",
+    noAreas: "No areas match the current search.",
+    linkedStatuses: "Linked financial statuses",
+    linkedStatusesHint:
+      "Any status configured to appear in price lists is added here automatically.",
+    snapshotTitle: "Protecting existing shipment prices",
+    snapshotHint:
+      "A shipment stores the price used when it is created; list edits apply only to new shipments.",
+    editorTitle: "Price-list settings",
+    newTitle: "Add new price list",
+    arabicName: "Arabic list name",
+    englishName: "English list name",
+    code: "Internal code",
+    publishState: "Usage state",
+    active: "Active",
+    draft: "Draft",
+    defaultList: "Use as the default price list",
+    defaultHint:
+      "Used automatically for senders without a private list and can be changed in sender settings.",
+    senderLink: "Senders assigned to this list",
+    senderLinkHint:
+      "Assign multiple senders to one list or create a private list; selecting a sender already assigned elsewhere moves it to this list.",
+    noSender: "No assigned sender",
+    cancel: "Cancel",
+    save: "Save settings",
+    savedList: "Price-list settings saved",
+    createdList: "Price list added",
+    demo: "Demo-only changes in the design prototype",
+  },
+} as const;
+
 function Brand({
   compact = false,
   lang,
@@ -1471,6 +1719,11 @@ function Sidebar({
           label: lang === "ar" ? "المحافظات والمناطق" : "Governorates & areas",
           icon: MapPin,
           screen: "areas" as const,
+        },
+        {
+          label: lang === "ar" ? "قوائم الأسعار" : "Price lists",
+          icon: HandCoins,
+          screen: "priceLists" as const,
         },
         { label: t.settings, icon: Settings2 },
       ],
@@ -3454,6 +3707,787 @@ function AreasScreen({
   );
 }
 
+function PriceListEditor({
+  priceList,
+  isNew,
+  lang,
+  onClose,
+  onSave,
+}: {
+  priceList: PriceListRecord;
+  isNew: boolean;
+  lang: Lang;
+  onClose: () => void;
+  onSave: (priceList: PriceListRecord) => void;
+}) {
+  const p = priceListCopy[lang];
+  const [draft, setDraft] = useState(priceList);
+
+  function toggleSender(sender: Localized) {
+    setDraft((current) => {
+      const exists = current.senders.some((item) => item.en === sender.en);
+      return {
+        ...current,
+        senders: exists
+          ? current.senders.filter((item) => item.en !== sender.en)
+          : [...current.senders, sender],
+      };
+    });
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(draft);
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={p.cancel}
+        onClick={onClose}
+      />
+      <aside className="policy-editor price-list-editor" aria-label={p.editorTitle}>
+        <form onSubmit={handleSubmit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span className="price-editor-badge">
+                <HandCoins size={20} />
+              </span>
+              <span>
+                <small>{isNew ? p.newTitle : p.editorTitle}</small>
+                <strong>{draft.name[lang] || p.newTitle}</strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={p.cancel}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Pencil size={16} /></span>
+                <div>
+                  <strong>{isNew ? p.newTitle : p.editorTitle}</strong>
+                  <small>{p.code}</small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{p.arabicName}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.name.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, ar: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{p.englishName}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.name.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, en: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{p.code}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.code}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          code: event.target.value.toUpperCase().replace(/\s+/g, "-"),
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{p.publishState}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.state}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          state: event.target.value as "active" | "draft",
+                        }))
+                      }
+                    >
+                      <option value="active">{p.active}</option>
+                      <option value="draft">{p.draft}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+              </div>
+
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.isDefault}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    isDefault: !current.isDefault,
+                  }))
+                }
+              >
+                <span>
+                  <strong>{p.defaultList}</strong>
+                  <small>{p.defaultHint}</small>
+                </span>
+                <i className={draft.isDefault ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><UsersRound size={16} /></span>
+                <div>
+                  <strong>{p.senderLink}</strong>
+                  <small>{p.senderLinkHint}</small>
+                </div>
+              </div>
+              <div className="policy-choice-grid price-sender-grid">
+                {availableSenders.map((sender) => {
+                  const checked = draft.senders.some((item) => item.en === sender.en);
+                  return (
+                    <label className="policy-check" key={sender.en}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleSender(sender)}
+                      />
+                      <span><Check size={13} /></span>
+                      {sender[lang]}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="geo-safety-card pricing-snapshot-card">
+              <ShieldCheck size={18} />
+              <div>
+                <strong>{p.snapshotTitle}</strong>
+                <p>{p.snapshotHint}</p>
+              </div>
+            </section>
+
+            <div className="policy-demo-note">
+              <CircleAlert size={15} />
+              {p.demo}
+            </div>
+          </div>
+
+          <div className="drawer__footer drawer__footer--split">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {p.cancel}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {p.save}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function PriceListsScreen({
+  lang,
+  theme,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const p = priceListCopy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [priceLists, setPriceLists] = useState(priceListsData);
+  const [selectedId, setSelectedId] = useState(priceListsData[0].id);
+  const [listSearch, setListSearch] = useState("");
+  const [areaSearch, setAreaSearch] = useState("");
+  const [governorateFilter, setGovernorateFilter] = useState("all");
+  const [editing, setEditing] = useState<PriceListRecord | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [dirtyLists, setDirtyLists] = useState<string[]>([]);
+  const [toast, setToast] = useState("");
+
+  const pricingStatuses = statusPolicies.filter((status) =>
+    pricedStatusIds.includes(status.id as (typeof pricedStatusIds)[number]),
+  );
+  const areasWithGovernorates = governoratesData.flatMap((governorate) =>
+    governorate.areas.map((area) => ({ area, governorate })),
+  );
+  const selected =
+    priceLists.find((priceList) => priceList.id === selectedId) ?? priceLists[0];
+
+  const filteredLists = useMemo(() => {
+    const normalized = listSearch.trim().toLowerCase();
+    return priceLists.filter(
+      (priceList) =>
+        !normalized ||
+        [priceList.name.ar, priceList.name.en, priceList.code].some((value) =>
+          value.toLowerCase().includes(normalized),
+        ),
+    );
+  }, [listSearch, priceLists]);
+
+  const filteredAreas = useMemo(() => {
+    const normalized = areaSearch.trim().toLowerCase();
+    return areasWithGovernorates.filter(({ area, governorate }) => {
+      const matchesGovernorate =
+        governorateFilter === "all" || governorate.id === governorateFilter;
+      const matchesSearch =
+        !normalized ||
+        [
+          area.name.ar,
+          area.name.en,
+          area.code,
+          governorate.name.ar,
+          governorate.name.en,
+          ...area.aliases,
+        ].some((value) => value.toLowerCase().includes(normalized));
+      return matchesGovernorate && matchesSearch;
+    });
+  }, [areaSearch, governorateFilter]);
+
+  function priceListCompletion(priceList: PriceListRecord) {
+    const total = areasWithGovernorates.length * pricingStatuses.length;
+    const filled = areasWithGovernorates.reduce(
+      (count, { area }) =>
+        count +
+        pricingStatuses.filter(
+          (status) => priceList.prices[area.id]?.[status.id] != null,
+        ).length,
+      0,
+    );
+    return {
+      filled,
+      total,
+      percent: total ? Math.round((filled / total) * 100) : 0,
+    };
+  }
+
+  function setPrice(areaId: string, statusId: string, rawValue: string) {
+    if (!selected) return;
+    const value = rawValue === "" ? null : Math.max(0, Number(rawValue));
+    setPriceLists((current) =>
+      current.map((priceList) =>
+        priceList.id === selected.id
+          ? {
+              ...priceList,
+              prices: {
+                ...priceList.prices,
+                [areaId]: {
+                  ...(priceList.prices[areaId] ?? {}),
+                  [statusId]: Number.isNaN(value) ? null : value,
+                },
+              },
+            }
+          : priceList,
+      ),
+    );
+    setDirtyLists((current) =>
+      current.includes(selected.id) ? current : [...current, selected.id],
+    );
+  }
+
+  function savePrices() {
+    if (!selected) return;
+    setPriceLists((current) =>
+      current.map((priceList) =>
+        priceList.id === selected.id
+          ? { ...priceList, version: priceList.version + 1 }
+          : priceList,
+      ),
+    );
+    setDirtyLists((current) => current.filter((id) => id !== selected.id));
+    setToast(p.savedPrices);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  function openNew() {
+    const prices: PriceMatrix = {};
+    areasWithGovernorates.forEach(({ area }) => {
+      prices[area.id] = Object.fromEntries(
+        pricingStatuses.map((status) => [status.id, null]),
+      );
+    });
+    setIsNew(true);
+    setEditing({
+      id: `price-${Date.now()}`,
+      name: { ar: "", en: "" },
+      code: "",
+      state: "draft",
+      isDefault: false,
+      senders: [],
+      version: 1,
+      prices,
+    });
+  }
+
+  function saveList(next: PriceListRecord) {
+    setPriceLists((current) => {
+      const selectedSenderNames = new Set(next.senders.map((sender) => sender.en));
+      const exists = current.some((priceList) => priceList.id === next.id);
+      const prepared = current.map((priceList) => ({
+        ...priceList,
+        isDefault: next.isDefault ? false : priceList.isDefault,
+        senders:
+          priceList.id === next.id
+            ? priceList.senders
+            : priceList.senders.filter(
+                (sender) => !selectedSenderNames.has(sender.en),
+              ),
+      }));
+      if (exists) {
+        return prepared.map((priceList) =>
+          priceList.id === next.id
+            ? { ...next, version: priceList.version + 1 }
+            : priceList,
+        );
+      }
+      return [next, ...prepared];
+    });
+    setSelectedId(next.id);
+    setEditing(null);
+    setToast(isNew ? p.createdList : p.savedList);
+    setIsNew(false);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  const assignedSenderCount = new Set(
+    priceLists.flatMap((priceList) => priceList.senders.map((sender) => sender.en)),
+  ).size;
+  const totalMissing = priceLists.reduce((sum, priceList) => {
+    const completion = priceListCompletion(priceList);
+    return sum + completion.total - completion.filled;
+  }, 0);
+  const selectedCompletion = selected
+    ? priceListCompletion(selected)
+    : { filled: 0, total: 0, percent: 0 };
+  const selectedDirty = selected ? dirtyLists.includes(selected.id) : false;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="priceLists"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><HandCoins size={20} /></span>
+            <span>
+              <strong>{t.workspace}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button
+              className="square-button notification-button"
+              type="button"
+              aria-label={t.notifications}
+            >
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content pricing-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{p.title}</h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>{p.subtitle}</p>
+            </div>
+            <button className="primary-button" type="button" onClick={openNew}>
+              <Plus size={18} />
+              {p.add}
+            </button>
+          </div>
+
+          <section className="status-summary-grid pricing-summary-grid">
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue">
+                <HandCoins size={18} />
+              </span>
+              <div><small>{p.activeLists}</small><strong>{priceLists.filter((list) => list.state === "active").length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--green">
+                <UsersRound size={18} />
+              </span>
+              <div><small>{p.assignedSenders}</small><strong>{assignedSenderCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--gray">
+                <UserRound size={18} />
+              </span>
+              <div><small>{p.privateLists}</small><strong>{priceLists.filter((list) => list.senders.length === 1).length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange">
+                <CircleAlert size={18} />
+              </span>
+              <div><small>{p.missingPrices}</small><strong>{totalMissing}</strong></div>
+            </article>
+          </section>
+
+          <div className="status-control-note pricing-control-note">
+            <GitBranch size={18} />
+            <span>{p.controlNote}</span>
+          </div>
+
+          <section className="pricing-layout">
+            <aside className="price-lists-panel">
+              <div className="geo-panel-heading">
+                <span>
+                  <strong>{p.lists}</strong>
+                  <small>{priceLists.length}</small>
+                </span>
+                <button
+                  className="status-edit-button"
+                  type="button"
+                  title={p.add}
+                  onClick={openNew}
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+              <label className="shipment-search price-list-search">
+                <Search size={15} />
+                <input
+                  value={listSearch}
+                  onChange={(event) => setListSearch(event.target.value)}
+                  placeholder={p.searchLists}
+                />
+                {listSearch && (
+                  <button type="button" onClick={() => setListSearch("")} aria-label={t.clear}>
+                    <X size={15} />
+                  </button>
+                )}
+              </label>
+              <div className="price-list-items">
+                {filteredLists.map((priceList) => {
+                  const completion = priceListCompletion(priceList);
+                  return (
+                    <button
+                      className={`price-list-item ${
+                        priceList.id === selected?.id ? "price-list-item--active" : ""
+                      }`}
+                      type="button"
+                      key={priceList.id}
+                      onClick={() => setSelectedId(priceList.id)}
+                    >
+                      <span className="price-list-item__top">
+                        <span>
+                          <strong>{priceList.name[lang]}</strong>
+                          <small dir="ltr">{priceList.code}</small>
+                        </span>
+                        {dirtyLists.includes(priceList.id) && (
+                          <i className="price-dirty-dot" title={p.unsaved} />
+                        )}
+                      </span>
+                      <span className="price-list-item__badges">
+                        {priceList.isDefault && <em>{p.defaultBadge}</em>}
+                        <em
+                          className={
+                            priceList.state === "active"
+                              ? "price-list-state price-list-state--active"
+                              : "price-list-state"
+                          }
+                        >
+                          {priceList.state === "active" ? p.activeBadge : p.draftBadge}
+                        </em>
+                      </span>
+                      <span className="price-list-item__meta">
+                        <small>
+                          {priceList.senders.length || p.noSender}{" "}
+                          {priceList.senders.length
+                            ? priceList.senders.length === 1
+                              ? p.sender
+                              : p.senders
+                            : ""}
+                        </small>
+                        <small>{completion.percent}% {p.completion}</small>
+                      </span>
+                      <span className="price-list-progress">
+                        <b style={{ width: `${completion.percent}%` }} />
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            <div className="pricing-workspace">
+              {selected && (
+                <>
+                  <div className="pricing-workspace__heading">
+                    <div>
+                      <span className="price-workspace-icon"><HandCoins size={19} /></span>
+                      <span>
+                        <small>{p.pricingFor}</small>
+                        <strong>{selected.name[lang]}</strong>
+                      </span>
+                      <em
+                        className={
+                          selected.state === "active"
+                            ? "policy-state policy-state--published"
+                            : "policy-state policy-state--draft"
+                        }
+                      >
+                        {selected.state === "active" ? p.activeBadge : p.draftBadge}
+                      </em>
+                    </div>
+                    <div>
+                      {selectedDirty && (
+                        <span className="unsaved-chip">
+                          <CircleAlert size={14} />
+                          {p.unsaved}
+                        </span>
+                      )}
+                      <button
+                        className="secondary-button pricing-settings-button"
+                        type="button"
+                        onClick={() => {
+                          setIsNew(false);
+                          setEditing(selected);
+                        }}
+                      >
+                        <Settings2 size={15} />
+                        {p.editList}
+                      </button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        disabled={!selectedDirty}
+                        onClick={savePrices}
+                      >
+                        <Check size={16} />
+                        {p.savePrices}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="pricing-status-strip">
+                    <div>
+                      <strong>{p.linkedStatuses}</strong>
+                      <small>{p.linkedStatusesHint}</small>
+                    </div>
+                    <div>
+                      {pricingStatuses.map((status) => (
+                        <span key={status.id}>
+                          <i style={{ backgroundColor: status.color }} />
+                          {status.name[lang]}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pricing-toolbar">
+                    <label className="shipment-search">
+                      <Search size={18} />
+                      <input
+                        value={areaSearch}
+                        onChange={(event) => setAreaSearch(event.target.value)}
+                        placeholder={p.searchArea}
+                      />
+                      {areaSearch && (
+                        <button type="button" onClick={() => setAreaSearch("")} aria-label={t.clear}>
+                          <X size={16} />
+                        </button>
+                      )}
+                    </label>
+                    <label className="select-wrap status-filter">
+                      <select
+                        value={governorateFilter}
+                        onChange={(event) => setGovernorateFilter(event.target.value)}
+                      >
+                        <option value="all">{p.allGovernorates}</option>
+                        {governoratesData.map((governorate) => (
+                          <option key={governorate.id} value={governorate.id}>
+                            {governorate.name[lang]}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown size={15} />
+                    </label>
+                  </div>
+
+                  <div className="pricing-matrix">
+                    <div className="pricing-matrix__head">
+                      <span>{p.area}</span>
+                      {pricingStatuses.map((status) => (
+                        <span key={status.id}>
+                          <i style={{ backgroundColor: status.color }} />
+                          {status.name[lang]}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="pricing-matrix__body">
+                      {filteredAreas.map(({ area, governorate }) => (
+                        <article className="pricing-row" key={area.id}>
+                          <div className="pricing-area">
+                            <span className="geo-area-pin"><MapPin size={15} /></span>
+                            <span>
+                              <strong>{area.name[lang]}</strong>
+                              <small>{governorate.name[lang]}</small>
+                            </span>
+                            {area.state === "paused" && <em>{p.stoppedArea}</em>}
+                          </div>
+                          {pricingStatuses.map((status) => {
+                            const value = selected.prices[area.id]?.[status.id];
+                            return (
+                              <label
+                                className={`price-cell ${value == null ? "price-cell--missing" : ""}`}
+                                key={status.id}
+                              >
+                                <span className="price-cell__mobile-label">
+                                  <i style={{ backgroundColor: status.color }} />
+                                  {status.name[lang]}
+                                </span>
+                                <span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    inputMode="decimal"
+                                    value={value ?? ""}
+                                    placeholder={p.missing}
+                                    onChange={(event) =>
+                                      setPrice(area.id, status.id, event.target.value)
+                                    }
+                                    aria-label={`${area.name[lang]} - ${status.name[lang]}`}
+                                  />
+                                  <small>{p.priceCurrency}</small>
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </article>
+                      ))}
+                      {filteredAreas.length === 0 && (
+                        <div className="status-empty">
+                          <Search size={22} />
+                          <span>{p.noAreas}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pricing-footer">
+                    <span>
+                      <ShieldCheck size={16} />
+                      {p.snapshotHint}
+                    </span>
+                    <strong>{selectedCompletion.filled}/{selectedCompletion.total}</strong>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editing && (
+        <PriceListEditor
+          key={editing.id}
+          priceList={editing}
+          isNew={isNew}
+          lang={lang}
+          onClose={() => {
+            setEditing(null);
+            setIsNew(false);
+          }}
+          onSave={saveList}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ShipmentsScreen({
   lang,
   theme,
@@ -4080,8 +5114,19 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
-      ) : (
+      ) : screen === "areas" ? (
         <AreasScreen
+          lang={lang}
+          theme={theme}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : (
+        <PriceListsScreen
           lang={lang}
           theme={theme}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
