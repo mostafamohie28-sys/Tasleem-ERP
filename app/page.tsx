@@ -21,6 +21,7 @@ import {
   Clock3,
   Columns3,
   Copy,
+  FileSpreadsheet,
   Eye,
   Filter,
   GitBranch,
@@ -39,11 +40,14 @@ import {
   Plus,
   Phone,
   Search,
+  Save,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
   Sun,
+  Trash2,
   Truck,
+  Upload,
   UserRound,
   UsersRound,
   Warehouse,
@@ -60,7 +64,8 @@ type Screen =
   | "areas"
   | "priceLists"
   | "courierRates"
-  | "shipmentPolicies";
+  | "shipmentPolicies"
+  | "addShipment";
 type Scenario =
   | "ready"
   | "loading"
@@ -1214,6 +1219,59 @@ const availableSenders: Localized[] = [
   { ar: "أوركيد", en: "Orchid" },
   { ar: "بريق", en: "Bareeq" },
   { ar: "أفينيو", en: "Avenue" },
+];
+
+type SenderEntryProfile = {
+  sender: Localized;
+  shippingPayer: "recipient" | "sender";
+};
+
+const senderEntryProfiles: SenderEntryProfile[] = availableSenders.map(
+  (sender, index) => ({
+    sender,
+    shippingPayer: index === 1 || index === 3 ? "sender" : "recipient",
+  }),
+);
+
+const savedRecipients = [
+  {
+    phone: "01001234281",
+    name: { ar: "محمد عادل", en: "Mohamed Adel" },
+    secondaryPhone: "01222555140",
+    addresses: [
+      {
+        governorateId: "gov-cairo",
+        areaId: "area-nasr-city",
+        label: {
+          ar: "المنزل — 12 شارع الطيران، مدينة نصر",
+          en: "Home — 12 El Tayaran St., Nasr City",
+        },
+      },
+      {
+        governorateId: "gov-cairo",
+        areaId: "area-heliopolis",
+        label: {
+          ar: "العمل — ميدان روكسي، مصر الجديدة",
+          en: "Work — Roxy Square, Heliopolis",
+        },
+      },
+    ],
+  },
+  {
+    phone: "01105559034",
+    name: { ar: "سارة محمود", en: "Sara Mahmoud" },
+    secondaryPhone: "",
+    addresses: [
+      {
+        governorateId: "gov-giza",
+        areaId: "area-dokki",
+        label: {
+          ar: "8 شارع مصدق، الدقي",
+          en: "8 Mossadak St., Dokki",
+        },
+      },
+    ],
+  },
 ];
 
 const pricedStatusIds = [
@@ -6999,9 +7057,61 @@ function ShipmentPoliciesScreen({
   );
 }
 
-function ShipmentsScreen({
+type ShipmentEntryDraft = {
+  phone: string;
+  recipientName: string;
+  secondaryPhone: string;
+  governorateId: string;
+  areaId: string;
+  address: string;
+  senderReference: string;
+  pieces: string;
+  contents: string;
+  shipmentPrice: string;
+  shippingPayer: "recipient" | "sender";
+  deliveryDate: string;
+  notes: string;
+  confirmation: "confirmed" | "no_answer" | "later" | "not_recorded";
+  customValues: Record<string, string>;
+};
+
+type PreparedShipment = ShipmentEntryDraft & {
+  localId: string;
+  shippingFee: number;
+  incompleteFields: string[];
+};
+
+function makeShipmentEntryDraft(
+  shippingPayer: "recipient" | "sender",
+): ShipmentEntryDraft {
+  return {
+    phone: "",
+    recipientName: "",
+    secondaryPhone: "",
+    governorateId: "",
+    areaId: "",
+    address: "",
+    senderReference: "",
+    pieces: "1",
+    contents: "",
+    shipmentPrice: "",
+    shippingPayer,
+    deliveryDate: "",
+    notes: "",
+    confirmation: "not_recorded",
+    customValues: {},
+  };
+}
+
+function AddShipmentScreen({
   lang,
   theme,
+  fields,
+  settings,
+  governorates,
+  statuses,
+  priceLists,
+  onSaveShipments,
   onLang,
   onTheme,
   onNavigate,
@@ -7009,6 +7119,1230 @@ function ShipmentsScreen({
 }: {
   lang: Lang;
   theme: Theme;
+  fields: ShipmentFieldPolicy[];
+  settings: ShipmentDataSettings;
+  governorates: GovernorateRecord[];
+  statuses: StatusPolicy[];
+  priceLists: PriceListRecord[];
+  onSaveShipments: (records: Shipment[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [entryMode, setEntryMode] = useState<"manual" | "excel">("manual");
+  const [senderKey, setSenderKey] = useState(availableSenders[0].en);
+  const initialPayer =
+    senderEntryProfiles.find((profile) => profile.sender.en === senderKey)
+      ?.shippingPayer ?? "recipient";
+  const [draft, setDraft] = useState<ShipmentEntryDraft>(() =>
+    makeShipmentEntryDraft(initialPayer),
+  );
+  const [prepared, setPrepared] = useState<PreparedShipment[]>([]);
+  const [error, setError] = useState("");
+  const [savedCount, setSavedCount] = useState(0);
+  const [excelFile, setExcelFile] = useState("");
+  const [excelChecked, setExcelChecked] = useState(false);
+
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const selectedSender =
+    availableSenders.find((sender) => sender.en === senderKey) ??
+    availableSenders[0];
+  const senderProfile =
+    senderEntryProfiles.find((profile) => profile.sender.en === senderKey) ??
+    senderEntryProfiles[0];
+  const senderPriceList =
+    priceLists.find(
+      (priceList) =>
+        priceList.state === "active" &&
+        priceList.senders.some(
+          (sender) =>
+            sender.en === selectedSender.en || sender.ar === selectedSender.ar,
+        ),
+    ) ??
+    priceLists.find((priceList) => priceList.state === "active" && priceList.isDefault);
+  const pricingStatus = statuses.find(
+    (status) => status.state === "published" && status.appearsInPricing,
+  );
+  const shippingFee =
+    draft.areaId && senderPriceList && pricingStatus
+      ? senderPriceList.prices[draft.areaId]?.[pricingStatus.id] ?? 0
+      : 0;
+  const activeGovernorates = governorates.filter(
+    (governorate) => governorate.state === "active",
+  );
+  const selectedGovernorate = governorates.find(
+    (governorate) => governorate.id === draft.governorateId,
+  );
+  const availableAreas = (selectedGovernorate?.areas ?? []).filter(
+    (area) => area.state === "active",
+  );
+  const matchedRecipient =
+    settings.phoneLookupEnabled && draft.phone.length >= 6
+      ? savedRecipients.find((recipient) => recipient.phone === draft.phone)
+      : undefined;
+  const activeFields = fields
+    .filter((field) => field.mode !== "hidden")
+    .sort((a, b) => a.order - b.order);
+  const fieldMap = new Map(activeFields.map((field) => [field.code, field]));
+  const customFields = activeFields.filter((field) => field.custom);
+  const shipmentPrice = Number(draft.shipmentPrice) || 0;
+  const totalDue =
+    shipmentPrice + (draft.shippingPayer === "recipient" ? shippingFee : 0);
+  const senderDue =
+    shipmentPrice - (draft.shippingPayer === "sender" ? shippingFee : 0);
+
+  function fieldVisible(code: string) {
+    return fieldMap.has(code);
+  }
+
+  function fieldRequired(code: string) {
+    return fieldMap.get(code)?.mode === "required_on_create";
+  }
+
+  function fieldLabel(code: string, fallback: Localized) {
+    return fieldMap.get(code)?.name[lang] ?? fallback[lang];
+  }
+
+  function updateDraft<K extends keyof ShipmentEntryDraft>(
+    key: K,
+    value: ShipmentEntryDraft[K],
+  ) {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setError("");
+    setSavedCount(0);
+  }
+
+  function chooseSender(nextKey: string) {
+    const nextProfile =
+      senderEntryProfiles.find((profile) => profile.sender.en === nextKey) ??
+      senderEntryProfiles[0];
+    setSenderKey(nextKey);
+    setDraft((current) => ({
+      ...current,
+      shippingPayer: nextProfile.shippingPayer,
+    }));
+    setError("");
+    setSavedCount(0);
+  }
+
+  function useSavedRecipient() {
+    if (!matchedRecipient) return;
+    const address = matchedRecipient.addresses[0];
+    setDraft((current) => ({
+      ...current,
+      recipientName: matchedRecipient.name[lang],
+      secondaryPhone: matchedRecipient.secondaryPhone,
+      governorateId: address.governorateId,
+      areaId: address.areaId,
+      address: address.label[lang],
+    }));
+  }
+
+  function chooseSavedAddress(index: number) {
+    if (!matchedRecipient) return;
+    const nextAddress = matchedRecipient.addresses[index];
+    setDraft((current) => ({
+      ...current,
+      governorateId: nextAddress.governorateId,
+      areaId: nextAddress.areaId,
+      address: nextAddress.label[lang],
+    }));
+  }
+
+  const codeValues: Record<string, string> = {
+    RECIPIENT_PHONE: draft.phone,
+    RECIPIENT_NAME: draft.recipientName,
+    SECONDARY_PHONE: draft.secondaryPhone,
+    GOVERNORATE: draft.governorateId,
+    AREA: draft.areaId,
+    DELIVERY_ADDRESS: draft.address,
+    SENDER: senderKey,
+    SENDER_REFERENCE: draft.senderReference,
+    PIECE_COUNT: draft.pieces,
+    CONTENTS: draft.contents,
+    SHIPMENT_PRICE: draft.shipmentPrice,
+    SHIPPING_FEE: String(shippingFee || ""),
+    SHIPPING_PAYER: draft.shippingPayer,
+    DELIVERY_DATE: draft.deliveryDate,
+    NOTES: draft.notes,
+  };
+
+  function validateCurrent() {
+    const missingCreate = activeFields.filter((field) => {
+      if (field.mode !== "required_on_create") return false;
+      const value = field.custom
+        ? draft.customValues[field.id]
+        : codeValues[field.code];
+      return !String(value ?? "").trim();
+    });
+    if (missingCreate.length) {
+      setError(
+        lang === "ar"
+          ? `استكمل أولًا: ${missingCreate.map((field) => field.name.ar).join("، ")}`
+          : `Complete first: ${missingCreate.map((field) => field.name.en).join(", ")}`,
+      );
+      return null;
+    }
+    if (draft.areaId && !shippingFee) {
+      setError(
+        lang === "ar"
+          ? "لا يوجد سعر مكتمل لهذه المنطقة داخل قائمة أسعار الراسل."
+          : "This area has no completed price in the sender price list.",
+      );
+      return null;
+    }
+    const incompleteFields = activeFields
+      .filter((field) => field.mode === "required_before_assignment")
+      .filter((field) => {
+        const value = field.custom
+          ? draft.customValues[field.id]
+          : codeValues[field.code];
+        return !String(value ?? "").trim();
+      })
+      .map((field) => field.name[lang]);
+    return {
+      ...draft,
+      localId: `prepared-${Date.now()}-${prepared.length}`,
+      shippingFee,
+      incompleteFields,
+    };
+  }
+
+  function resetCurrent() {
+    setDraft(makeShipmentEntryDraft(senderProfile.shippingPayer));
+    setError("");
+  }
+
+  function addAnother() {
+    const next = validateCurrent();
+    if (!next) return;
+    setPrepared((current) => [...current, next]);
+    resetCurrent();
+  }
+
+  function draftHasContent() {
+    return Boolean(
+      draft.phone ||
+        draft.recipientName ||
+        draft.areaId ||
+        draft.address ||
+        draft.shipmentPrice ||
+        draft.senderReference,
+    );
+  }
+
+  function savePrepared() {
+    let allPrepared = prepared;
+    if (draftHasContent() || prepared.length === 0) {
+      const current = validateCurrent();
+      if (!current) return;
+      allPrepared = [...prepared, current];
+    }
+    if (!allPrepared.length) return;
+
+    const now = Date.now();
+    const records: Shipment[] = allPrepared.map((item, index) => {
+      const governorate = governorates.find(
+        (record) => record.id === item.governorateId,
+      );
+      const area = governorate?.areas.find((record) => record.id === item.areaId);
+      const incomplete = item.incompleteFields.length > 0;
+      const beforeWarehouse =
+        incomplete && settings.incompleteRoute === "complete_before_warehouse";
+      const confirmationText: Localized =
+        item.confirmation === "confirmed"
+          ? { ar: "تم التأكيد", en: "Confirmed" }
+          : item.confirmation === "no_answer"
+            ? { ar: "لم يرد", en: "No answer" }
+            : item.confirmation === "later"
+              ? { ar: "تواصل لاحقًا", en: "Contact later" }
+              : { ar: "لم يُسجل", en: "Not recorded" };
+      return {
+        id: `TS-${String(now + index).slice(-6)}`,
+        reference:
+          item.senderReference ||
+          `${selectedSender.en.slice(0, 2).toUpperCase()}-${String(now + index).slice(-4)}`,
+        recipient: {
+          ar: item.recipientName || "غير مكتمل",
+          en: item.recipientName || "Incomplete",
+        },
+        phone: item.phone,
+        sender: selectedSender,
+        area: area?.name ?? { ar: "غير محددة", en: "Not selected" },
+        governorate: governorate?.name ?? {
+          ar: "غير محددة",
+          en: "Not selected",
+        },
+        status: {
+          ar: "لم تُسجّل حالة تشغيلية",
+          en: "No operational status recorded",
+        },
+        statusTone: incomplete ? "red" : "blue",
+        custody: beforeWarehouse
+          ? { ar: "قائمة استكمال البيانات", en: "Data completion queue" }
+          : { ar: "المخزن الرئيسي", en: "Main warehouse" },
+        custodyType: "warehouse",
+        courier: null,
+        amount: Number(item.shipmentPrice) || 0,
+        deliveryDate: item.deliveryDate
+          ? { ar: item.deliveryDate, en: item.deliveryDate }
+          : { ar: "غير محدد", en: "Not set" },
+        required: incomplete
+          ? {
+              ar: `استكمال: ${item.incompleteFields.join("، ")}`,
+              en: `Complete: ${item.incompleteFields.join(", ")}`,
+            }
+          : { ar: "لا يوجد", en: "None" },
+        requiredType: incomplete ? "incomplete" : "none",
+        lastEvent: {
+          ar: "أضيفت الآن من التسجيل اليدوي",
+          en: "Added just now through manual entry",
+        },
+        confirmation: confirmationText,
+        pieces: Math.max(1, Number(item.pieces) || 1),
+        shippingFee: item.shippingFee,
+        shippingPayer: item.shippingPayer,
+        address: {
+          ar: item.address || "غير مكتمل",
+          en: item.address || "Incomplete",
+        },
+      };
+    });
+
+    onSaveShipments(records);
+    setPrepared([]);
+    resetCurrent();
+    setSavedCount(records.length);
+  }
+
+  const requiredMark = (code: string) =>
+    fieldRequired(code) ? <em className="entry-required">*</em> : null;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="shipments"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <PackagePlus size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar" ? "تسجيل الشحنات" : "Shipment intake"}
+              </strong>
+              <small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content shipment-entry-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <button
+                className="entry-back"
+                type="button"
+                onClick={() => onNavigate("shipments")}
+              >
+                {lang === "ar" ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+                {lang === "ar" ? "العودة إلى الشحنات" : "Back to shipments"}
+              </button>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "إضافة الشحنات" : "Add shipments"}</h1>
+                <span className="demo-chip">
+                  {lang === "ar" ? "حسب سياسات الشركة" : "Policy-driven"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "سجّل شحنة واحدة أو جهّز مجموعة كاملة لنفس الراسل."
+                  : "Register one shipment or prepare a complete batch for one sender."}
+              </p>
+            </div>
+            <div className="entry-mode-switch">
+              <button
+                type="button"
+                className={entryMode === "manual" ? "entry-mode--active" : ""}
+                onClick={() => setEntryMode("manual")}
+              >
+                <PackagePlus size={17} />
+                {lang === "ar" ? "تسجيل يدوي" : "Manual entry"}
+              </button>
+              <button
+                type="button"
+                className={entryMode === "excel" ? "entry-mode--active" : ""}
+                onClick={() => setEntryMode("excel")}
+              >
+                <FileSpreadsheet size={17} />
+                Excel
+              </button>
+            </div>
+          </div>
+
+          <section className="entry-sender-bar">
+            <div>
+              <span className="entry-step">1</span>
+              <span>
+                <strong>{lang === "ar" ? "الراسل" : "Sender"}</strong>
+                <small>
+                  {lang === "ar"
+                    ? "يُحدد مرة واحدة لكل المجموعة"
+                    : "Selected once for the whole batch"}
+                </small>
+              </span>
+            </div>
+            <label className="entry-select">
+              <select value={senderKey} onChange={(event) => chooseSender(event.target.value)}>
+                {availableSenders.map((sender) => (
+                  <option key={sender.en} value={sender.en}>
+                    {sender[lang]}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={16} />
+            </label>
+            <div className="entry-price-source">
+              <HandCoins size={18} />
+              <span>
+                <small>{lang === "ar" ? "قائمة الأسعار" : "Price list"}</small>
+                <strong>
+                  {senderPriceList?.name[lang] ??
+                    (lang === "ar" ? "غير مرتبطة" : "Not linked")}
+                </strong>
+              </span>
+            </div>
+            <div className="entry-payer-source">
+              <small>{lang === "ar" ? "الافتراضي" : "Default payer"}</small>
+              <strong>
+                {senderProfile.shippingPayer === "recipient"
+                  ? lang === "ar"
+                    ? "الشحن على المستلم"
+                    : "Recipient pays shipping"
+                  : lang === "ar"
+                    ? "الشحن على الراسل"
+                    : "Sender pays shipping"}
+              </strong>
+            </div>
+          </section>
+
+          {entryMode === "manual" ? (
+            <div className="shipment-entry-layout">
+              <section className="entry-form-card">
+                <div className="entry-card-heading">
+                  <div>
+                    <span className="entry-step">2</span>
+                    <span>
+                      <strong>
+                        {lang === "ar" ? "بيانات الشحنة" : "Shipment details"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "الحقول الظاهرة والمطلوبة تأتي من صفحة السياسات"
+                          : "Visible and required fields follow your policies"}
+                      </small>
+                    </span>
+                  </div>
+                  <span className="entry-policy-chip">
+                    <SlidersHorizontal size={15} />
+                    {activeFields.length} {lang === "ar" ? "حقل مفعّل" : "active fields"}
+                  </span>
+                </div>
+
+                <div className="entry-section entry-section--recipient">
+                  <div className="entry-section-title">
+                    <UserRound size={18} />
+                    <strong>{lang === "ar" ? "المستلم" : "Recipient"}</strong>
+                  </div>
+                  <div className="entry-fields-grid">
+                    {fieldVisible("RECIPIENT_PHONE") && (
+                      <label className="entry-field entry-field--phone">
+                        <span>
+                          {fieldLabel("RECIPIENT_PHONE", {
+                            ar: "رقم الهاتف الأساسي",
+                            en: "Primary phone",
+                          })}
+                          {requiredMark("RECIPIENT_PHONE")}
+                        </span>
+                        <span className="entry-input">
+                          <Phone size={17} />
+                          <input
+                            dir="ltr"
+                            value={draft.phone}
+                            onChange={(event) => updateDraft("phone", event.target.value)}
+                            placeholder="0100 000 0000"
+                          />
+                        </span>
+                        {settings.phoneLookupEnabled && (
+                          <small>
+                            {lang === "ar"
+                              ? "ابحث بالهاتف لاستدعاء بيانات المستلم"
+                              : "Phone lookup retrieves saved recipient data"}
+                          </small>
+                        )}
+                      </label>
+                    )}
+                    {matchedRecipient && (
+                      <button
+                        className="recipient-match"
+                        type="button"
+                        onClick={useSavedRecipient}
+                      >
+                        <span className="mini-avatar">
+                          {matchedRecipient.name[lang].slice(0, 1)}
+                        </span>
+                        <span>
+                          <strong>{matchedRecipient.name[lang]}</strong>
+                          <small>
+                            {matchedRecipient.addresses.length}{" "}
+                            {lang === "ar" ? "عنوان محفوظ" : "saved addresses"}
+                          </small>
+                        </span>
+                        <span className="recipient-match__action">
+                          <Check size={15} />
+                          {lang === "ar" ? "استخدام البيانات" : "Use details"}
+                        </span>
+                      </button>
+                    )}
+                    {fieldVisible("RECIPIENT_NAME") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("RECIPIENT_NAME", {
+                            ar: "اسم المستلم",
+                            en: "Recipient name",
+                          })}
+                          {requiredMark("RECIPIENT_NAME")}
+                        </span>
+                        <input
+                          value={draft.recipientName}
+                          onChange={(event) =>
+                            updateDraft("recipientName", event.target.value)
+                          }
+                          placeholder={lang === "ar" ? "الاسم الكامل" : "Full name"}
+                        />
+                      </label>
+                    )}
+                    {fieldVisible("SECONDARY_PHONE") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("SECONDARY_PHONE", {
+                            ar: "رقم هاتف إضافي",
+                            en: "Secondary phone",
+                          })}
+                          {requiredMark("SECONDARY_PHONE")}
+                        </span>
+                        <input
+                          dir="ltr"
+                          value={draft.secondaryPhone}
+                          onChange={(event) =>
+                            updateDraft("secondaryPhone", event.target.value)
+                          }
+                          placeholder="01-- --- ----"
+                        />
+                      </label>
+                    )}
+                  </div>
+                  {matchedRecipient && matchedRecipient.addresses.length > 1 && (
+                    <div className="saved-addresses">
+                      <small>{lang === "ar" ? "العناوين المحفوظة:" : "Saved addresses:"}</small>
+                      {matchedRecipient.addresses.map((address, index) => (
+                        <button
+                          type="button"
+                          key={`${address.areaId}-${index}`}
+                          onClick={() => chooseSavedAddress(index)}
+                        >
+                          <MapPin size={14} />
+                          {address.label[lang]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="entry-section">
+                  <div className="entry-section-title">
+                    <MapPin size={18} />
+                    <strong>
+                      {lang === "ar" ? "عنوان التسليم والتغطية" : "Delivery address"}
+                    </strong>
+                  </div>
+                  <div className="entry-fields-grid entry-fields-grid--three">
+                    {fieldVisible("GOVERNORATE") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("GOVERNORATE", {
+                            ar: "المحافظة",
+                            en: "Governorate",
+                          })}
+                          {requiredMark("GOVERNORATE")}
+                        </span>
+                        <span className="entry-select">
+                          <select
+                            value={draft.governorateId}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                governorateId: event.target.value,
+                                areaId: "",
+                              }))
+                            }
+                          >
+                            <option value="">
+                              {lang === "ar" ? "اختر المحافظة" : "Select governorate"}
+                            </option>
+                            {activeGovernorates.map((governorate) => (
+                              <option key={governorate.id} value={governorate.id}>
+                                {governorate.name[lang]}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                    )}
+                    {fieldVisible("AREA") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("AREA", { ar: "المنطقة", en: "Area" })}
+                          {requiredMark("AREA")}
+                        </span>
+                        <span className="entry-select">
+                          <select
+                            value={draft.areaId}
+                            disabled={!draft.governorateId}
+                            onChange={(event) => updateDraft("areaId", event.target.value)}
+                          >
+                            <option value="">
+                              {lang === "ar" ? "اختر المنطقة" : "Select area"}
+                            </option>
+                            {availableAreas.map((area) => (
+                              <option key={area.id} value={area.id}>
+                                {area.name[lang]}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                    )}
+                    {fieldVisible("DELIVERY_ADDRESS") && (
+                      <label className="entry-field entry-field--wide">
+                        <span>
+                          {fieldLabel("DELIVERY_ADDRESS", {
+                            ar: "العنوان التفصيلي",
+                            en: "Detailed address",
+                          })}
+                          {requiredMark("DELIVERY_ADDRESS")}
+                        </span>
+                        <input
+                          value={draft.address}
+                          onChange={(event) => updateDraft("address", event.target.value)}
+                          placeholder={
+                            lang === "ar"
+                              ? "الشارع، العقار، الدور، علامة مميزة..."
+                              : "Street, building, floor, landmark..."
+                          }
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="entry-section">
+                  <div className="entry-section-title">
+                    <Boxes size={18} />
+                    <strong>{lang === "ar" ? "الطرد" : "Parcel"}</strong>
+                  </div>
+                  <div className="entry-fields-grid entry-fields-grid--three">
+                    {fieldVisible("SENDER_REFERENCE") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("SENDER_REFERENCE", {
+                            ar: "مرجع الراسل",
+                            en: "Sender reference",
+                          })}
+                          {requiredMark("SENDER_REFERENCE")}
+                        </span>
+                        <input
+                          value={draft.senderReference}
+                          onChange={(event) =>
+                            updateDraft("senderReference", event.target.value)
+                          }
+                          placeholder="ORD-1024"
+                        />
+                      </label>
+                    )}
+                    {fieldVisible("PIECE_COUNT") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("PIECE_COUNT", {
+                            ar: "عدد القطع داخل الشحنة",
+                            en: "Pieces in shipment",
+                          })}
+                          {requiredMark("PIECE_COUNT")}
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={draft.pieces}
+                          onChange={(event) => updateDraft("pieces", event.target.value)}
+                        />
+                      </label>
+                    )}
+                    {fieldVisible("DELIVERY_DATE") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("DELIVERY_DATE", {
+                            ar: "موعد التسليم المطلوب",
+                            en: "Requested delivery date",
+                          })}
+                          {requiredMark("DELIVERY_DATE")}
+                        </span>
+                        <input
+                          type="date"
+                          value={draft.deliveryDate}
+                          onChange={(event) =>
+                            updateDraft("deliveryDate", event.target.value)
+                          }
+                        />
+                      </label>
+                    )}
+                    {fieldVisible("CONTENTS") && (
+                      <label className="entry-field">
+                        <span>
+                          {fieldLabel("CONTENTS", {
+                            ar: "وصف المحتوى",
+                            en: "Contents",
+                          })}
+                          {requiredMark("CONTENTS")}
+                        </span>
+                        <input
+                          value={draft.contents}
+                          onChange={(event) => updateDraft("contents", event.target.value)}
+                          placeholder={lang === "ar" ? "مثال: ملابس" : "Example: Clothing"}
+                        />
+                      </label>
+                    )}
+                    {fieldVisible("NOTES") && (
+                      <label className="entry-field entry-field--wide">
+                        <span>
+                          {fieldLabel("NOTES", {
+                            ar: "ملاحظات الشحنة",
+                            en: "Shipment notes",
+                          })}
+                          {requiredMark("NOTES")}
+                        </span>
+                        <input
+                          value={draft.notes}
+                          onChange={(event) => updateDraft("notes", event.target.value)}
+                          placeholder={
+                            lang === "ar"
+                              ? "تعليمات أو معلومات إضافية..."
+                              : "Extra instructions or information..."
+                          }
+                        />
+                      </label>
+                    )}
+                  </div>
+                </div>
+
+                <div className="entry-section entry-section--financial">
+                  <div className="entry-section-title">
+                    <HandCoins size={18} />
+                    <strong>
+                      {lang === "ar" ? "التحصيل ومصاريف الشحن" : "Collection & shipping"}
+                    </strong>
+                  </div>
+                  <div className="entry-financial-layout">
+                    {fieldVisible("SHIPMENT_PRICE") && (
+                      <label className="entry-field entry-price-input">
+                        <span>
+                          {fieldLabel("SHIPMENT_PRICE", {
+                            ar: "سعر الشحنة",
+                            en: "Shipment price",
+                          })}
+                          {requiredMark("SHIPMENT_PRICE")}
+                        </span>
+                        <span className="entry-input">
+                          <input
+                            type="number"
+                            min="0"
+                            value={draft.shipmentPrice}
+                            onChange={(event) =>
+                              updateDraft("shipmentPrice", event.target.value)
+                            }
+                            placeholder="0"
+                          />
+                          <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                        </span>
+                      </label>
+                    )}
+                    <div className="entry-shipping-fee">
+                      <span>
+                        <small>{lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}</small>
+                        <strong>{money.format(shippingFee)}</strong>
+                      </span>
+                      <small>
+                        {draft.areaId
+                          ? `${senderPriceList?.name[lang] ?? ""} · ${
+                              pricingStatus?.name[lang] ?? ""
+                            }`
+                          : lang === "ar"
+                            ? "تظهر بعد اختيار المنطقة"
+                            : "Shown after area selection"}
+                      </small>
+                    </div>
+                    <div className="entry-payer-control">
+                      <span>
+                        {fieldLabel("SHIPPING_PAYER", {
+                          ar: "متحمّل مصاريف الشحن",
+                          en: "Shipping payer",
+                        })}
+                      </span>
+                      {settings.shippingPayerOverride ? (
+                        <div>
+                          <button
+                            type="button"
+                            className={
+                              draft.shippingPayer === "recipient" ? "active" : ""
+                            }
+                            onClick={() => updateDraft("shippingPayer", "recipient")}
+                          >
+                            {lang === "ar" ? "المستلم" : "Recipient"}
+                          </button>
+                          <button
+                            type="button"
+                            className={draft.shippingPayer === "sender" ? "active" : ""}
+                            onClick={() => updateDraft("shippingPayer", "sender")}
+                          >
+                            {lang === "ar" ? "الراسل" : "Sender"}
+                          </button>
+                        </div>
+                      ) : (
+                        <strong>
+                          {draft.shippingPayer === "recipient"
+                            ? lang === "ar"
+                              ? "المستلم"
+                              : "Recipient"
+                            : lang === "ar"
+                              ? "الراسل"
+                              : "Sender"}
+                        </strong>
+                      )}
+                    </div>
+                  </div>
+                  <div className="entry-money-summary">
+                    <span>
+                      <small>{lang === "ar" ? "سعر الشحنة" : "Shipment price"}</small>
+                      <strong>{money.format(shipmentPrice)}</strong>
+                    </span>
+                    <i>+</i>
+                    <span>
+                      <small>{lang === "ar" ? "شحن على المستلم" : "Recipient shipping"}</small>
+                      <strong>
+                        {money.format(
+                          draft.shippingPayer === "recipient" ? shippingFee : 0,
+                        )}
+                      </strong>
+                    </span>
+                    <i>=</i>
+                    <span className="entry-money-summary__total">
+                      <small>{lang === "ar" ? "المطلوب تحصيله" : "Total to collect"}</small>
+                      <strong>{money.format(totalDue)}</strong>
+                    </span>
+                    <span>
+                      <small>{lang === "ar" ? "مستحق الراسل" : "Sender due"}</small>
+                      <strong>{money.format(senderDue)}</strong>
+                    </span>
+                  </div>
+                </div>
+
+                {settings.confirmationMode !== "off" && (
+                  <div className="entry-section entry-confirmation">
+                    <div className="entry-section-title">
+                      <ClipboardCheck size={18} />
+                      <span>
+                        <strong>
+                          {lang === "ar" ? "تأكيد الطلب" : "Order confirmation"}
+                        </strong>
+                        <small>
+                          {settings.confirmationMode === "required_before_assignment"
+                            ? lang === "ar"
+                              ? "مطلوب قبل الإسناد"
+                              : "Required before assignment"
+                            : lang === "ar"
+                              ? "اختياري"
+                              : "Optional"}
+                        </small>
+                      </span>
+                    </div>
+                    <div className="entry-confirmation-options">
+                      {(
+                        [
+                          ["not_recorded", "لم يُسجل", "Not recorded"],
+                          ["confirmed", "تم التأكيد", "Confirmed"],
+                          ["no_answer", "لم يرد", "No answer"],
+                          ["later", "تواصل لاحقًا", "Contact later"],
+                        ] as const
+                      ).map(([value, ar, en]) => (
+                        <button
+                          type="button"
+                          key={value}
+                          className={draft.confirmation === value ? "active" : ""}
+                          onClick={() => updateDraft("confirmation", value)}
+                        >
+                          {draft.confirmation === value && <Check size={14} />}
+                          {lang === "ar" ? ar : en}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {customFields.length > 0 && (
+                  <div className="entry-section">
+                    <div className="entry-section-title">
+                      <Settings2 size={18} />
+                      <strong>{lang === "ar" ? "حقول الشركة" : "Company fields"}</strong>
+                    </div>
+                    <div className="entry-fields-grid">
+                      {customFields.map((field) => (
+                        <label className="entry-field" key={field.id}>
+                          <span>
+                            {field.name[lang]}
+                            {field.mode === "required_on_create" && (
+                              <em className="entry-required">*</em>
+                            )}
+                          </span>
+                          <input
+                            value={draft.customValues[field.id] ?? ""}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                customValues: {
+                                  ...current.customValues,
+                                  [field.id]: event.target.value,
+                                },
+                              }))
+                            }
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {error && (
+                  <div className="entry-error" role="alert">
+                    <CircleAlert size={17} />
+                    {error}
+                  </div>
+                )}
+                {savedCount > 0 && (
+                  <div className="entry-success" role="status">
+                    <PackageCheck size={18} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? `تم حفظ ${savedCount} شحنة`
+                          : `${savedCount} shipment(s) saved`}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "ظهرت الشحنات الآن في القائمة العامة."
+                          : "The shipments now appear in the general list."}
+                      </small>
+                    </span>
+                    <button type="button" onClick={() => onNavigate("shipments")}>
+                      {lang === "ar" ? "عرض الشحنات" : "View shipments"}
+                    </button>
+                  </div>
+                )}
+
+                <div className="entry-form-actions">
+                  <button className="secondary-button" type="button" onClick={resetCurrent}>
+                    {lang === "ar" ? "تفريغ الحقول" : "Clear fields"}
+                  </button>
+                  <button className="secondary-button" type="button" onClick={addAnother}>
+                    <Plus size={17} />
+                    {lang === "ar" ? "إضافة شحنة أخرى" : "Add another shipment"}
+                  </button>
+                  <button className="primary-button" type="button" onClick={savePrepared}>
+                    <Save size={17} />
+                    {prepared.length
+                      ? lang === "ar"
+                        ? `حفظ المجموعة (${prepared.length + (draftHasContent() ? 1 : 0)})`
+                        : `Save batch (${prepared.length + (draftHasContent() ? 1 : 0)})`
+                      : lang === "ar"
+                        ? "حفظ الشحنة"
+                        : "Save shipment"}
+                  </button>
+                </div>
+              </section>
+
+              <aside className="prepared-panel">
+                <div className="prepared-panel__heading">
+                  <div>
+                    <span className="entry-step">3</span>
+                    <span>
+                      <strong>{lang === "ar" ? "المجموعة الحالية" : "Current batch"}</strong>
+                      <small>
+                        {lang === "ar"
+                          ? "شحنات جاهزة للحفظ معًا"
+                          : "Shipments ready to save together"}
+                      </small>
+                    </span>
+                  </div>
+                  <b>{prepared.length}</b>
+                </div>
+                {prepared.length ? (
+                  <div className="prepared-list">
+                    {prepared.map((item, index) => {
+                      const area = governorates
+                        .flatMap((governorate) => governorate.areas)
+                        .find((record) => record.id === item.areaId);
+                      return (
+                        <article key={item.localId}>
+                          <span className="prepared-index">{index + 1}</span>
+                          <span>
+                            <strong>{item.recipientName}</strong>
+                            <small dir="ltr">{item.phone}</small>
+                            <small>
+                              {area?.name[lang] ?? (lang === "ar" ? "منطقة غير محددة" : "No area")}
+                              {" · "}
+                              {item.pieces} {lang === "ar" ? "قطعة" : "pcs"}
+                            </small>
+                          </span>
+                          <span className="prepared-money">
+                            <strong>
+                              {money.format(
+                                Number(item.shipmentPrice) +
+                                  (item.shippingPayer === "recipient"
+                                    ? item.shippingFee
+                                    : 0),
+                              )}
+                            </strong>
+                            {item.incompleteFields.length > 0 && (
+                              <em>{lang === "ar" ? "تحتاج استكمال" : "Incomplete"}</em>
+                            )}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setPrepared((current) =>
+                                current.filter((record) => record.localId !== item.localId),
+                              )
+                            }
+                            aria-label={lang === "ar" ? "حذف" : "Remove"}
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="prepared-empty">
+                    <Boxes size={27} />
+                    <strong>
+                      {lang === "ar" ? "لا توجد شحنات مجهزة بعد" : "No prepared shipments yet"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "املأ البيانات ثم اختر «إضافة شحنة أخرى»."
+                        : "Fill the form, then choose “Add another shipment”."}
+                    </small>
+                  </div>
+                )}
+                <div className="prepared-summary">
+                  <span>
+                    <small>{lang === "ar" ? "الراسل" : "Sender"}</small>
+                    <strong>{selectedSender[lang]}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "إجمالي التحصيل" : "Total collection"}</small>
+                    <strong>
+                      {money.format(
+                        prepared.reduce(
+                          (sum, item) =>
+                            sum +
+                            Number(item.shipmentPrice) +
+                            (item.shippingPayer === "recipient"
+                              ? item.shippingFee
+                              : 0),
+                          0,
+                        ),
+                      )}
+                    </strong>
+                  </span>
+                </div>
+              </aside>
+            </div>
+          ) : (
+            <section className="excel-entry-card">
+              <div className="excel-entry-hero">
+                <span className="excel-entry-icon">
+                  <FileSpreadsheet size={30} />
+                </span>
+                <div>
+                  <h2>{lang === "ar" ? "استيراد شحنات Excel" : "Import Excel shipments"}</h2>
+                  <p>
+                    {lang === "ar"
+                      ? "حمّل ملف الراسل، افحص كل الصفوف، ثم احفظ المجموعة كاملة."
+                      : "Upload the sender file, validate every row, then save the whole batch."}
+                  </p>
+                </div>
+                <span className="excel-safety-badge">
+                  <ShieldCheck size={16} />
+                  {lang === "ar" ? "الكل أو لا شيء" : "All or nothing"}
+                </span>
+              </div>
+              <label className="excel-dropzone">
+                <Upload size={27} />
+                <strong>
+                  {excelFile ||
+                    (lang === "ar"
+                      ? "اسحب ملف Excel هنا أو اضغط للاختيار"
+                      : "Drop an Excel file here or click to browse")}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "XLSX أو XLS — لا يتم حفظ أي صف قبل نجاح الفحص كاملًا"
+                    : "XLSX or XLS — no row is saved until the full file passes"}
+                </small>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={(event) => {
+                    setExcelFile(event.target.files?.[0]?.name ?? "");
+                    setExcelChecked(false);
+                  }}
+                />
+              </label>
+              <div className="excel-columns-preview">
+                <div>
+                  <strong>{lang === "ar" ? "أعمدة النموذج الحالي" : "Current template columns"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "تتغير تلقائيًا حسب سياسات بيانات الشحنات"
+                      : "Automatically follows shipment data policies"}
+                  </small>
+                </div>
+                <div>
+                  {activeFields
+                    .filter((field) => field.inExcel)
+                    .map((field) => (
+                      <span key={field.id}>
+                        {field.name[lang]}
+                        {field.mode === "required_on_create" && <i>*</i>}
+                      </span>
+                    ))}
+                </div>
+              </div>
+              {excelChecked && (
+                <div className="excel-validation-result">
+                  <CircleAlert size={19} />
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? "الملف يحتاج تصحيح صف واحد"
+                        : "One row needs correction"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "الصف 4: رقم الهاتف الأساسي غير موجود. لم تُحفظ أي شحنة."
+                        : "Row 4: primary phone is missing. No shipments were saved."}
+                    </small>
+                  </span>
+                </div>
+              )}
+              <div className="excel-entry-actions">
+                <button className="secondary-button" type="button">
+                  <FileSpreadsheet size={17} />
+                  {lang === "ar" ? "تنزيل النموذج" : "Download template"}
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={!excelFile}
+                  onClick={() => setExcelChecked(true)}
+                >
+                  <ClipboardCheck size={17} />
+                  {lang === "ar" ? "فحص الملف كاملًا" : "Validate full file"}
+                </button>
+              </div>
+            </section>
+          )}
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function ShipmentsScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -7034,7 +8368,7 @@ function ShipmentsScreen({
 
   const filteredShipments = useMemo(() => {
     const normalized = search.trim().toLowerCase();
-    return shipments.filter((shipment) => {
+    return shipmentRecords.filter((shipment) => {
       const matchesSearch =
         !normalized ||
         [
@@ -7058,7 +8392,7 @@ function ShipmentsScreen({
         !custodyFilter || shipment.custodyType === custodyFilter;
       return matchesSearch && matchesTab && matchesStatus && matchesCustody;
     });
-  }, [activeTab, custodyFilter, search, statusFilter]);
+  }, [activeTab, custodyFilter, search, shipmentRecords, statusFilter]);
 
   const visibleShipments =
     scenario === "ready" ||
@@ -7068,26 +8402,26 @@ function ShipmentsScreen({
       : [];
 
   const tabs: { id: TabId; label: string; count: number }[] = [
-    { id: "all", label: t.all, count: shipments.length },
+    { id: "all", label: t.all, count: shipmentRecords.length },
     {
       id: "action",
       label: t.needAction,
-      count: shipments.filter((item) => item.requiredType === "attention").length,
+      count: shipmentRecords.filter((item) => item.requiredType === "attention").length,
     },
     {
       id: "warehouse",
       label: t.inWarehouse,
-      count: shipments.filter((item) => item.custodyType === "warehouse").length,
+      count: shipmentRecords.filter((item) => item.custodyType === "warehouse").length,
     },
     {
       id: "courier",
       label: t.withCourier,
-      count: shipments.filter((item) => item.custodyType === "courier").length,
+      count: shipmentRecords.filter((item) => item.custodyType === "courier").length,
     },
     {
       id: "incomplete",
       label: t.incomplete,
-      count: shipments.filter((item) => item.requiredType === "incomplete").length,
+      count: shipmentRecords.filter((item) => item.requiredType === "incomplete").length,
     },
   ];
 
@@ -7181,7 +8515,7 @@ function ShipmentsScreen({
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => showToast(t.handoff)}
+                onClick={() => onNavigate("addShipment")}
               >
                 <PackagePlus size={18} />
                 {t.addShipment}
@@ -7597,6 +8931,7 @@ export default function Home() {
   const [sharedShipmentSettings, setSharedShipmentSettings] = useState(
     shipmentDataSettingsDefault,
   );
+  const [sharedShipments, setSharedShipments] = useState(shipments);
   const [controlCenterReady, setControlCenterReady] = useState(false);
 
   useEffect(() => {
@@ -7615,6 +8950,7 @@ export default function Home() {
           courierPlans?: CourierRatePlan[];
           shipmentFields?: ShipmentFieldPolicy[];
           shipmentSettings?: ShipmentDataSettings;
+          shipments?: Shipment[];
         };
         if (Array.isArray(parsed.statuses)) {
           setSharedStatuses(
@@ -7637,6 +8973,9 @@ export default function Home() {
         }
         if (parsed.shipmentSettings) {
           setSharedShipmentSettings(parsed.shipmentSettings);
+        }
+        if (Array.isArray(parsed.shipments)) {
+          setSharedShipments(parsed.shipments);
         }
       }
     } catch {
@@ -7756,6 +9095,7 @@ export default function Home() {
         courierPlans: sharedCourierPlans,
         shipmentFields: sharedShipmentFields,
         shipmentSettings: sharedShipmentSettings,
+        shipments: sharedShipments,
       }),
     );
   }, [
@@ -7765,6 +9105,7 @@ export default function Home() {
     sharedPriceLists,
     sharedShipmentFields,
     sharedShipmentSettings,
+    sharedShipments,
     sharedStatuses,
   ]);
 
@@ -7784,6 +9125,26 @@ export default function Home() {
         <ShipmentsScreen
           lang={lang}
           theme={theme}
+          shipmentRecords={sharedShipments}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "addShipment" ? (
+        <AddShipmentScreen
+          lang={lang}
+          theme={theme}
+          fields={sharedShipmentFields}
+          settings={sharedShipmentSettings}
+          governorates={sharedGovernorates}
+          statuses={sharedStatuses}
+          priceLists={sharedPriceLists}
+          onSaveShipments={(records) =>
+            setSharedShipments((current) => [...records, ...current])
+          }
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
