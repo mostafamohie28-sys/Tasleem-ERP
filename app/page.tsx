@@ -15,7 +15,9 @@ import {
   Clock3,
   Columns3,
   Copy,
+  Eye,
   Filter,
+  GitBranch,
   Globe2,
   HandCoins,
   LayoutDashboard,
@@ -27,6 +29,8 @@ import {
   MoreHorizontal,
   PackageCheck,
   PackagePlus,
+  Pencil,
+  Plus,
   Phone,
   Search,
   Settings2,
@@ -43,7 +47,7 @@ import {
 
 type Lang = "ar" | "en";
 type Theme = "light" | "dark";
-type Screen = "login" | "shipments";
+type Screen = "login" | "shipments" | "statuses";
 type Scenario =
   | "ready"
   | "loading"
@@ -507,6 +511,314 @@ const shipments: Shipment[] = [
   },
 ];
 
+type StatusPolicy = {
+  id: string;
+  name: Localized;
+  code: string;
+  color: string;
+  state: "published" | "draft";
+  executors: Localized;
+  visibility: Localized[];
+  assignmentEffect: Localized;
+  pieceEffect: Localized;
+  financialEffect: Localized;
+  appearsInPricing: boolean;
+  requiredFields: Localized[];
+  usage: number;
+  version: number;
+};
+
+const statusPolicies: StatusPolicy[] = [
+  {
+    id: "status-delivered",
+    name: { ar: "تم التسليم", en: "Delivered" },
+    code: "DELIVERED",
+    color: "#07835a",
+    state: "published",
+    executors: { ar: "المندوب والعمليات", en: "Courier & operations" },
+    visibility: [
+      { ar: "العمليات", en: "Operations" },
+      { ar: "الراسل", en: "Sender" },
+      { ar: "المندوب", en: "Courier" },
+    ],
+    assignmentEffect: { ar: "إنهاء التكليف", en: "End assignment" },
+    pieceEffect: { ar: "كل القطع مسلّمة", en: "All pieces delivered" },
+    financialEffect: { ar: "مبلغ فقط", en: "Money only" },
+    appearsInPricing: true,
+    requiredFields: [
+      { ar: "المبلغ المحصل", en: "Collected amount" },
+      { ar: "عدد القطع المسلمة", en: "Delivered pieces" },
+    ],
+    usage: 1842,
+    version: 7,
+  },
+  {
+    id: "status-partial",
+    name: { ar: "تسليم جزئي", en: "Partial delivery" },
+    code: "PARTIAL",
+    color: "#2551b9",
+    state: "published",
+    executors: { ar: "المندوب والعمليات", en: "Courier & operations" },
+    visibility: [
+      { ar: "العمليات", en: "Operations" },
+      { ar: "الراسل", en: "Sender" },
+    ],
+    assignmentEffect: { ar: "مسار مرتجع", en: "Return route" },
+    pieceEffect: { ar: "إدخال المسلّم واشتقاق الراجع", en: "Enter delivered; derive return" },
+    financialEffect: { ar: "مبلغ ومرتجع", en: "Money and return" },
+    appearsInPricing: true,
+    requiredFields: [
+      { ar: "المبلغ المحصل", en: "Collected amount" },
+      { ar: "عدد القطع المسلمة", en: "Delivered pieces" },
+    ],
+    usage: 214,
+    version: 4,
+  },
+  {
+    id: "status-deferred",
+    name: { ar: "مؤجل للموعد", en: "Deferred" },
+    code: "DEFERRED",
+    color: "#6b7c93",
+    state: "published",
+    executors: {
+      ar: "المندوب وخدمة العملاء والعمليات",
+      en: "Courier, customer service & operations",
+    },
+    visibility: [
+      { ar: "العمليات", en: "Operations" },
+      { ar: "الراسل", en: "Sender" },
+    ],
+    assignmentEffect: { ar: "إنهاء + قائمة متابعة", en: "End + follow-up queue" },
+    pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+    financialEffect: { ar: "مبلغ فقط", en: "Money only" },
+    appearsInPricing: true,
+    requiredFields: [
+      { ar: "الموعد الجديد", en: "New date" },
+      { ar: "سبب الحالة", en: "Status reason" },
+    ],
+    usage: 486,
+    version: 5,
+  },
+  {
+    id: "status-cancelled",
+    name: { ar: "لاغي", en: "Cancelled" },
+    code: "CANCELLED",
+    color: "#c43737",
+    state: "published",
+    executors: { ar: "العمليات فقط", en: "Operations only" },
+    visibility: [
+      { ar: "العمليات", en: "Operations" },
+      { ar: "الراسل", en: "Sender" },
+    ],
+    assignmentEffect: { ar: "مسار مرتجع", en: "Return route" },
+    pieceEffect: { ar: "كل القطع راجعة", en: "All pieces returned" },
+    financialEffect: { ar: "مرتجع فقط", en: "Return only" },
+    appearsInPricing: true,
+    requiredFields: [
+      { ar: "سبب الحالة", en: "Status reason" },
+      { ar: "ملاحظة", en: "Note" },
+    ],
+    usage: 329,
+    version: 3,
+  },
+  {
+    id: "status-no-answer",
+    name: { ar: "لم يرد", en: "No answer" },
+    code: "NO_ANSWER",
+    color: "#e95f00",
+    state: "published",
+    executors: { ar: "خدمة العملاء", en: "Customer service" },
+    visibility: [{ ar: "العمليات", en: "Operations" }],
+    assignmentEffect: {
+      ar: "إنهاء + قائمة متابعة",
+      en: "End + follow-up queue",
+    },
+    pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+    financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInPricing: false,
+    requiredFields: [{ ar: "ملاحظة", en: "Note" }],
+    usage: 671,
+    version: 2,
+  },
+  {
+    id: "status-address-review",
+    name: { ar: "مراجعة العنوان", en: "Address review" },
+    code: "ADDRESS_REVIEW",
+    color: "#8b5cf6",
+    state: "draft",
+    executors: { ar: "العمليات فقط", en: "Operations only" },
+    visibility: [{ ar: "العمليات", en: "Operations" }],
+    assignmentEffect: {
+      ar: "إنهاء + قائمة متابعة",
+      en: "End + follow-up queue",
+    },
+    pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+    financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInPricing: false,
+    requiredFields: [
+      { ar: "العنوان الصحيح", en: "Correct address" },
+      { ar: "ملاحظة", en: "Note" },
+    ],
+    usage: 0,
+    version: 1,
+  },
+];
+
+const statusCopy = {
+  ar: {
+    title: "حالات الشحنات",
+    subtitle: "أنشئ أي حالة وحدد سياستها التشغيلية والمالية بدون تعديل الأكواد.",
+    add: "إضافة حالة",
+    active: "حالات منشورة",
+    financial: "لها أثر مالي",
+    pricing: "تظهر في قوائم الأسعار",
+    draft: "مسودة تحتاج مراجعة",
+    search: "ابحث باسم الحالة أو الكود...",
+    allStates: "كل الحالات",
+    published: "منشورة",
+    drafts: "المسودات",
+    allPricing: "كل سياسات التسعير",
+    inPricing: "تظهر في الأسعار",
+    notInPricing: "لا تظهر في الأسعار",
+    status: "الحالة",
+    operation: "سياسة التشغيل",
+    money: "الأثر المالي والتسعير",
+    visibility: "الظهور",
+    usage: "الاستخدام",
+    version: "نسخة",
+    edit: "تعديل السياسة",
+    publishedBadge: "منشورة",
+    draftBadge: "مسودة",
+    pricingBadge: "ضمن قائمة الأسعار",
+    noPricing: "خارج قائمة الأسعار",
+    noResults: "لا توجد حالات تطابق البحث الحالي.",
+    controlNote:
+      "لا توجد حالة مفروضة داخل النظام؛ كل حالة بالأسفل هي سياسة قابلة للتعديل أو التعطيل حسب طريقة عمل شركتك.",
+    editorTitle: "سياسة الحالة",
+    newTitle: "إضافة حالة جديدة",
+    basics: "التعريف الأساسي",
+    arabicName: "اسم الحالة بالعربية",
+    englishName: "اسم الحالة بالإنجليزية",
+    code: "الكود الداخلي",
+    color: "لون الحالة",
+    publishState: "حالة النشر",
+    permissions: "من يستطيع تسجيلها ومن يراها",
+    executor: "من يستطيع تسجيل الحالة",
+    operationsOnly: "العمليات فقط",
+    courierOperations: "المندوب والعمليات",
+    serviceOperations: "خدمة العملاء والعمليات",
+    courierServiceOperations: "المندوب وخدمة العملاء والعمليات",
+    visibleTo: "تظهر إلى",
+    operationalEffect: "أثرها على التشغيل والحيازة",
+    assignment: "ما يحدث لتكليف المندوب",
+    endAssignment: "إنهاء التكليف",
+    keepAssignment: "إبقاء التكليف",
+    followUp: "إنهاء التكليف وإرسالها للمتابعة",
+    returnRoute: "إنهاء التكليف وإدخال مسار المرتجع",
+    pieces: "سياسة القطع والمرتجع",
+    ignorePieces: "لا تستخدم عدد القطع",
+    allDelivered: "كل القطع مسلمة",
+    allReturned: "كل القطع مرتجعة",
+    partialPieces: "إدخال المسلّم وحساب المرتجع تلقائيًا",
+    financialSection: "الماليات وقائمة الأسعار",
+    financialEffect: "الأثر المالي",
+    noFinancial: "بلا أثر مالي",
+    moneyOnly: "مبلغ فقط",
+    returnOnly: "مرتجع فقط",
+    moneyReturn: "مبلغ ومرتجع",
+    pricingToggle: "إظهار الحالة في قوائم الأسعار",
+    pricingHint:
+      "عند التفعيل ستظهر الحالة بجوار كل منطقة داخل قائمة الأسعار لتحديد سعر مستقل لها.",
+    fields: "البيانات المطلوبة عند تسجيل الحالة",
+    reason: "سبب الحالة",
+    note: "ملاحظة",
+    amount: "المبلغ المحصل",
+    deliveredPieces: "عدد القطع المسلمة",
+    newDate: "موعد جديد",
+    cancel: "إلغاء",
+    save: "حفظ السياسة",
+    saved: "تم حفظ سياسة الحالة",
+    created: "تمت إضافة الحالة الجديدة",
+    demo: "تغييرات تجريبية داخل نموذج التصميم فقط",
+  },
+  en: {
+    title: "Shipment statuses",
+    subtitle: "Create any status and define its operational and financial policy without code changes.",
+    add: "Add status",
+    active: "Published statuses",
+    financial: "Financial statuses",
+    pricing: "Shown in price lists",
+    draft: "Draft needs review",
+    search: "Search status name or code...",
+    allStates: "All statuses",
+    published: "Published",
+    drafts: "Drafts",
+    allPricing: "All pricing policies",
+    inPricing: "Shown in pricing",
+    notInPricing: "Not in pricing",
+    status: "Status",
+    operation: "Operating policy",
+    money: "Financial & pricing effect",
+    visibility: "Visibility",
+    usage: "Usage",
+    version: "Version",
+    edit: "Edit policy",
+    publishedBadge: "Published",
+    draftBadge: "Draft",
+    pricingBadge: "In price lists",
+    noPricing: "Outside price lists",
+    noResults: "No statuses match the current search.",
+    controlNote:
+      "The system imposes no built-in status; every status below is a policy you can edit or disable to match your company.",
+    editorTitle: "Status policy",
+    newTitle: "Add a new status",
+    basics: "Basic definition",
+    arabicName: "Arabic status name",
+    englishName: "English status name",
+    code: "Internal code",
+    color: "Status color",
+    publishState: "Publishing state",
+    permissions: "Who can record it and who can see it",
+    executor: "Who can record this status",
+    operationsOnly: "Operations only",
+    courierOperations: "Courier & operations",
+    serviceOperations: "Customer service & operations",
+    courierServiceOperations: "Courier, customer service & operations",
+    visibleTo: "Visible to",
+    operationalEffect: "Operations and custody effect",
+    assignment: "Courier assignment effect",
+    endAssignment: "End assignment",
+    keepAssignment: "Keep assignment",
+    followUp: "End assignment and send to follow-up",
+    returnRoute: "End assignment and start return route",
+    pieces: "Pieces and return policy",
+    ignorePieces: "Ignore piece count",
+    allDelivered: "All pieces delivered",
+    allReturned: "All pieces returned",
+    partialPieces: "Enter delivered pieces and derive returns",
+    financialSection: "Financials and price lists",
+    financialEffect: "Financial effect",
+    noFinancial: "No financial effect",
+    moneyOnly: "Money only",
+    returnOnly: "Return only",
+    moneyReturn: "Money and return",
+    pricingToggle: "Show status in price lists",
+    pricingHint:
+      "When enabled, the status appears beside every area in price lists with its own configurable price.",
+    fields: "Required data when recording the status",
+    reason: "Status reason",
+    note: "Note",
+    amount: "Collected amount",
+    deliveredPieces: "Delivered pieces",
+    newDate: "New date",
+    cancel: "Cancel",
+    save: "Save policy",
+    saved: "Status policy saved",
+    created: "New status added",
+    demo: "Demo-only changes in the design prototype",
+  },
+} as const;
+
 function Brand({
   compact = false,
   lang,
@@ -763,17 +1075,21 @@ function LoginScreen({
 
 function Sidebar({
   lang,
+  activeScreen,
   collapsed,
   mobileOpen,
   onCollapse,
   onMobileClose,
+  onNavigate,
   onLogout,
 }: {
   lang: Lang;
+  activeScreen: Exclude<Screen, "login">;
   collapsed: boolean;
   mobileOpen: boolean;
   onCollapse: () => void;
   onMobileClose: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
   onLogout: () => void;
 }) {
   const t = copy[lang];
@@ -785,7 +1101,7 @@ function Sidebar({
     {
       label: t.operations,
       items: [
-        { label: t.shipments, icon: Boxes, active: true },
+        { label: t.shipments, icon: Boxes, screen: "shipments" as const },
         { label: t.confirmation, icon: ClipboardCheck },
         { label: t.assignment, icon: Truck },
         { label: t.warehouse, icon: Warehouse },
@@ -799,9 +1115,13 @@ function Sidebar({
       ],
     },
     {
-      label: "",
+      label: t.policies,
       items: [
-        { label: t.policies, icon: SlidersHorizontal },
+        {
+          label: lang === "ar" ? "حالات الشحنات" : "Shipment statuses",
+          icon: SlidersHorizontal,
+          screen: "statuses" as const,
+        },
         { label: t.settings, icon: Settings2 },
       ],
     },
@@ -840,16 +1160,23 @@ function Sidebar({
               {section.label && <p>{section.label}</p>}
               {section.items.map((item) => {
                 const Icon = item.icon;
+                const active = "screen" in item && item.screen === activeScreen;
                 return (
                   <button
-                    className={`nav-item ${item.active ? "nav-item--active" : ""}`}
+                    className={`nav-item ${active ? "nav-item--active" : ""}`}
                     type="button"
                     key={item.label}
                     title={collapsed ? item.label : undefined}
+                    onClick={() => {
+                      if ("screen" in item && item.screen) {
+                        onNavigate(item.screen);
+                        onMobileClose();
+                      }
+                    }}
                   >
                     <Icon size={19} />
                     <span>{item.label}</span>
-                    {item.active && <i />}
+                    {active && <i />}
                   </button>
                 );
               })}
@@ -1238,17 +1565,773 @@ function FilterDrawer({
   );
 }
 
-function ShipmentsScreen({
+function StatusPolicyDrawer({
+  policy,
+  isNew,
+  lang,
+  onClose,
+  onSave,
+}: {
+  policy: StatusPolicy;
+  isNew: boolean;
+  lang: Lang;
+  onClose: () => void;
+  onSave: (policy: StatusPolicy) => void;
+}) {
+  const s = statusCopy[lang];
+  const [draft, setDraft] = useState(policy);
+  const visibilityOptions: Localized[] = [
+    { ar: "العمليات", en: "Operations" },
+    { ar: "الراسل", en: "Sender" },
+    { ar: "المندوب", en: "Courier" },
+    { ar: "خدمة العملاء", en: "Customer service" },
+  ];
+  const fieldOptions: Localized[] = [
+    { ar: statusCopy.ar.reason, en: statusCopy.en.reason },
+    { ar: statusCopy.ar.note, en: statusCopy.en.note },
+    { ar: statusCopy.ar.amount, en: statusCopy.en.amount },
+    { ar: statusCopy.ar.deliveredPieces, en: statusCopy.en.deliveredPieces },
+    { ar: statusCopy.ar.newDate, en: statusCopy.en.newDate },
+  ];
+
+  function toggleLocalized(field: "visibility" | "requiredFields", item: Localized) {
+    setDraft((current) => {
+      const exists = current[field].some((value) => value.en === item.en);
+      return {
+        ...current,
+        [field]: exists
+          ? current[field].filter((value) => value.en !== item.en)
+          : [...current[field], item],
+      };
+    });
+  }
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(draft);
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={s.cancel}
+        onClick={onClose}
+      />
+      <aside className="policy-editor" aria-label={isNew ? s.newTitle : s.editorTitle}>
+        <form onSubmit={handleSubmit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span
+                className="status-color-preview"
+                style={{ backgroundColor: draft.color }}
+              />
+              <span>
+                <small>{isNew ? s.newTitle : s.editorTitle}</small>
+                <strong>{draft.name[lang] || s.newTitle}</strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={s.cancel}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Pencil size={16} /></span>
+                <div>
+                  <strong>{s.basics}</strong>
+                  <small>{s.code}</small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{s.arabicName}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.name.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, ar: event.target.value },
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{s.englishName}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.name.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, en: event.target.value },
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{s.code}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.code}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          code: event.target.value.toUpperCase().replace(/\s+/g, "_"),
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field policy-color-field">
+                  <span>{s.color}</span>
+                  <span className="field__control">
+                    <input
+                      type="color"
+                      value={draft.color}
+                      onChange={(event) =>
+                        setDraft((current) => ({ ...current, color: event.target.value }))
+                      }
+                    />
+                    <strong dir="ltr">{draft.color.toUpperCase()}</strong>
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{s.publishState}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.state}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          state: event.target.value as StatusPolicy["state"],
+                        }))
+                      }
+                    >
+                      <option value="published">{s.publishedBadge}</option>
+                      <option value="draft">{s.draftBadge}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Eye size={16} /></span>
+                <div>
+                  <strong>{s.permissions}</strong>
+                  <small>{s.visibleTo}</small>
+                </div>
+              </div>
+              <label className="select-field">
+                <span>{s.executor}</span>
+                <span className="select-wrap">
+                  <select
+                    value={draft.executors.en}
+                    onChange={(event) => {
+                      const map: Record<string, Localized> = {
+                        "Operations only": { ar: "العمليات فقط", en: "Operations only" },
+                        "Courier & operations": {
+                          ar: "المندوب والعمليات",
+                          en: "Courier & operations",
+                        },
+                        "Customer service & operations": {
+                          ar: "خدمة العملاء والعمليات",
+                          en: "Customer service & operations",
+                        },
+                        "Courier, customer service & operations": {
+                          ar: "المندوب وخدمة العملاء والعمليات",
+                          en: "Courier, customer service & operations",
+                        },
+                      };
+                      setDraft((current) => ({
+                        ...current,
+                        executors: map[event.target.value],
+                      }));
+                    }}
+                  >
+                    <option value="Operations only">{s.operationsOnly}</option>
+                    <option value="Courier & operations">{s.courierOperations}</option>
+                    <option value="Customer service & operations">
+                      {s.serviceOperations}
+                    </option>
+                    <option value="Courier, customer service & operations">
+                      {s.courierServiceOperations}
+                    </option>
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
+              <div className="policy-choice-grid">
+                {visibilityOptions.map((item) => {
+                  const checked = draft.visibility.some((value) => value.en === item.en);
+                  return (
+                    <label className="policy-check" key={item.en}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleLocalized("visibility", item)}
+                      />
+                      <span><Check size={13} /></span>
+                      {item[lang]}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><GitBranch size={16} /></span>
+                <div>
+                  <strong>{s.operationalEffect}</strong>
+                  <small>{s.assignment}</small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="select-field">
+                  <span>{s.assignment}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.assignmentEffect.en}
+                      onChange={(event) => {
+                        const map: Record<string, Localized> = {
+                          "End assignment": { ar: "إنهاء التكليف", en: "End assignment" },
+                          "Keep assignment": { ar: "إبقاء التكليف", en: "Keep assignment" },
+                          "End + follow-up queue": {
+                            ar: "إنهاء + قائمة متابعة",
+                            en: "End + follow-up queue",
+                          },
+                          "Return route": { ar: "مسار مرتجع", en: "Return route" },
+                        };
+                        setDraft((current) => ({
+                          ...current,
+                          assignmentEffect: map[event.target.value],
+                        }));
+                      }}
+                    >
+                      <option value="End assignment">{s.endAssignment}</option>
+                      <option value="Keep assignment">{s.keepAssignment}</option>
+                      <option value="End + follow-up queue">{s.followUp}</option>
+                      <option value="Return route">{s.returnRoute}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{s.pieces}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.pieceEffect.en}
+                      onChange={(event) => {
+                        const map: Record<string, Localized> = {
+                          "Ignore piece count": {
+                            ar: "لا يستخدم عدد القطع",
+                            en: "Ignore piece count",
+                          },
+                          "All pieces delivered": {
+                            ar: "كل القطع مسلّمة",
+                            en: "All pieces delivered",
+                          },
+                          "All pieces returned": {
+                            ar: "كل القطع راجعة",
+                            en: "All pieces returned",
+                          },
+                          "Enter delivered; derive return": {
+                            ar: "إدخال المسلّم واشتقاق الراجع",
+                            en: "Enter delivered; derive return",
+                          },
+                        };
+                        setDraft((current) => ({
+                          ...current,
+                          pieceEffect: map[event.target.value],
+                        }));
+                      }}
+                    >
+                      <option value="Ignore piece count">{s.ignorePieces}</option>
+                      <option value="All pieces delivered">{s.allDelivered}</option>
+                      <option value="All pieces returned">{s.allReturned}</option>
+                      <option value="Enter delivered; derive return">{s.partialPieces}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><HandCoins size={16} /></span>
+                <div>
+                  <strong>{s.financialSection}</strong>
+                  <small>{s.financialEffect}</small>
+                </div>
+              </div>
+              <label className="select-field">
+                <span>{s.financialEffect}</span>
+                <span className="select-wrap">
+                  <select
+                    value={draft.financialEffect.en}
+                    onChange={(event) => {
+                      const map: Record<string, Localized> = {
+                        "No financial effect": {
+                          ar: "بلا أثر مالي",
+                          en: "No financial effect",
+                        },
+                        "Money only": { ar: "مبلغ فقط", en: "Money only" },
+                        "Return only": { ar: "مرتجع فقط", en: "Return only" },
+                        "Money and return": {
+                          ar: "مبلغ ومرتجع",
+                          en: "Money and return",
+                        },
+                      };
+                      setDraft((current) => ({
+                        ...current,
+                        financialEffect: map[event.target.value],
+                      }));
+                    }}
+                  >
+                    <option value="No financial effect">{s.noFinancial}</option>
+                    <option value="Money only">{s.moneyOnly}</option>
+                    <option value="Return only">{s.returnOnly}</option>
+                    <option value="Money and return">{s.moneyReturn}</option>
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.appearsInPricing}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    appearsInPricing: !current.appearsInPricing,
+                  }))
+                }
+              >
+                <span>
+                  <strong>{s.pricingToggle}</strong>
+                  <small>{s.pricingHint}</small>
+                </span>
+                <i className={draft.appearsInPricing ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><ClipboardCheck size={16} /></span>
+                <div>
+                  <strong>{s.fields}</strong>
+                  <small>{draft.requiredFields.length}</small>
+                </div>
+              </div>
+              <div className="policy-choice-grid policy-choice-grid--fields">
+                {fieldOptions.map((item) => {
+                  const checked = draft.requiredFields.some(
+                    (value) => value.en === item.en,
+                  );
+                  return (
+                    <label className="policy-check" key={item.en}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleLocalized("requiredFields", item)}
+                      />
+                      <span><Check size={13} /></span>
+                      {item[lang]}
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
+            <div className="policy-demo-note">
+              <CircleAlert size={15} />
+              {s.demo}
+            </div>
+          </div>
+
+          <div className="drawer__footer drawer__footer--split">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {s.cancel}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {s.save}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function StatusesScreen({
   lang,
   theme,
   onLang,
   onTheme,
+  onNavigate,
   onLogout,
 }: {
   lang: Lang;
   theme: Theme;
   onLang: () => void;
   onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const s = statusCopy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [policies, setPolicies] = useState(statusPolicies);
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState("all");
+  const [pricingFilter, setPricingFilter] = useState("all");
+  const [editing, setEditing] = useState<StatusPolicy | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [toast, setToast] = useState("");
+
+  const filtered = useMemo(() => {
+    const normalized = search.trim().toLowerCase();
+    return policies.filter((policy) => {
+      const matchesSearch =
+        !normalized ||
+        [policy.name.ar, policy.name.en, policy.code].some((value) =>
+          value.toLowerCase().includes(normalized),
+        );
+      const matchesState = stateFilter === "all" || policy.state === stateFilter;
+      const matchesPricing =
+        pricingFilter === "all" ||
+        (pricingFilter === "yes" && policy.appearsInPricing) ||
+        (pricingFilter === "no" && !policy.appearsInPricing);
+      return matchesSearch && matchesState && matchesPricing;
+    });
+  }, [policies, pricingFilter, search, stateFilter]);
+
+  function openNew() {
+    setIsNew(true);
+    setEditing({
+      id: `status-${Date.now()}`,
+      name: { ar: "حالة جديدة", en: "New status" },
+      code: "NEW_STATUS",
+      color: "#2551b9",
+      state: "draft",
+      executors: { ar: "العمليات فقط", en: "Operations only" },
+      visibility: [{ ar: "العمليات", en: "Operations" }],
+      assignmentEffect: { ar: "إنهاء التكليف", en: "End assignment" },
+      pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+      financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+      appearsInPricing: false,
+      requiredFields: [{ ar: "ملاحظة", en: "Note" }],
+      usage: 0,
+      version: 1,
+    });
+  }
+
+  function savePolicy(policy: StatusPolicy) {
+    setPolicies((current) =>
+      current.some((item) => item.id === policy.id)
+        ? current.map((item) =>
+            item.id === policy.id ? { ...policy, version: item.version + 1 } : item,
+          )
+        : [policy, ...current],
+    );
+    setEditing(null);
+    setToast(isNew ? s.created : s.saved);
+    setIsNew(false);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  const financialCount = policies.filter(
+    (policy) => policy.financialEffect.en !== "No financial effect",
+  ).length;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="statuses"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><SlidersHorizontal size={20} /></span>
+            <span>
+              <strong>{t.workspace}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button
+              className="square-button notification-button"
+              type="button"
+              aria-label={t.notifications}
+            >
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content status-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{s.title}</h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>{s.subtitle}</p>
+            </div>
+            <button className="primary-button" type="button" onClick={openNew}>
+              <Plus size={18} />
+              {s.add}
+            </button>
+          </div>
+
+          <section className="status-summary-grid">
+            <article>
+              <span className="status-summary-icon status-summary-icon--green">
+                <PackageCheck size={18} />
+              </span>
+              <div><small>{s.active}</small><strong>{policies.filter((item) => item.state === "published").length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue">
+                <HandCoins size={18} />
+              </span>
+              <div><small>{s.financial}</small><strong>{financialCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange">
+                <SlidersHorizontal size={18} />
+              </span>
+              <div><small>{s.pricing}</small><strong>{policies.filter((item) => item.appearsInPricing).length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--gray">
+                <Pencil size={18} />
+              </span>
+              <div><small>{s.draft}</small><strong>{policies.filter((item) => item.state === "draft").length}</strong></div>
+            </article>
+          </section>
+
+          <div className="status-control-note">
+            <ShieldCheck size={18} />
+            <span>{s.controlNote}</span>
+          </div>
+
+          <section className="status-policy-panel">
+            <div className="status-policy-toolbar">
+              <label className="shipment-search">
+                <Search size={18} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={s.search}
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")} aria-label={t.clear}>
+                    <X size={16} />
+                  </button>
+                )}
+              </label>
+              <label className="select-wrap status-filter">
+                <select
+                  value={stateFilter}
+                  onChange={(event) => setStateFilter(event.target.value)}
+                >
+                  <option value="all">{s.allStates}</option>
+                  <option value="published">{s.published}</option>
+                  <option value="draft">{s.drafts}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="select-wrap status-filter">
+                <select
+                  value={pricingFilter}
+                  onChange={(event) => setPricingFilter(event.target.value)}
+                >
+                  <option value="all">{s.allPricing}</option>
+                  <option value="yes">{s.inPricing}</option>
+                  <option value="no">{s.notInPricing}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="status-policy-table">
+              <div className="status-policy-table__head">
+                <span>{s.status}</span>
+                <span>{s.operation}</span>
+                <span>{s.money}</span>
+                <span>{s.visibility}</span>
+                <span>{s.usage}</span>
+                <span />
+              </div>
+              <div className="status-policy-table__body">
+                {filtered.map((policy) => (
+                  <article className="status-policy-row" key={policy.id}>
+                    <div className="status-identity">
+                      <span
+                        className="status-identity__color"
+                        style={{ backgroundColor: policy.color }}
+                      />
+                      <span>
+                        <strong>{policy.name[lang]}</strong>
+                        <small dir="ltr">{policy.code}</small>
+                      </span>
+                      <em
+                        className={
+                          policy.state === "published"
+                            ? "policy-state policy-state--published"
+                            : "policy-state policy-state--draft"
+                        }
+                      >
+                        {policy.state === "published"
+                          ? s.publishedBadge
+                          : s.draftBadge}
+                      </em>
+                    </div>
+                    <div className="status-policy-copy">
+                      <strong>{policy.assignmentEffect[lang]}</strong>
+                      <small>{policy.executors[lang]}</small>
+                      <small>{policy.pieceEffect[lang]}</small>
+                    </div>
+                    <div className="status-policy-copy">
+                      <strong>{policy.financialEffect[lang]}</strong>
+                      <span
+                        className={
+                          policy.appearsInPricing
+                            ? "pricing-link pricing-link--active"
+                            : "pricing-link"
+                        }
+                      >
+                        {policy.appearsInPricing ? s.pricingBadge : s.noPricing}
+                      </span>
+                    </div>
+                    <div className="visibility-chips">
+                      {policy.visibility.map((item) => (
+                        <span key={item.en}>{item[lang]}</span>
+                      ))}
+                    </div>
+                    <div className="status-usage">
+                      <strong>{policy.usage.toLocaleString(lang === "ar" ? "ar-EG" : "en-US")}</strong>
+                      <small>{s.version} {policy.version}</small>
+                    </div>
+                    <button
+                      className="status-edit-button"
+                      type="button"
+                      aria-label={s.edit}
+                      title={s.edit}
+                      onClick={() => {
+                        setIsNew(false);
+                        setEditing(policy);
+                      }}
+                    >
+                      <Pencil size={16} />
+                    </button>
+                  </article>
+                ))}
+                {filtered.length === 0 && (
+                  <div className="status-empty">
+                    <Search size={22} />
+                    <span>{s.noResults}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editing && (
+        <StatusPolicyDrawer
+          key={editing.id}
+          policy={editing}
+          isNew={isNew}
+          lang={lang}
+          onClose={() => {
+            setEditing(null);
+            setIsNew(false);
+          }}
+          onSave={savePolicy}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ShipmentsScreen({
+  lang,
+  theme,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
   onLogout: () => void;
 }) {
   const t = copy[lang];
@@ -1345,10 +2428,12 @@ function ShipmentsScreen({
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
       <Sidebar
         lang={lang}
+        activeScreen="shipments"
         collapsed={collapsed}
         mobileOpen={mobileOpen}
         onCollapse={() => setCollapsed((value) => !value)}
         onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
         onLogout={onLogout}
       />
 
@@ -1838,7 +2923,7 @@ export default function Home() {
           }
           onEnter={() => setScreen("shipments")}
         />
-      ) : (
+      ) : screen === "shipments" ? (
         <ShipmentsScreen
           lang={lang}
           theme={theme}
@@ -1846,6 +2931,18 @@ export default function Home() {
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : (
+        <StatusesScreen
+          lang={lang}
+          theme={theme}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
       )}
