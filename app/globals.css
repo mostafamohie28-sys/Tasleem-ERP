@@ -3181,8 +3181,28 @@ tbody tr:hover {
 }
 
 .geo-search {
-  min-height: 38px;
-  margin: 10px;
+  width: calc(100% - 24px);
+  height: 32px;
+  min-height: 32px;
+  flex: 0 0 auto;
+  gap: 6px;
+  margin: 8px 12px;
+  padding-inline: 9px;
+  border-radius: 8px;
+}
+
+.geo-search svg {
+  width: 14px;
+  height: 14px;
+}
+
+.geo-search input {
+  font-size: 9.5px;
+}
+
+.geo-search button {
+  width: 22px;
+  height: 22px;
 }
 
 .governorate-list {
