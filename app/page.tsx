@@ -47,7 +47,7 @@ import {
 
 type Lang = "ar" | "en";
 type Theme = "light" | "dark";
-type Screen = "login" | "shipments" | "statuses";
+type Screen = "login" | "shipments" | "statuses" | "areas";
 type Scenario =
   | "ready"
   | "loading"
@@ -819,6 +819,351 @@ const statusCopy = {
   },
 } as const;
 
+type AreaRecord = {
+  id: string;
+  name: Localized;
+  code: string;
+  state: "active" | "paused";
+  order: number;
+  aliases: string[];
+  pricedLists: number;
+  shipments: number;
+  assignmentAllowed: boolean;
+};
+
+type GovernorateRecord = {
+  id: string;
+  name: Localized;
+  code: string;
+  state: "active" | "paused";
+  order: number;
+  areas: AreaRecord[];
+};
+
+type GeoEditorState = {
+  kind: "governorate" | "area";
+  isNew: boolean;
+  governorateId: string;
+  draft: {
+    id: string;
+    name: Localized;
+    code: string;
+    state: "active" | "paused";
+    order: number;
+    aliases: string[];
+    assignmentAllowed: boolean;
+  };
+};
+
+const governoratesData: GovernorateRecord[] = [
+  {
+    id: "gov-cairo",
+    name: { ar: "القاهرة", en: "Cairo" },
+    code: "CAI",
+    state: "active",
+    order: 1,
+    areas: [
+      {
+        id: "area-nasr-city",
+        name: { ar: "مدينة نصر", en: "Nasr City" },
+        code: "CAI-NASR",
+        state: "active",
+        order: 1,
+        aliases: ["عباس العقاد", "مصطفى النحاس"],
+        pricedLists: 5,
+        shipments: 642,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-heliopolis",
+        name: { ar: "مصر الجديدة", en: "Heliopolis" },
+        code: "CAI-HELIO",
+        state: "active",
+        order: 2,
+        aliases: ["هليوبوليس", "روكسي"],
+        pricedLists: 5,
+        shipments: 418,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-maadi",
+        name: { ar: "المعادي", en: "Maadi" },
+        code: "CAI-MAADI",
+        state: "active",
+        order: 3,
+        aliases: ["زهراء المعادي", "دجلة"],
+        pricedLists: 5,
+        shipments: 376,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-shubra",
+        name: { ar: "شبرا", en: "Shubra" },
+        code: "CAI-SHUBRA",
+        state: "active",
+        order: 4,
+        aliases: ["روض الفرج"],
+        pricedLists: 4,
+        shipments: 287,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-new-cairo",
+        name: { ar: "القاهرة الجديدة", en: "New Cairo" },
+        code: "CAI-NEW",
+        state: "paused",
+        order: 5,
+        aliases: ["التجمع", "الرحاب"],
+        pricedLists: 3,
+        shipments: 205,
+        assignmentAllowed: false,
+      },
+    ],
+  },
+  {
+    id: "gov-giza",
+    name: { ar: "الجيزة", en: "Giza" },
+    code: "GIZ",
+    state: "active",
+    order: 2,
+    areas: [
+      {
+        id: "area-dokki",
+        name: { ar: "الدقي", en: "Dokki" },
+        code: "GIZ-DOKKI",
+        state: "active",
+        order: 1,
+        aliases: ["ميدان الدقي"],
+        pricedLists: 5,
+        shipments: 391,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-mohandessin",
+        name: { ar: "المهندسين", en: "Mohandessin" },
+        code: "GIZ-MOH",
+        state: "active",
+        order: 2,
+        aliases: ["جامعة الدول"],
+        pricedLists: 5,
+        shipments: 344,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-haram",
+        name: { ar: "الهرم", en: "Haram" },
+        code: "GIZ-HARAM",
+        state: "active",
+        order: 3,
+        aliases: ["فيصل", "المريوطية"],
+        pricedLists: 5,
+        shipments: 516,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-october",
+        name: { ar: "السادس من أكتوبر", en: "6th of October" },
+        code: "GIZ-OCT",
+        state: "active",
+        order: 4,
+        aliases: ["أكتوبر", "الحي المتميز"],
+        pricedLists: 4,
+        shipments: 228,
+        assignmentAllowed: true,
+      },
+    ],
+  },
+  {
+    id: "gov-alexandria",
+    name: { ar: "الإسكندرية", en: "Alexandria" },
+    code: "ALX",
+    state: "active",
+    order: 3,
+    areas: [
+      {
+        id: "area-sidi-gaber",
+        name: { ar: "سيدي جابر", en: "Sidi Gaber" },
+        code: "ALX-SG",
+        state: "active",
+        order: 1,
+        aliases: ["سموحة"],
+        pricedLists: 5,
+        shipments: 263,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-mandara",
+        name: { ar: "المنتزه", en: "Montaza" },
+        code: "ALX-MON",
+        state: "active",
+        order: 2,
+        aliases: ["المندرة", "ميامي"],
+        pricedLists: 5,
+        shipments: 301,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-agami",
+        name: { ar: "العجمي", en: "Agami" },
+        code: "ALX-AGA",
+        state: "paused",
+        order: 3,
+        aliases: ["البيطاش"],
+        pricedLists: 2,
+        shipments: 114,
+        assignmentAllowed: false,
+      },
+    ],
+  },
+  {
+    id: "gov-dakahlia",
+    name: { ar: "الدقهلية", en: "Dakahlia" },
+    code: "DKH",
+    state: "active",
+    order: 4,
+    areas: [
+      {
+        id: "area-mansoura",
+        name: { ar: "المنصورة", en: "Mansoura" },
+        code: "DKH-MAN",
+        state: "active",
+        order: 1,
+        aliases: ["حي الجامعة"],
+        pricedLists: 5,
+        shipments: 192,
+        assignmentAllowed: true,
+      },
+      {
+        id: "area-talkha",
+        name: { ar: "طلخا", en: "Talkha" },
+        code: "DKH-TAL",
+        state: "active",
+        order: 2,
+        aliases: [],
+        pricedLists: 4,
+        shipments: 87,
+        assignmentAllowed: true,
+      },
+    ],
+  },
+];
+
+const geoCopy = {
+  ar: {
+    title: "المحافظات والمناطق",
+    subtitle: "نظّم نطاق التغطية الذي تستخدمه الشحنات والإسناد وقوائم الأسعار.",
+    addGovernorate: "إضافة محافظة",
+    governorates: "المحافظات",
+    activeAreas: "المناطق المتاحة",
+    pausedAreas: "مناطق موقوفة",
+    pricingPending: "تحتاج استكمال تسعير",
+    controlNote:
+      "إضافة منطقة هنا تُظهرها تلقائيًا داخل كل قوائم الأسعار كسطر يحتاج سعرًا؛ الأسعار نفسها تظل داخل صفحة قوائم الأسعار فقط.",
+    searchGovernorate: "ابحث عن محافظة...",
+    governorateCount: "محافظات",
+    areasCount: "منطقة",
+    active: "نشطة",
+    paused: "موقوفة",
+    editGovernorate: "تعديل المحافظة",
+    areasIn: "مناطق",
+    addArea: "إضافة منطقة",
+    searchArea: "ابحث باسم المنطقة أو الكود أو اسم بديل...",
+    allAvailability: "كل حالات الإتاحة",
+    area: "المنطقة",
+    aliases: "أسماء البحث البديلة",
+    availability: "الإتاحة التشغيلية",
+    priceLists: "جاهزية قوائم الأسعار",
+    shipments: "الشحنات",
+    readyPricing: "مكتمل في القوائم",
+    pendingPricing: "سعر ناقص",
+    assignmentReady: "متاحة للإسناد",
+    assignmentPaused: "الإسناد موقوف",
+    noAreas: "لا توجد مناطق تطابق البحث الحالي.",
+    noGovernorates: "لا توجد محافظات تطابق البحث.",
+    editorGovernorate: "بيانات المحافظة",
+    newGovernorate: "إضافة محافظة جديدة",
+    editorArea: "بيانات المنطقة",
+    newArea: "إضافة منطقة جديدة",
+    arabicName: "الاسم بالعربية",
+    englishName: "الاسم بالإنجليزية",
+    code: "الكود الداخلي",
+    order: "ترتيب الظهور",
+    state: "حالة الاستخدام",
+    alternativeNames: "أسماء بديلة للبحث",
+    alternativeHint: "افصل بين الأسماء بفاصلة، لتسهيل البحث والاستيراد من Excel.",
+    assignmentToggle: "السماح بإسناد الشحنات لهذه المنطقة",
+    assignmentHint: "عند الإيقاف تظل البيانات القديمة محفوظة ولا تظهر المنطقة ضمن مناطق الإسناد المتاحة.",
+    priceLinkTitle: "الربط مع قوائم الأسعار",
+    priceLinkHint:
+      "ستظهر المنطقة تلقائيًا في جميع القوائم الحالية والجديدة، وأي سعر ناقص سيظل واضحًا حتى يتم استكماله من صفحة قوائم الأسعار.",
+    existingData: "حماية البيانات القديمة",
+    existingDataHint:
+      "إيقاف المحافظة أو المنطقة يمنع استخدامها في شحنات جديدة، ولا يغيّر الشحنات المسجلة سابقًا.",
+    cancel: "إلغاء",
+    save: "حفظ البيانات",
+    savedGovernorate: "تم حفظ بيانات المحافظة",
+    savedArea: "تم حفظ بيانات المنطقة",
+    demo: "تغييرات تجريبية داخل نموذج التصميم فقط",
+  },
+  en: {
+    title: "Governorates & areas",
+    subtitle: "Organize the service coverage used by shipments, assignment and price lists.",
+    addGovernorate: "Add governorate",
+    governorates: "Governorates",
+    activeAreas: "Available areas",
+    pausedAreas: "Paused areas",
+    pricingPending: "Need pricing",
+    controlNote:
+      "Adding an area here automatically adds it to every price list as a row awaiting a price; prices stay exclusively inside Price Lists.",
+    searchGovernorate: "Search governorates...",
+    governorateCount: "governorates",
+    areasCount: "areas",
+    active: "Active",
+    paused: "Paused",
+    editGovernorate: "Edit governorate",
+    areasIn: "Areas in",
+    addArea: "Add area",
+    searchArea: "Search area, code or alias...",
+    allAvailability: "All availability",
+    area: "Area",
+    aliases: "Search aliases",
+    availability: "Operational availability",
+    priceLists: "Price-list readiness",
+    shipments: "Shipments",
+    readyPricing: "Complete in lists",
+    pendingPricing: "Missing price",
+    assignmentReady: "Available for assignment",
+    assignmentPaused: "Assignment paused",
+    noAreas: "No areas match the current search.",
+    noGovernorates: "No governorates match your search.",
+    editorGovernorate: "Governorate details",
+    newGovernorate: "Add new governorate",
+    editorArea: "Area details",
+    newArea: "Add new area",
+    arabicName: "Arabic name",
+    englishName: "English name",
+    code: "Internal code",
+    order: "Display order",
+    state: "Usage state",
+    alternativeNames: "Alternative search names",
+    alternativeHint: "Separate aliases with commas to improve search and Excel imports.",
+    assignmentToggle: "Allow shipment assignment to this area",
+    assignmentHint:
+      "When disabled, old records remain intact and the area is excluded from available assignment areas.",
+    priceLinkTitle: "Price-list connection",
+    priceLinkHint:
+      "The area appears automatically in every current and future list; missing prices remain visible until completed in Price Lists.",
+    existingData: "Existing data protection",
+    existingDataHint:
+      "Pausing a governorate or area prevents new use without changing previously recorded shipments.",
+    cancel: "Cancel",
+    save: "Save details",
+    savedGovernorate: "Governorate details saved",
+    savedArea: "Area details saved",
+    demo: "Demo-only changes in the design prototype",
+  },
+} as const;
+
 function Brand({
   compact = false,
   lang,
@@ -1121,6 +1466,11 @@ function Sidebar({
           label: lang === "ar" ? "حالات الشحنات" : "Shipment statuses",
           icon: SlidersHorizontal,
           screen: "statuses" as const,
+        },
+        {
+          label: lang === "ar" ? "المحافظات والمناطق" : "Governorates & areas",
+          icon: MapPin,
+          screen: "areas" as const,
         },
         { label: t.settings, icon: Settings2 },
       ],
@@ -2319,6 +2669,791 @@ function StatusesScreen({
   );
 }
 
+function GeoEditorDrawer({
+  editor,
+  lang,
+  onClose,
+  onSave,
+}: {
+  editor: GeoEditorState;
+  lang: Lang;
+  onClose: () => void;
+  onSave: (editor: GeoEditorState) => void;
+}) {
+  const g = geoCopy[lang];
+  const [draft, setDraft] = useState(editor.draft);
+  const title =
+    editor.kind === "governorate"
+      ? editor.isNew
+        ? g.newGovernorate
+        : g.editorGovernorate
+      : editor.isNew
+        ? g.newArea
+        : g.editorArea;
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave({ ...editor, draft });
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={g.cancel}
+        onClick={onClose}
+      />
+      <aside className="policy-editor geo-editor" aria-label={title}>
+        <form onSubmit={handleSubmit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span className="geo-editor-badge">
+                <MapPin size={19} />
+              </span>
+              <span>
+                <small>{title}</small>
+                <strong>{draft.name[lang] || title}</strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={g.cancel}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Pencil size={16} /></span>
+                <div>
+                  <strong>{title}</strong>
+                  <small>{g.code}</small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{g.arabicName}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.name.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, ar: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{g.englishName}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.name.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, en: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{g.code}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.code}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          code: event.target.value.toUpperCase().replace(/\s+/g, "-"),
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{g.order}</span>
+                  <span className="field__control">
+                    <input
+                      type="number"
+                      min="1"
+                      value={draft.order}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          order: Number(event.target.value) || 1,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{g.state}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.state}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          state: event.target.value as "active" | "paused",
+                        }))
+                      }
+                    >
+                      <option value="active">{g.active}</option>
+                      <option value="paused">{g.paused}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            {editor.kind === "area" && (
+              <>
+                <section className="policy-form-section">
+                  <div className="policy-form-section__title">
+                    <span><Search size={16} /></span>
+                    <div>
+                      <strong>{g.alternativeNames}</strong>
+                      <small>{g.alternativeHint}</small>
+                    </div>
+                  </div>
+                  <label className="field geo-alias-field">
+                    <span>{g.alternativeNames}</span>
+                    <span className="field__control">
+                      <input
+                        value={draft.aliases.join("، ")}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            aliases: event.target.value
+                              .split(/[,،]/)
+                              .map((value) => value.trim())
+                              .filter(Boolean),
+                          }))
+                        }
+                        placeholder={lang === "ar" ? "مثال: التجمع، الرحاب" : "e.g. Tagamoa, Rehab"}
+                      />
+                    </span>
+                  </label>
+                  <button
+                    className="policy-switch-row"
+                    type="button"
+                    role="switch"
+                    aria-checked={draft.assignmentAllowed}
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        assignmentAllowed: !current.assignmentAllowed,
+                      }))
+                    }
+                  >
+                    <span>
+                      <strong>{g.assignmentToggle}</strong>
+                      <small>{g.assignmentHint}</small>
+                    </span>
+                    <i className={draft.assignmentAllowed ? "switch switch--on" : "switch"}>
+                      <b />
+                    </i>
+                  </button>
+                </section>
+
+                <section className="geo-link-card">
+                  <span><SlidersHorizontal size={18} /></span>
+                  <div>
+                    <strong>{g.priceLinkTitle}</strong>
+                    <p>{g.priceLinkHint}</p>
+                  </div>
+                </section>
+              </>
+            )}
+
+            <section className="geo-safety-card">
+              <ShieldCheck size={18} />
+              <div>
+                <strong>{g.existingData}</strong>
+                <p>{g.existingDataHint}</p>
+              </div>
+            </section>
+
+            <div className="policy-demo-note">
+              <CircleAlert size={15} />
+              {g.demo}
+            </div>
+          </div>
+
+          <div className="drawer__footer drawer__footer--split">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {g.cancel}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {g.save}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function AreasScreen({
+  lang,
+  theme,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const g = geoCopy[lang];
+  const priceListCount = 5;
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [governorates, setGovernorates] = useState(governoratesData);
+  const [selectedGovernorateId, setSelectedGovernorateId] = useState(
+    governoratesData[0].id,
+  );
+  const [governorateSearch, setGovernorateSearch] = useState("");
+  const [areaSearch, setAreaSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState("all");
+  const [editor, setEditor] = useState<GeoEditorState | null>(null);
+  const [toast, setToast] = useState("");
+
+  const allAreas = governorates.flatMap((governorate) => governorate.areas);
+  const selectedGovernorate =
+    governorates.find((governorate) => governorate.id === selectedGovernorateId) ??
+    governorates[0];
+
+  const filteredGovernorates = useMemo(() => {
+    const normalized = governorateSearch.trim().toLowerCase();
+    return governorates
+      .filter(
+        (governorate) =>
+          !normalized ||
+          [governorate.name.ar, governorate.name.en, governorate.code].some((value) =>
+            value.toLowerCase().includes(normalized),
+          ),
+      )
+      .sort((a, b) => a.order - b.order);
+  }, [governorateSearch, governorates]);
+
+  const filteredAreas = useMemo(() => {
+    if (!selectedGovernorate) return [];
+    const normalized = areaSearch.trim().toLowerCase();
+    return selectedGovernorate.areas
+      .filter((area) => {
+        const matchesSearch =
+          !normalized ||
+          [area.name.ar, area.name.en, area.code, ...area.aliases].some((value) =>
+            value.toLowerCase().includes(normalized),
+          );
+        const matchesState = stateFilter === "all" || area.state === stateFilter;
+        return matchesSearch && matchesState;
+      })
+      .sort((a, b) => a.order - b.order);
+  }, [areaSearch, selectedGovernorate, stateFilter]);
+
+  function newGovernorate() {
+    setEditor({
+      kind: "governorate",
+      isNew: true,
+      governorateId: "",
+      draft: {
+        id: `gov-${Date.now()}`,
+        name: { ar: "", en: "" },
+        code: "",
+        state: "active",
+        order: governorates.length + 1,
+        aliases: [],
+        assignmentAllowed: true,
+      },
+    });
+  }
+
+  function editGovernorate() {
+    if (!selectedGovernorate) return;
+    setEditor({
+      kind: "governorate",
+      isNew: false,
+      governorateId: selectedGovernorate.id,
+      draft: {
+        id: selectedGovernorate.id,
+        name: selectedGovernorate.name,
+        code: selectedGovernorate.code,
+        state: selectedGovernorate.state,
+        order: selectedGovernorate.order,
+        aliases: [],
+        assignmentAllowed: true,
+      },
+    });
+  }
+
+  function openArea(area?: AreaRecord) {
+    if (!selectedGovernorate) return;
+    setEditor({
+      kind: "area",
+      isNew: !area,
+      governorateId: selectedGovernorate.id,
+      draft: area
+        ? {
+            id: area.id,
+            name: area.name,
+            code: area.code,
+            state: area.state,
+            order: area.order,
+            aliases: area.aliases,
+            assignmentAllowed: area.assignmentAllowed,
+          }
+        : {
+            id: `area-${Date.now()}`,
+            name: { ar: "", en: "" },
+            code: `${selectedGovernorate.code}-`,
+            state: "active",
+            order: selectedGovernorate.areas.length + 1,
+            aliases: [],
+            assignmentAllowed: true,
+          },
+    });
+  }
+
+  function saveGeo(nextEditor: GeoEditorState) {
+    const { draft } = nextEditor;
+    if (nextEditor.kind === "governorate") {
+      setGovernorates((current) => {
+        const exists = current.some((item) => item.id === draft.id);
+        if (exists) {
+          return current.map((item) =>
+            item.id === draft.id
+              ? {
+                  ...item,
+                  name: draft.name,
+                  code: draft.code,
+                  state: draft.state,
+                  order: draft.order,
+                }
+              : item,
+          );
+        }
+        return [
+          ...current,
+          {
+            id: draft.id,
+            name: draft.name,
+            code: draft.code,
+            state: draft.state,
+            order: draft.order,
+            areas: [],
+          },
+        ];
+      });
+      if (nextEditor.isNew) setSelectedGovernorateId(draft.id);
+      setToast(g.savedGovernorate);
+    } else {
+      setGovernorates((current) =>
+        current.map((governorate) => {
+          if (governorate.id !== nextEditor.governorateId) return governorate;
+          const existing = governorate.areas.find((area) => area.id === draft.id);
+          const savedArea: AreaRecord = {
+            id: draft.id,
+            name: draft.name,
+            code: draft.code,
+            state: draft.state,
+            order: draft.order,
+            aliases: draft.aliases,
+            assignmentAllowed: draft.assignmentAllowed,
+            pricedLists: existing?.pricedLists ?? 0,
+            shipments: existing?.shipments ?? 0,
+          };
+          return {
+            ...governorate,
+            areas: existing
+              ? governorate.areas.map((area) =>
+                  area.id === draft.id ? savedArea : area,
+                )
+              : [...governorate.areas, savedArea],
+          };
+        }),
+      );
+      setToast(g.savedArea);
+    }
+    setEditor(null);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  const activeAreaCount = allAreas.filter((area) => area.state === "active").length;
+  const pausedAreaCount = allAreas.length - activeAreaCount;
+  const pendingPriceCount = allAreas.filter(
+    (area) => area.pricedLists < priceListCount,
+  ).length;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="areas"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><MapPin size={20} /></span>
+            <span>
+              <strong>{t.workspace}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button
+              className="square-button notification-button"
+              type="button"
+              aria-label={t.notifications}
+            >
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content geo-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{g.title}</h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>{g.subtitle}</p>
+            </div>
+            <button className="primary-button" type="button" onClick={newGovernorate}>
+              <Plus size={18} />
+              {g.addGovernorate}
+            </button>
+          </div>
+
+          <section className="status-summary-grid geo-summary-grid">
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue">
+                <MapPin size={18} />
+              </span>
+              <div><small>{g.governorates}</small><strong>{governorates.length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--green">
+                <PackageCheck size={18} />
+              </span>
+              <div><small>{g.activeAreas}</small><strong>{activeAreaCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--gray">
+                <CircleAlert size={18} />
+              </span>
+              <div><small>{g.pausedAreas}</small><strong>{pausedAreaCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange">
+                <HandCoins size={18} />
+              </span>
+              <div><small>{g.pricingPending}</small><strong>{pendingPriceCount}</strong></div>
+            </article>
+          </section>
+
+          <div className="status-control-note geo-control-note">
+            <GitBranch size={18} />
+            <span>{g.controlNote}</span>
+          </div>
+
+          <section className="geo-control-layout">
+            <aside className="governorates-panel">
+              <div className="geo-panel-heading">
+                <span>
+                  <strong>{g.governorates}</strong>
+                  <small>{governorates.length} {g.governorateCount}</small>
+                </span>
+                <button
+                  className="status-edit-button"
+                  type="button"
+                  title={g.addGovernorate}
+                  onClick={newGovernorate}
+                >
+                  <Plus size={16} />
+                </button>
+              </div>
+              <label className="shipment-search geo-search">
+                <Search size={17} />
+                <input
+                  value={governorateSearch}
+                  onChange={(event) => setGovernorateSearch(event.target.value)}
+                  placeholder={g.searchGovernorate}
+                />
+                {governorateSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setGovernorateSearch("")}
+                    aria-label={t.clear}
+                  >
+                    <X size={15} />
+                  </button>
+                )}
+              </label>
+              <div className="governorate-list">
+                {filteredGovernorates.map((governorate) => (
+                  <button
+                    className={`governorate-item ${
+                      governorate.id === selectedGovernorate?.id
+                        ? "governorate-item--active"
+                        : ""
+                    }`}
+                    type="button"
+                    key={governorate.id}
+                    onClick={() => setSelectedGovernorateId(governorate.id)}
+                  >
+                    <span className="governorate-item__icon">
+                      <MapPin size={16} />
+                    </span>
+                    <span>
+                      <strong>{governorate.name[lang]}</strong>
+                      <small dir="ltr">{governorate.code}</small>
+                    </span>
+                    <span className="governorate-item__meta">
+                      <b>{governorate.areas.length}</b>
+                      <i
+                        className={
+                          governorate.state === "active"
+                            ? "geo-state-dot geo-state-dot--active"
+                            : "geo-state-dot"
+                        }
+                      />
+                    </span>
+                  </button>
+                ))}
+                {filteredGovernorates.length === 0 && (
+                  <div className="geo-list-empty">{g.noGovernorates}</div>
+                )}
+              </div>
+            </aside>
+
+            <div className="areas-panel">
+              {selectedGovernorate && (
+                <>
+                  <div className="areas-panel__heading">
+                    <div>
+                      <span className="geo-title-icon"><MapPin size={19} /></span>
+                      <span>
+                        <small>{g.areasIn}</small>
+                        <strong>{selectedGovernorate.name[lang]}</strong>
+                      </span>
+                      <em
+                        className={
+                          selectedGovernorate.state === "active"
+                            ? "policy-state policy-state--published"
+                            : "policy-state policy-state--draft"
+                        }
+                      >
+                        {selectedGovernorate.state === "active" ? g.active : g.paused}
+                      </em>
+                    </div>
+                    <div>
+                      <button
+                        className="secondary-button geo-edit-governorate"
+                        type="button"
+                        onClick={editGovernorate}
+                      >
+                        <Pencil size={15} />
+                        {g.editGovernorate}
+                      </button>
+                      <button className="primary-button" type="button" onClick={() => openArea()}>
+                        <Plus size={17} />
+                        {g.addArea}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="geo-area-toolbar">
+                    <label className="shipment-search">
+                      <Search size={18} />
+                      <input
+                        value={areaSearch}
+                        onChange={(event) => setAreaSearch(event.target.value)}
+                        placeholder={g.searchArea}
+                      />
+                      {areaSearch && (
+                        <button type="button" onClick={() => setAreaSearch("")} aria-label={t.clear}>
+                          <X size={16} />
+                        </button>
+                      )}
+                    </label>
+                    <label className="select-wrap status-filter">
+                      <select
+                        value={stateFilter}
+                        onChange={(event) => setStateFilter(event.target.value)}
+                      >
+                        <option value="all">{g.allAvailability}</option>
+                        <option value="active">{g.active}</option>
+                        <option value="paused">{g.paused}</option>
+                      </select>
+                      <ChevronDown size={15} />
+                    </label>
+                  </div>
+
+                  <div className="geo-area-table">
+                    <div className="geo-area-table__head">
+                      <span>{g.area}</span>
+                      <span>{g.aliases}</span>
+                      <span>{g.availability}</span>
+                      <span>{g.priceLists}</span>
+                      <span>{g.shipments}</span>
+                      <span />
+                    </div>
+                    <div className="geo-area-table__body">
+                      {filteredAreas.map((area) => (
+                        <article className="geo-area-row" key={area.id}>
+                          <div className="geo-area-identity">
+                            <span className="geo-area-pin"><MapPin size={15} /></span>
+                            <span>
+                              <strong>{area.name[lang]}</strong>
+                              <small dir="ltr">{area.code}</small>
+                            </span>
+                          </div>
+                          <div className="geo-aliases">
+                            {area.aliases.length ? (
+                              area.aliases.slice(0, 2).map((alias) => (
+                                <span key={alias}>{alias}</span>
+                              ))
+                            ) : (
+                              <small>—</small>
+                            )}
+                          </div>
+                          <div className="geo-availability">
+                            <span
+                              className={
+                                area.state === "active"
+                                  ? "policy-state policy-state--published"
+                                  : "policy-state policy-state--draft"
+                              }
+                            >
+                              {area.state === "active" ? g.active : g.paused}
+                            </span>
+                            <small>
+                              {area.assignmentAllowed
+                                ? g.assignmentReady
+                                : g.assignmentPaused}
+                            </small>
+                          </div>
+                          <div className="geo-pricing">
+                            <span>
+                              <strong dir="ltr">{area.pricedLists}/{priceListCount}</strong>
+                              <small>
+                                {area.pricedLists === priceListCount
+                                  ? g.readyPricing
+                                  : g.pendingPricing}
+                              </small>
+                            </span>
+                            <i>
+                              <b
+                                style={{
+                                  width: `${(area.pricedLists / priceListCount) * 100}%`,
+                                }}
+                              />
+                            </i>
+                          </div>
+                          <div className="geo-shipment-count">
+                            <strong>{area.shipments.toLocaleString(lang === "ar" ? "ar-EG" : "en-US")}</strong>
+                            <small>{g.shipments}</small>
+                          </div>
+                          <button
+                            className="status-edit-button"
+                            type="button"
+                            aria-label={g.editorArea}
+                            title={g.editorArea}
+                            onClick={() => openArea(area)}
+                          >
+                            <Pencil size={16} />
+                          </button>
+                        </article>
+                      ))}
+                      {filteredAreas.length === 0 && (
+                        <div className="status-empty">
+                          <MapPin size={22} />
+                          <span>{g.noAreas}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editor && (
+        <GeoEditorDrawer
+          key={`${editor.kind}-${editor.draft.id}`}
+          editor={editor}
+          lang={lang}
+          onClose={() => setEditor(null)}
+          onSave={saveGeo}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ShipmentsScreen({
   lang,
   theme,
@@ -2934,8 +4069,19 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
-      ) : (
+      ) : screen === "statuses" ? (
         <StatusesScreen
+          lang={lang}
+          theme={theme}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : (
+        <AreasScreen
           lang={lang}
           theme={theme}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
