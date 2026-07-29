@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   Banknote,
+  Barcode,
   Bell,
   Boxes,
   Calculator,
@@ -32,6 +33,7 @@ import {
   HandCoins,
   Landmark,
   LayoutDashboard,
+  Link2,
   LockKeyhole,
   LogIn,
   MapPin,
@@ -47,6 +49,7 @@ import {
   ReceiptText,
   Search,
   Save,
+  ScanBarcode,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
@@ -73,6 +76,7 @@ type Screen =
   | "shipmentPolicies"
   | "incompleteShipments"
   | "warehouse"
+  | "trusts"
   | "addShipment"
   | "confirmation"
   | "assignment"
@@ -113,6 +117,43 @@ type WarehouseMovement = {
   performedBy: Localized;
   note: string;
   timestamp: Localized;
+};
+
+type TrustEvent = {
+  id: string;
+  type: "registered" | "moved" | "linked" | "converted" | "returned";
+  title: Localized;
+  details: Localized;
+  performedBy: Localized;
+  timestamp: Localized;
+};
+
+type TrustRecord = {
+  id: string;
+  barcode: string;
+  description: string;
+  marks: string;
+  sourceName: string;
+  locationId: string;
+  photoName: string;
+  note: string;
+  registeredBy: Localized;
+  receivedAt: Localized;
+  receivedAtIso: string;
+  state: "current" | "resolved";
+  resolution?: "linked" | "converted" | "returned";
+  linkedShipmentId?: string;
+  receiverName?: string;
+  proofReference?: string;
+  resolvedAt?: Localized;
+  history: TrustEvent[];
+};
+
+type TrustPolicy = {
+  photoRequired: boolean;
+  defaultLocationId: string;
+  overdueDays: number;
+  handoverProof: "none" | "signature" | "photo" | "otp";
 };
 
 type SenderRecord = {
@@ -218,6 +259,7 @@ type Shipment = {
   /** Pricing source saved with the shipment so later policy edits do not rewrite history. */
   recipientShippingSource?: "company" | "custom";
   recipientShippingAreaId?: string;
+  sourceTrustId?: string;
   shippingPayer: "recipient" | "sender";
   customValues?: Record<string, string>;
   customFinancialSnapshot?: {
@@ -3025,7 +3067,7 @@ const shipmentDataSettingsDefault: ShipmentDataSettings = {
   confirmationAttempts: 2,
   allowAssignmentWithoutConfirmation: true,
   incompleteRoute: "warehouse_and_queue",
-  trustsEnabled: false,
+  trustsEnabled: true,
   shippingPayerOverride: true,
   phoneLookupEnabled: true,
   defaultShippingPayer: "recipient",
@@ -3812,6 +3854,11 @@ function Sidebar({
           label: t.warehouse,
           icon: Warehouse,
           screen: "warehouse" as const,
+        },
+        {
+          label: lang === "ar" ? "الأمانات" : "Unidentified parcels",
+          icon: ScanBarcode,
+          screen: "trusts" as const,
         },
       ],
     },
@@ -15021,11 +15068,1278 @@ const warehouseLocations = [
   },
 ] as const;
 
+const trustPolicyDefault: TrustPolicy = {
+  photoRequired: false,
+  defaultLocationId: "main-storage",
+  overdueDays: 3,
+  handoverProof: "signature",
+};
+
+const trustRecordsDemoData: TrustRecord[] = [
+  {
+    id: "TR-24031",
+    barcode: "TR-24031",
+    description: "كرتونة متوسطة مغلقة بشريط أزرق",
+    marks: "ملصق قديم ممسوح جزئيًا — حرفا LM ظاهران",
+    sourceName: "",
+    locationId: "main-storage",
+    photoName: "trust-24031.jpg",
+    note: "وصلت مع مجموعة طرود ولم يمكن تحديد بياناتها.",
+    registeredBy: { ar: "محمود صبري", en: "Mahmoud Sabry" },
+    receivedAt: { ar: "29 يوليو، 4:20 م", en: "29 Jul, 4:20 PM" },
+    receivedAtIso: "2026-07-29T13:20:00.000Z",
+    state: "current",
+    history: [
+      {
+        id: "trust-event-24031-created",
+        type: "registered",
+        title: { ar: "تسجيل أمانة", en: "Trust registered" },
+        details: {
+          ar: "سُجل الطرد في التخزين الرئيسي دون إنشاء شحنة.",
+          en: "Parcel registered in main storage without creating a shipment.",
+        },
+        performedBy: { ar: "محمود صبري", en: "Mahmoud Sabry" },
+        timestamp: { ar: "29 يوليو، 4:20 م", en: "29 Jul, 4:20 PM" },
+      },
+    ],
+  },
+  {
+    id: "TR-24026",
+    barcode: "TR-24026",
+    description: "حقيبة شحن سوداء صغيرة",
+    marks: "اسم النور مكتوب بالقلم على الجانب",
+    sourceName: "شركة النور للتجارة",
+    locationId: "data-completion",
+    photoName: "trust-24026.jpg",
+    note: "تم التواصل مع المصدر وننتظر تأكيد محتوى الطرد.",
+    registeredBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    receivedAt: { ar: "24 يوليو، 11:05 ص", en: "24 Jul, 11:05 AM" },
+    receivedAtIso: "2026-07-24T08:05:00.000Z",
+    state: "current",
+    history: [
+      {
+        id: "trust-event-24026-moved",
+        type: "moved",
+        title: { ar: "نقل داخلي", en: "Internal move" },
+        details: {
+          ar: "نُقلت من التخزين الرئيسي إلى رف استكمال البيانات.",
+          en: "Moved from main storage to the data completion shelf.",
+        },
+        performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        timestamp: { ar: "25 يوليو، 9:10 ص", en: "25 Jul, 9:10 AM" },
+      },
+      {
+        id: "trust-event-24026-created",
+        type: "registered",
+        title: { ar: "تسجيل أمانة", en: "Trust registered" },
+        details: {
+          ar: "سُجل المصدر المبدئي من العلامة الموجودة على الطرد.",
+          en: "Probable source recorded from the parcel marking.",
+        },
+        performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        timestamp: { ar: "24 يوليو، 11:05 ص", en: "24 Jul, 11:05 AM" },
+      },
+    ],
+  },
+  {
+    id: "TR-24018",
+    barcode: "TR-24018",
+    description: "كيس شحن أبيض بدون بوليصة",
+    marks: "لا توجد علامات واضحة",
+    sourceName: "",
+    locationId: "",
+    photoName: "",
+    note: "عُثر عليه أثناء ترتيب منطقة الاستلام.",
+    registeredBy: { ar: "سارة علي", en: "Sara Ali" },
+    receivedAt: { ar: "28 يوليو، 1:40 م", en: "28 Jul, 1:40 PM" },
+    receivedAtIso: "2026-07-28T10:40:00.000Z",
+    state: "current",
+    history: [
+      {
+        id: "trust-event-24018-created",
+        type: "registered",
+        title: { ar: "تسجيل أمانة تحتاج مكانًا", en: "Trust needs location" },
+        details: {
+          ar: "سُجلت الأمانة دون موقع داخلي ويجب تحديده.",
+          en: "Trust registered without an internal location; one must be set.",
+        },
+        performedBy: { ar: "سارة علي", en: "Sara Ali" },
+        timestamp: { ar: "28 يوليو، 1:40 م", en: "28 Jul, 1:40 PM" },
+      },
+    ],
+  },
+  {
+    id: "TR-23990",
+    barcode: "TR-23990",
+    description: "طرد كرتوني صغير عُثر على بوليصته لاحقًا",
+    marks: "مرجع LM-4481",
+    sourceName: "متجر لمسة",
+    locationId: "dispatch-zone",
+    photoName: "trust-23990.jpg",
+    note: "",
+    registeredBy: { ar: "محمود صبري", en: "Mahmoud Sabry" },
+    receivedAt: { ar: "20 يوليو، 10:15 ص", en: "20 Jul, 10:15 AM" },
+    receivedAtIso: "2026-07-20T07:15:00.000Z",
+    state: "resolved",
+    resolution: "linked",
+    linkedShipmentId: "TS-12864",
+    resolvedAt: { ar: "20 يوليو، 12:30 م", en: "20 Jul, 12:30 PM" },
+    history: [
+      {
+        id: "trust-event-23990-linked",
+        type: "linked",
+        title: { ar: "رُبطت بشحنة موجودة", en: "Linked to existing shipment" },
+        details: {
+          ar: "تم التحقق من الأصل المادي وربطه بالشحنة TS-12864.",
+          en: "Physical parcel verified and linked to shipment TS-12864.",
+        },
+        performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        timestamp: { ar: "20 يوليو، 12:30 م", en: "20 Jul, 12:30 PM" },
+      },
+      {
+        id: "trust-event-23990-created",
+        type: "registered",
+        title: { ar: "تسجيل أمانة", en: "Trust registered" },
+        details: {
+          ar: "طرد غير معرّف في منطقة الاستلام.",
+          en: "Unidentified parcel in receiving area.",
+        },
+        performedBy: { ar: "محمود صبري", en: "Mahmoud Sabry" },
+        timestamp: { ar: "20 يوليو، 10:15 ص", en: "20 Jul, 10:15 AM" },
+      },
+    ],
+  },
+];
+
 function warehouseLocationLabel(id: string): Localized {
   return warehouseLocations.find((location) => location.id === id)?.name ?? {
     ar: "مكان داخلي غير محدد",
     en: "Internal location not set",
   };
+}
+
+function TrustsScreen({
+  lang,
+  theme,
+  enabled,
+  policy,
+  records,
+  shipmentRecords,
+  onEnabledChange,
+  onPolicyChange,
+  onRecordsChange,
+  onShipmentsChange,
+  onConvertToShipment,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  enabled: boolean;
+  policy: TrustPolicy;
+  records: TrustRecord[];
+  shipmentRecords: Shipment[];
+  onEnabledChange: (enabled: boolean) => void;
+  onPolicyChange: (policy: TrustPolicy) => void;
+  onRecordsChange: (records: TrustRecord[]) => void;
+  onShipmentsChange: (records: Shipment[]) => void;
+  onConvertToShipment: (record: TrustRecord) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [view, setView] = useState<"current" | "history">("current");
+  const [search, setSearch] = useState("");
+  const [locationFilter, setLocationFilter] = useState("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "known" | "unknown">(
+    "all",
+  );
+  const [selectedId, setSelectedId] = useState("");
+  const [action, setAction] = useState<"none" | "link" | "return">("none");
+  const [locationDraft, setLocationDraft] = useState("");
+  const [movementNote, setMovementNote] = useState("");
+  const [shipmentLinkId, setShipmentLinkId] = useState("");
+  const [receiverName, setReceiverName] = useState("");
+  const [proofReference, setProofReference] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
+  const [showPolicy, setShowPolicy] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState(policy);
+  const [createDraft, setCreateDraft] = useState({
+    barcode: "",
+    description: "",
+    marks: "",
+    sourceName: "",
+    locationId: policy.defaultLocationId,
+    photoName: "",
+    note: "",
+  });
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const selectedTrust =
+    records.find((record) => record.id === selectedId) ?? null;
+  const currentRecords = records.filter((record) => record.state === "current");
+  const historyRecords = records.filter((record) => record.state === "resolved");
+  const noSourceCount = currentRecords.filter(
+    (record) => !record.sourceName.trim(),
+  ).length;
+  const noLocationCount = currentRecords.filter(
+    (record) => !record.locationId,
+  ).length;
+  const ageDays = (record: TrustRecord) =>
+    Math.max(
+      0,
+      Math.floor(
+        (Date.now() - new Date(record.receivedAtIso).getTime()) /
+          (24 * 60 * 60 * 1000),
+      ),
+    );
+  const overdueCount = currentRecords.filter(
+    (record) => ageDays(record) >= policy.overdueDays,
+  ).length;
+  const normalizedSearch = search.trim().toLowerCase();
+  const sourceRecords = view === "current" ? currentRecords : historyRecords;
+  const visibleRecords = sourceRecords.filter((record) => {
+    const matchesSearch =
+      !normalizedSearch ||
+      [
+        record.id,
+        record.barcode,
+        record.description,
+        record.marks,
+        record.sourceName,
+        record.registeredBy.ar,
+        record.registeredBy.en,
+        record.linkedShipmentId ?? "",
+      ].some((value) => value.toLowerCase().includes(normalizedSearch));
+    const matchesLocation =
+      locationFilter === "all" ||
+      (locationFilter === "unset"
+        ? !record.locationId
+        : record.locationId === locationFilter);
+    const matchesSource =
+      sourceFilter === "all" ||
+      (sourceFilter === "known"
+        ? Boolean(record.sourceName.trim())
+        : !record.sourceName.trim());
+    return matchesSearch && matchesLocation && matchesSource;
+  });
+  const eligibleShipments = shipmentRecords.filter(
+    (shipment) => shipment.custodyType === "warehouse",
+  );
+
+  function timestampNow(): Localized {
+    const now = new Date();
+    return {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+  }
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function openTrust(record: TrustRecord) {
+    setSelectedId(record.id);
+    setLocationDraft(record.locationId);
+    setMovementNote("");
+    setShipmentLinkId("");
+    setReceiverName("");
+    setProofReference("");
+    setAction("none");
+    setError("");
+  }
+
+  function openCreateForm() {
+    if (!enabled) {
+      setError(
+        lang === "ar"
+          ? "فعّل قدرة الأمانات أولًا قبل تسجيل طرد جديد."
+          : "Enable trusts before registering a new parcel.",
+      );
+      return;
+    }
+    setCreateDraft({
+      barcode: `TR-${String(Date.now()).slice(-5)}`,
+      description: "",
+      marks: "",
+      sourceName: "",
+      locationId: policy.defaultLocationId,
+      photoName: "",
+      note: "",
+    });
+    setError("");
+    setShowCreate(true);
+  }
+
+  function createTrust() {
+    const barcode = createDraft.barcode.trim();
+    if (!barcode || !createDraft.description.trim()) {
+      setError(
+        lang === "ar"
+          ? "باركود الأمانة ووصف الطرد مطلوبان."
+          : "Trust barcode and parcel description are required.",
+      );
+      return;
+    }
+    if (
+      records.some(
+        (record) => record.barcode.toLowerCase() === barcode.toLowerCase(),
+      )
+    ) {
+      setError(
+        lang === "ar"
+          ? "باركود الأمانة مستخدم من قبل."
+          : "This trust barcode is already used.",
+      );
+      return;
+    }
+    if (policy.photoRequired && !createDraft.photoName) {
+      setError(
+        lang === "ar"
+          ? "صورة الطرد مطلوبة وفق سياسة الشركة."
+          : "A parcel photo is required by company policy.",
+      );
+      return;
+    }
+    const timestamp = timestampNow();
+    const record: TrustRecord = {
+      id: barcode,
+      barcode,
+      description: createDraft.description.trim(),
+      marks: createDraft.marks.trim(),
+      sourceName: createDraft.sourceName.trim(),
+      locationId: createDraft.locationId,
+      photoName: createDraft.photoName,
+      note: createDraft.note.trim(),
+      registeredBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      receivedAt: timestamp,
+      receivedAtIso: new Date().toISOString(),
+      state: "current",
+      history: [
+        {
+          id: `trust-event-created-${Date.now()}`,
+          type: "registered",
+          title: { ar: "تسجيل أمانة", en: "Trust registered" },
+          details: {
+            ar: `سُجل الطرد كأمانة مستقلة${createDraft.locationId ? ` في ${warehouseLocationLabel(createDraft.locationId).ar}` : " ويحتاج تحديد مكان"}.`,
+            en: `Parcel registered as an independent trust${createDraft.locationId ? ` in ${warehouseLocationLabel(createDraft.locationId).en}` : " and needs a location"}.`,
+          },
+          performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+          timestamp,
+        },
+      ],
+    };
+    onRecordsChange([record, ...records]);
+    setShowCreate(false);
+    openTrust(record);
+    showToast(
+      lang === "ar"
+        ? "تم تسجيل الأمانة دون إنشاء شحنة أو حساب مالي"
+        : "Trust registered without creating a shipment or financial record",
+    );
+  }
+
+  function moveTrust() {
+    if (!selectedTrust || selectedTrust.state !== "current") return;
+    if (!locationDraft) {
+      setError(
+        lang === "ar" ? "اختر المكان الجديد أولًا." : "Choose a new location.",
+      );
+      return;
+    }
+    if (locationDraft === selectedTrust.locationId) {
+      setError(
+        lang === "ar"
+          ? "الأمانة موجودة بالفعل في هذا المكان."
+          : "The trust is already in this location.",
+      );
+      return;
+    }
+    const timestamp = timestampNow();
+    const from = selectedTrust.locationId
+      ? warehouseLocationLabel(selectedTrust.locationId)
+      : { ar: "مكان غير محدد", en: "Unassigned location" };
+    const to = warehouseLocationLabel(locationDraft);
+    onRecordsChange(
+      records.map((record) =>
+        record.id === selectedTrust.id
+          ? {
+              ...record,
+              locationId: locationDraft,
+              history: [
+                {
+                  id: `trust-event-move-${Date.now()}`,
+                  type: "moved" as const,
+                  title: { ar: "نقل الأمانة", en: "Trust moved" },
+                  details: {
+                    ar: `من ${from.ar} إلى ${to.ar}${movementNote.trim() ? ` — ${movementNote.trim()}` : ""}`,
+                    en: `From ${from.en} to ${to.en}${movementNote.trim() ? ` — ${movementNote.trim()}` : ""}`,
+                  },
+                  performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                  timestamp,
+                },
+                ...record.history,
+              ],
+            }
+          : record,
+      ),
+    );
+    setMovementNote("");
+    setError("");
+    showToast(lang === "ar" ? "تم تحديث مكان الأمانة" : "Trust location updated");
+  }
+
+  function resolveByLink() {
+    if (!selectedTrust || selectedTrust.state !== "current") return;
+    const shipment = shipmentRecords.find(
+      (record) => record.id === shipmentLinkId,
+    );
+    if (!shipment) {
+      setError(
+        lang === "ar" ? "اختر شحنة موجودة أولًا." : "Choose an existing shipment.",
+      );
+      return;
+    }
+    if (shipment.custodyType !== "warehouse") {
+      setError(
+        lang === "ar"
+          ? "لا يمكن الربط: حيازة الشحنة ليست داخل المخزن."
+          : "Cannot link: shipment custody is not in the warehouse.",
+      );
+      return;
+    }
+    const timestamp = timestampNow();
+    const locationId =
+      selectedTrust.locationId || shipment.warehouseLocation || "main-storage";
+    onShipmentsChange(
+      shipmentRecords.map((record) =>
+        record.id === shipment.id
+          ? {
+              ...record,
+              warehouseLocation: locationId,
+              lastEvent: {
+                ar: `تم التحقق من الطرد وربطه بالأمانة ${selectedTrust.id}`,
+                en: `Parcel verified and linked from trust ${selectedTrust.id}`,
+              },
+              warehouseHistory: [
+                {
+                  id: `warehouse-trust-link-${Date.now()}`,
+                  type: "location_changed" as const,
+                  pieces: record.pieces,
+                  from: record.warehouseLocation
+                    ? warehouseLocationLabel(record.warehouseLocation)
+                    : { ar: "مكان الشحنة السابق", en: "Previous shipment location" },
+                  to: warehouseLocationLabel(locationId),
+                  performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                  note:
+                    lang === "ar"
+                      ? `توحيد الأصل المادي مع الأمانة ${selectedTrust.id}`
+                      : `Physical parcel unified with trust ${selectedTrust.id}`,
+                  timestamp,
+                },
+                ...(record.warehouseHistory ?? []),
+              ],
+            }
+          : record,
+      ),
+    );
+    onRecordsChange(
+      records.map((record) =>
+        record.id === selectedTrust.id
+          ? {
+              ...record,
+              state: "resolved" as const,
+              resolution: "linked" as const,
+              linkedShipmentId: shipment.id,
+              resolvedAt: timestamp,
+              history: [
+                {
+                  id: `trust-event-link-${Date.now()}`,
+                  type: "linked" as const,
+                  title: {
+                    ar: "رُبطت بشحنة موجودة",
+                    en: "Linked to existing shipment",
+                  },
+                  details: {
+                    ar: `تم التحقق من أن الأصل المادي واحد وربطه بالشحنة ${shipment.id}.`,
+                    en: `The same physical parcel was verified and linked to ${shipment.id}.`,
+                  },
+                  performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                  timestamp,
+                },
+                ...record.history,
+              ],
+            }
+          : record,
+      ),
+    );
+    setSelectedId("");
+    setView("history");
+    showToast(
+      lang === "ar"
+        ? `تم ربط الأمانة بالشحنة ${shipment.id} دون ازدواج الحيازة`
+        : `Trust linked to ${shipment.id} without duplicate custody`,
+    );
+  }
+
+  function resolveByReturn() {
+    if (!selectedTrust || selectedTrust.state !== "current") return;
+    if (!selectedTrust.sourceName.trim()) {
+      setError(
+        lang === "ar"
+          ? "لا يمكن التسليم قبل تحديد المصدر والتحقق منه."
+          : "The source must be identified and verified before handover.",
+      );
+      return;
+    }
+    if (!receiverName.trim()) {
+      setError(
+        lang === "ar"
+          ? "اسم مستلم الأمانة من المصدر مطلوب."
+          : "Receiver name at the source is required.",
+      );
+      return;
+    }
+    if (policy.handoverProof !== "none" && !proofReference.trim()) {
+      setError(
+        lang === "ar"
+          ? "أدخل مرجع إثبات التسليم وفق سياسة الشركة."
+          : "Enter the handover proof reference required by policy.",
+      );
+      return;
+    }
+    const timestamp = timestampNow();
+    onRecordsChange(
+      records.map((record) =>
+        record.id === selectedTrust.id
+          ? {
+              ...record,
+              state: "resolved" as const,
+              resolution: "returned" as const,
+              receiverName: receiverName.trim(),
+              proofReference: proofReference.trim(),
+              resolvedAt: timestamp,
+              history: [
+                {
+                  id: `trust-event-return-${Date.now()}`,
+                  type: "returned" as const,
+                  title: {
+                    ar: "تسليم الأمانة إلى المصدر",
+                    en: "Trust handed to source",
+                  },
+                  details: {
+                    ar: `استلمها ${receiverName.trim()} من ${record.sourceName}${proofReference.trim() ? ` — إثبات: ${proofReference.trim()}` : ""}.`,
+                    en: `${receiverName.trim()} received it for ${record.sourceName}${proofReference.trim() ? ` — Proof: ${proofReference.trim()}` : ""}.`,
+                  },
+                  performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                  timestamp,
+                },
+                ...record.history,
+              ],
+            }
+          : record,
+      ),
+    );
+    setSelectedId("");
+    setView("history");
+    showToast(
+      lang === "ar"
+        ? "تم تسليم الأمانة وإغلاق حيازة الشركة"
+        : "Trust handed over and company custody closed",
+    );
+  }
+
+  function savePolicy() {
+    if (
+      !policyDraft.defaultLocationId ||
+      !Number.isFinite(policyDraft.overdueDays) ||
+      policyDraft.overdueDays < 1
+    ) {
+      setError(
+        lang === "ar"
+          ? "حدد المكان الافتراضي ومدة تأخير صحيحة."
+          : "Choose a default location and a valid overdue period.",
+      );
+      return;
+    }
+    onPolicyChange(policyDraft);
+    setShowPolicy(false);
+    setError("");
+    showToast(lang === "ar" ? "تم حفظ سياسة الأمانات" : "Trust policy saved");
+  }
+
+  const outcomeLabel = (record: TrustRecord) => {
+    if (record.resolution === "linked")
+      return lang === "ar" ? "رُبطت بشحنة موجودة" : "Linked to shipment";
+    if (record.resolution === "converted")
+      return lang === "ar" ? "تحولت لشحنة جديدة" : "Converted to shipment";
+    return lang === "ar" ? "سُلّمت للمصدر" : "Returned to source";
+  };
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="trusts"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <ScanBarcode size={20} />
+            </span>
+            <span>
+              <strong>{lang === "ar" ? "الأمانات" : "Unidentified parcels"}</strong>
+              <small>{lang === "ar" ? "حيازة مستقلة بلا حسابات" : "Independent custody, no finance"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={
+                lang === "ar"
+                  ? "ابحث بالباركود أو الوصف أو المصدر..."
+                  : "Search barcode, description or source..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content trusts-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <span className="eyebrow">
+                <ShieldCheck size={16} />
+                {lang === "ar" ? "سجل حيازة مستقل" : "Independent custody register"}
+              </span>
+              <h1>{lang === "ar" ? "الأمانات والطرود غير المعرّفة" : "Trusts and unidentified parcels"}</h1>
+              <p>
+                {lang === "ar"
+                  ? "الطرد الموجود فعليًا بلا بيانات كافية لا يتحول إلى شحنة وهمية ولا يدخل الأسعار أو الإسناد."
+                  : "A physical parcel without enough identity never becomes a fake shipment or enters pricing and assignment."}
+              </p>
+            </div>
+            <div className="page-heading-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => {
+                  setPolicyDraft(policy);
+                  setError("");
+                  setShowPolicy(true);
+                }}
+              >
+                <Settings2 size={17} />
+                {lang === "ar" ? "سياسة الأمانات" : "Trust policy"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={openCreateForm}
+                disabled={!enabled}
+              >
+                <Plus size={17} />
+                {lang === "ar" ? "تسجيل أمانة" : "Register trust"}
+              </button>
+            </div>
+          </div>
+
+          {!enabled && (
+            <section className="trusts-disabled-banner">
+              <span>
+                <LockKeyhole size={20} />
+              </span>
+              <div>
+                <strong>
+                  {lang === "ar"
+                    ? "قدرة الأمانات غير مفعلة حاليًا"
+                    : "Trusts are currently disabled"}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "فعّلها على مستوى الشركة لتسجيل طرود جديدة. السجل السابق يظل محفوظًا."
+                    : "Enable it company-wide to register new parcels. Existing history remains preserved."}
+                </small>
+              </div>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => onEnabledChange(true)}
+              >
+                {lang === "ar" ? "تفعيل الأمانات" : "Enable trusts"}
+              </button>
+            </section>
+          )}
+
+          <section className="trusts-truth-strip">
+            <div>
+              <ShieldCheck size={20} />
+              <span>
+                <strong>{lang === "ar" ? "لا أثر مالي" : "No financial impact"}</strong>
+                <small>{lang === "ar" ? "لا سعر، لا COD، لا حساب راسل أو مندوب" : "No price, COD, sender or courier account"}</small>
+              </span>
+            </div>
+            <div>
+              <Truck size={20} />
+              <span>
+                <strong>{lang === "ar" ? "غير قابلة للإسناد" : "Never assignable"}</strong>
+                <small>{lang === "ar" ? "ليست شحنة ولا تظهر في قوائم المناديب" : "Not a shipment and never shown to couriers"}</small>
+              </span>
+            </div>
+            <div>
+              <ClipboardCheck size={20} />
+              <span>
+                <strong>{lang === "ar" ? "مصير موثّق فقط" : "Documented outcome only"}</strong>
+                <small>{lang === "ar" ? "ربط أو تحويل أو تسليم فعلي للمصدر" : "Link, convert or physically return to source"}</small>
+              </span>
+            </div>
+          </section>
+
+          <section className="trusts-metrics">
+            <article>
+              <span><Boxes size={20} /></span>
+              <small>{lang === "ar" ? "أمانات حالية" : "Current trusts"}</small>
+              <strong>{currentRecords.length}</strong>
+            </article>
+            <article>
+              <span><CircleHelp size={20} /></span>
+              <small>{lang === "ar" ? "بدون مصدر معروف" : "Unknown source"}</small>
+              <strong>{noSourceCount}</strong>
+            </article>
+            <article className={overdueCount ? "trusts-metric--alert" : ""}>
+              <span><Clock3 size={20} /></span>
+              <small>{lang === "ar" ? "متأخرة" : "Overdue"}</small>
+              <strong>{overdueCount}</strong>
+            </article>
+            <article className={noLocationCount ? "trusts-metric--danger" : ""}>
+              <span><MapPin size={20} /></span>
+              <small>{lang === "ar" ? "تحتاج تحديد مكان" : "Need location"}</small>
+              <strong>{noLocationCount}</strong>
+            </article>
+          </section>
+
+          <section className="trusts-panel">
+            <div className="trusts-panel__tabs">
+              <button
+                className={view === "current" ? "active" : ""}
+                type="button"
+                onClick={() => setView("current")}
+              >
+                {lang === "ar" ? "الأمانات الحالية" : "Current trusts"}
+                <b>{currentRecords.length}</b>
+              </button>
+              <button
+                className={view === "history" ? "active" : ""}
+                type="button"
+                onClick={() => setView("history")}
+              >
+                {lang === "ar" ? "السجل" : "History"}
+                <b>{historyRecords.length}</b>
+              </button>
+            </div>
+
+            <div className="trusts-toolbar">
+              <label className="shipment-search">
+                <Search size={18} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "باركود الأمانة، الوصف، العلامات أو المصدر..."
+                      : "Trust barcode, description, marks or source..."
+                  }
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")} aria-label={lang === "ar" ? "مسح البحث" : "Clear search"}>
+                    <X size={16} />
+                  </button>
+                )}
+              </label>
+              <label className="select-wrap">
+                <MapPin size={16} />
+                <select
+                  value={locationFilter}
+                  onChange={(event) => setLocationFilter(event.target.value)}
+                >
+                  <option value="all">{lang === "ar" ? "كل الأماكن" : "All locations"}</option>
+                  <option value="unset">{lang === "ar" ? "مكان غير محدد" : "Location not set"}</option>
+                  {warehouseLocations.map((location) => (
+                    <option value={location.id} key={location.id}>
+                      {location.name[lang]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="select-wrap">
+                <UsersRound size={16} />
+                <select
+                  value={sourceFilter}
+                  onChange={(event) =>
+                    setSourceFilter(event.target.value as typeof sourceFilter)
+                  }
+                >
+                  <option value="all">{lang === "ar" ? "كل المصادر" : "All sources"}</option>
+                  <option value="known">{lang === "ar" ? "مصدر معروف" : "Known source"}</option>
+                  <option value="unknown">{lang === "ar" ? "مصدر غير معروف" : "Unknown source"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="trusts-list">
+              <div className="trusts-list__head">
+                <span>{lang === "ar" ? "الأمانة" : "Trust"}</span>
+                <span>{lang === "ar" ? "الوصف والعلامات" : "Description & marks"}</span>
+                <span>{lang === "ar" ? "المصدر" : "Source"}</span>
+                <span>{lang === "ar" ? "المكان" : "Location"}</span>
+                <span>{lang === "ar" ? "العمر" : "Age"}</span>
+                <span>{view === "current" ? (lang === "ar" ? "المطلوب" : "Required") : (lang === "ar" ? "المصير" : "Outcome")}</span>
+              </div>
+              {visibleRecords.length ? (
+                visibleRecords.map((record) => {
+                  const overdue =
+                    record.state === "current" &&
+                    ageDays(record) >= policy.overdueDays;
+                  return (
+                    <button
+                      className="trusts-row"
+                      type="button"
+                      key={record.id}
+                      onClick={() => openTrust(record)}
+                    >
+                      <span className="trusts-code">
+                        <b><Barcode size={16} />{record.barcode}</b>
+                        <small>{record.receivedAt[lang]}</small>
+                      </span>
+                      <span className="trusts-description">
+                        <b>{record.description}</b>
+                        <small>{record.marks || (lang === "ar" ? "لا توجد علامات مسجلة" : "No marks recorded")}</small>
+                      </span>
+                      <span>
+                        {record.sourceName || (
+                          <b className="trusts-warning-label">
+                            {lang === "ar" ? "غير معروف" : "Unknown"}
+                          </b>
+                        )}
+                      </span>
+                      <span>
+                        {record.locationId ? (
+                          warehouseLocationLabel(record.locationId)[lang]
+                        ) : (
+                          <b className="trusts-danger-label">
+                            {lang === "ar" ? "حدد مكانًا" : "Set location"}
+                          </b>
+                        )}
+                      </span>
+                      <span>
+                        <b className={overdue ? "trusts-age trusts-age--overdue" : "trusts-age"}>
+                          {ageDays(record)} {lang === "ar" ? "يوم" : "day(s)"}
+                        </b>
+                      </span>
+                      <span>
+                        {record.state === "current" ? (
+                          <b className="trusts-action-label">
+                            {lang === "ar" ? "مراجعة وحل" : "Review & resolve"}
+                          </b>
+                        ) : (
+                          <b className="trusts-outcome-label">{outcomeLabel(record)}</b>
+                        )}
+                        <ChevronLeft size={17} />
+                      </span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="trusts-empty">
+                  <PackageCheck size={30} />
+                  <strong>
+                    {lang === "ar"
+                      ? "لا توجد أمانات مطابقة"
+                      : "No matching trusts"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "غيّر البحث أو الفلاتر لعرض سجلات أخرى."
+                      : "Change search or filters to see other records."}
+                  </small>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {selectedTrust && (
+        <>
+          <button
+            className="drawer-backdrop"
+            type="button"
+            onClick={() => setSelectedId("")}
+            aria-label={lang === "ar" ? "إغلاق التفاصيل" : "Close details"}
+          />
+          <aside className="shipment-drawer trusts-drawer">
+            <div className="shipment-drawer__header">
+              <div>
+                <span>{selectedTrust.barcode}</span>
+                <h2>{selectedTrust.description}</h2>
+              </div>
+              <button type="button" onClick={() => setSelectedId("")}>
+                <X size={20} />
+              </button>
+            </div>
+
+            <section className="trusts-drawer__identity">
+              <span className="trusts-drawer__icon"><ScanBarcode size={24} /></span>
+              <div>
+                <strong>{lang === "ar" ? "أمانة — ليست شحنة" : "Trust — not a shipment"}</strong>
+                <small>
+                  {lang === "ar"
+                    ? "لا سعر ولا تحصيل ولا حالة شحنة ولا إسناد"
+                    : "No price, collection, shipment status or assignment"}
+                </small>
+              </div>
+              <b className={selectedTrust.state === "current" ? "trusts-state-current" : "trusts-state-resolved"}>
+                {selectedTrust.state === "current"
+                  ? lang === "ar" ? "حالية" : "Current"
+                  : lang === "ar" ? "تم حلها" : "Resolved"}
+              </b>
+            </section>
+
+            <section className="trusts-drawer__facts">
+              <span><small>{lang === "ar" ? "المصدر" : "Source"}</small><strong>{selectedTrust.sourceName || (lang === "ar" ? "غير معروف" : "Unknown")}</strong></span>
+              <span><small>{lang === "ar" ? "المكان" : "Location"}</small><strong>{selectedTrust.locationId ? warehouseLocationLabel(selectedTrust.locationId)[lang] : (lang === "ar" ? "غير محدد" : "Not set")}</strong></span>
+              <span><small>{lang === "ar" ? "المسجل" : "Registered by"}</small><strong>{selectedTrust.registeredBy[lang]}</strong></span>
+              <span><small>{lang === "ar" ? "العمر" : "Age"}</small><strong>{ageDays(selectedTrust)} {lang === "ar" ? "يوم" : "day(s)"}</strong></span>
+            </section>
+
+            <section className="trusts-evidence">
+              <div><small>{lang === "ar" ? "العلامات" : "Marks"}</small><p>{selectedTrust.marks || (lang === "ar" ? "لا توجد علامات مسجلة." : "No marks recorded.")}</p></div>
+              <div><small>{lang === "ar" ? "الملاحظة الداخلية" : "Internal note"}</small><p>{selectedTrust.note || (lang === "ar" ? "لا توجد ملاحظة." : "No note.")}</p></div>
+              <div className="trusts-photo-proof">
+                <span><Eye size={18} /></span>
+                <div>
+                  <small>{lang === "ar" ? "صورة الطرد" : "Parcel photo"}</small>
+                  <strong>{selectedTrust.photoName || (lang === "ar" ? "لم تُرفق صورة" : "No photo attached")}</strong>
+                </div>
+              </div>
+            </section>
+
+            {selectedTrust.state === "current" ? (
+              <>
+                <section className="trusts-drawer-section">
+                  <div className="trusts-drawer-section__title">
+                    <MapPin size={18} />
+                    <span>
+                      <strong>{lang === "ar" ? "نقل الأمانة داخل المخزن" : "Move trust inside warehouse"}</strong>
+                      <small>{lang === "ar" ? "يغيّر المكان فقط ولا ينشئ حركة شحنة." : "Changes location only; no shipment movement is created."}</small>
+                    </span>
+                  </div>
+                  <label className="field">
+                    <span>{lang === "ar" ? "المكان الجديد" : "New location"}</span>
+                    <select value={locationDraft} onChange={(event) => setLocationDraft(event.target.value)}>
+                      <option value="">{lang === "ar" ? "اختر المكان" : "Choose location"}</option>
+                      {warehouseLocations.map((location) => (
+                        <option value={location.id} key={location.id}>{location.name[lang]}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field">
+                    <span>{lang === "ar" ? "ملاحظة النقل" : "Move note"}</span>
+                    <input value={movementNote} onChange={(event) => setMovementNote(event.target.value)} placeholder={lang === "ar" ? "اختياري..." : "Optional..."} />
+                  </label>
+                  <button className="secondary-button" type="button" onClick={moveTrust}>
+                    <MapPin size={16} />
+                    {lang === "ar" ? "تأكيد النقل" : "Confirm move"}
+                  </button>
+                </section>
+
+                <section className="trusts-drawer-section">
+                  <div className="trusts-drawer-section__title">
+                    <ClipboardCheck size={18} />
+                    <span>
+                      <strong>{lang === "ar" ? "حل الأمانة" : "Resolve trust"}</strong>
+                      <small>{lang === "ar" ? "اختر ما حدث فعليًا؛ لا يوجد زر إغلاق عام." : "Choose what physically happened; there is no generic close button."}</small>
+                    </span>
+                  </div>
+                  <div className="trusts-resolution-grid">
+                    <button className={action === "link" ? "active" : ""} type="button" onClick={() => { setAction("link"); setError(""); }}>
+                      <Link2 size={19} />
+                      <strong>{lang === "ar" ? "ربط بشحنة موجودة" : "Link existing shipment"}</strong>
+                      <small>{lang === "ar" ? "بعد التأكد أن الطرد واحد" : "After verifying the same parcel"}</small>
+                    </button>
+                    <button type="button" onClick={() => onConvertToShipment(selectedTrust)}>
+                      <PackagePlus size={19} />
+                      <strong>{lang === "ar" ? "تحويل لشحنة جديدة" : "Convert to new shipment"}</strong>
+                      <small>{lang === "ar" ? "يفتح نموذج الإضافة الكامل" : "Opens the complete intake form"}</small>
+                    </button>
+                    <button className={action === "return" ? "active" : ""} type="button" onClick={() => { setAction("return"); setError(""); }}>
+                      <UsersRound size={19} />
+                      <strong>{lang === "ar" ? "تسليم للمصدر" : "Return to source"}</strong>
+                      <small>{lang === "ar" ? "استلام فعلي بإثبات" : "Physical handover with proof"}</small>
+                    </button>
+                  </div>
+
+                  {action === "link" && (
+                    <div className="trusts-resolution-form">
+                      <label className="field">
+                        <span>{lang === "ar" ? "الشحنة الموجودة داخل المخزن" : "Existing warehouse shipment"}</span>
+                        <select value={shipmentLinkId} onChange={(event) => setShipmentLinkId(event.target.value)}>
+                          <option value="">{lang === "ar" ? "اختر الشحنة" : "Choose shipment"}</option>
+                          {eligibleShipments.map((shipment) => (
+                            <option value={shipment.id} key={shipment.id}>
+                              {shipment.id} — {shipment.recipient[lang]} — {shipment.sender[lang]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <p><ShieldCheck size={15} />{lang === "ar" ? "لن تتكرر الحيازة؛ سجل الأمانة سيغلق ويرتبط بالشحنة." : "Custody will not duplicate; the trust closes and links to the shipment."}</p>
+                      <button className="primary-button" type="button" onClick={resolveByLink}>{lang === "ar" ? "تأكيد الربط" : "Confirm link"}</button>
+                    </div>
+                  )}
+
+                  {action === "return" && (
+                    <div className="trusts-resolution-form">
+                      <label className="field">
+                        <span>{lang === "ar" ? "اسم المستلم من المصدر" : "Receiver at source"}</span>
+                        <input value={receiverName} onChange={(event) => setReceiverName(event.target.value)} />
+                      </label>
+                      {policy.handoverProof !== "none" && (
+                        <label className="field">
+                          <span>
+                            {lang === "ar"
+                              ? `مرجع الإثبات (${policy.handoverProof === "signature" ? "توقيع" : policy.handoverProof === "photo" ? "صورة" : "OTP"})`
+                              : `Proof reference (${policy.handoverProof})`}
+                          </span>
+                          <input value={proofReference} onChange={(event) => setProofReference(event.target.value)} />
+                        </label>
+                      )}
+                      <button className="primary-button" type="button" onClick={resolveByReturn}>{lang === "ar" ? "تأكيد التسليم الفعلي" : "Confirm physical handover"}</button>
+                    </div>
+                  )}
+                </section>
+              </>
+            ) : (
+              <section className="trusts-resolved-card">
+                <Check size={20} />
+                <div>
+                  <strong>{outcomeLabel(selectedTrust)}</strong>
+                  <small>
+                    {selectedTrust.linkedShipmentId
+                      ? `${lang === "ar" ? "الشحنة" : "Shipment"} ${selectedTrust.linkedShipmentId}`
+                      : selectedTrust.receiverName
+                        ? `${lang === "ar" ? "المستلم" : "Receiver"}: ${selectedTrust.receiverName}`
+                        : selectedTrust.resolvedAt?.[lang]}
+                  </small>
+                </div>
+              </section>
+            )}
+
+            {error && <div className="warehouse-error" role="alert"><CircleAlert size={16} />{error}</div>}
+
+            <section className="warehouse-timeline trusts-timeline">
+              <div className="warehouse-timeline__title">
+                <strong>{lang === "ar" ? "سجل الأمانة" : "Trust history"}</strong>
+                <small>{lang === "ar" ? "سجل تراكمي لا يُمسح" : "Append-only history"}</small>
+              </div>
+              <div className="warehouse-timeline__items">
+                {selectedTrust.history.map((event) => (
+                  <article key={event.id}>
+                    <span><ClipboardCheck size={15} /></span>
+                    <div>
+                      <strong>{event.title[lang]}</strong>
+                      <p>{event.details[lang]}</p>
+                      <small>{event.performedBy[lang]} — {event.timestamp[lang]}</small>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </aside>
+        </>
+      )}
+
+      {showCreate && (
+        <div className="modal-overlay">
+          <section className="editor-modal trusts-create-modal">
+            <div className="editor-modal__header">
+              <div>
+                <span>{lang === "ar" ? "سجل حيازة جديد" : "New custody record"}</span>
+                <h2>{lang === "ar" ? "تسجيل أمانة" : "Register trust"}</h2>
+              </div>
+              <button type="button" onClick={() => setShowCreate(false)}><X size={20} /></button>
+            </div>
+            <div className="trusts-create-warning">
+              <ShieldCheck size={18} />
+              <p>{lang === "ar" ? "استخدم هذه الصفحة فقط عندما يكون الطرد موجودًا فعليًا ولا يمكن تعريفه كشحنة صحيحة." : "Use this only when the parcel physically exists and cannot be identified as a valid shipment."}</p>
+            </div>
+            <div className="editor-grid">
+              <label className="field">
+                <span>{lang === "ar" ? "باركود الأمانة" : "Trust barcode"}</span>
+                <input value={createDraft.barcode} onChange={(event) => setCreateDraft((current) => ({ ...current, barcode: event.target.value }))} />
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "المكان الحالي" : "Current location"}</span>
+                <select value={createDraft.locationId} onChange={(event) => setCreateDraft((current) => ({ ...current, locationId: event.target.value }))}>
+                  <option value="">{lang === "ar" ? "يحتاج تحديد مكان" : "Needs location"}</option>
+                  {warehouseLocations.map((location) => (
+                    <option value={location.id} key={location.id}>{location.name[lang]}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field editor-field--full">
+                <span>{lang === "ar" ? "وصف الطرد" : "Parcel description"}</span>
+                <input value={createDraft.description} onChange={(event) => setCreateDraft((current) => ({ ...current, description: event.target.value }))} placeholder={lang === "ar" ? "النوع، الحجم، اللون، التغليف..." : "Type, size, color, packaging..."} />
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "العلامات الظاهرة" : "Visible marks"}</span>
+                <input value={createDraft.marks} onChange={(event) => setCreateDraft((current) => ({ ...current, marks: event.target.value }))} />
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "المصدر إن عُرف" : "Source, if known"}</span>
+                <input value={createDraft.sourceName} onChange={(event) => setCreateDraft((current) => ({ ...current, sourceName: event.target.value }))} />
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "صورة الطرد" : "Parcel photo"}{policy.photoRequired ? " *" : ""}</span>
+                <input type="file" accept="image/*" onChange={(event) => setCreateDraft((current) => ({ ...current, photoName: event.target.files?.[0]?.name ?? "" }))} />
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "ملاحظة داخلية" : "Internal note"}</span>
+                <input value={createDraft.note} onChange={(event) => setCreateDraft((current) => ({ ...current, note: event.target.value }))} />
+              </label>
+            </div>
+            {error && <div className="warehouse-error" role="alert"><CircleAlert size={16} />{error}</div>}
+            <div className="editor-modal__footer">
+              <button className="secondary-button" type="button" onClick={() => setShowCreate(false)}>{lang === "ar" ? "إلغاء" : "Cancel"}</button>
+              <button className="primary-button" type="button" onClick={createTrust}><Save size={17} />{lang === "ar" ? "حفظ الأمانة" : "Save trust"}</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {showPolicy && (
+        <div className="modal-overlay">
+          <section className="editor-modal trust-policy-modal">
+            <div className="editor-modal__header">
+              <div>
+                <span>{lang === "ar" ? "إعداد على مستوى الشركة" : "Company-wide setting"}</span>
+                <h2>{lang === "ar" ? "سياسة الأمانات" : "Trust policy"}</h2>
+              </div>
+              <button type="button" onClick={() => setShowPolicy(false)}><X size={20} /></button>
+            </div>
+            <div className="trust-policy-status">
+              <span className={enabled ? "trust-policy-status__on" : ""}><ShieldCheck size={20} /></span>
+              <div>
+                <strong>{enabled ? (lang === "ar" ? "الأمانات مفعلة" : "Trusts enabled") : (lang === "ar" ? "الأمانات غير مفعلة" : "Trusts disabled")}</strong>
+                <small>{lang === "ar" ? "لا يمكن اعتبار أي أمانة شحنة أو إدخالها في الحسابات." : "No trust can be treated as a shipment or included in accounts."}</small>
+              </div>
+              <button
+                className={enabled ? "secondary-button" : "primary-button"}
+                type="button"
+                onClick={() => {
+                  if (enabled && currentRecords.length) {
+                    setError(lang === "ar" ? "لا يمكن تعطيل القدرة مع وجود أمانات حالية. عالجها أولًا." : "Cannot disable while current trusts exist. Resolve them first.");
+                    return;
+                  }
+                  onEnabledChange(!enabled);
+                  setError("");
+                }}
+              >
+                {enabled ? (lang === "ar" ? "تعطيل" : "Disable") : (lang === "ar" ? "تفعيل" : "Enable")}
+              </button>
+            </div>
+            <div className="editor-grid">
+              <label className="field">
+                <span>{lang === "ar" ? "المكان الافتراضي" : "Default location"}</span>
+                <select value={policyDraft.defaultLocationId} onChange={(event) => setPolicyDraft((current) => ({ ...current, defaultLocationId: event.target.value }))}>
+                  {warehouseLocations.map((location) => (
+                    <option value={location.id} key={location.id}>{location.name[lang]}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "تنبيه التأخير بعد" : "Overdue alert after"}</span>
+                <div className="number-field"><input type="number" min="1" value={policyDraft.overdueDays} onChange={(event) => setPolicyDraft((current) => ({ ...current, overdueDays: Number(event.target.value) }))} /><b>{lang === "ar" ? "يوم" : "days"}</b></div>
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "صورة الطرد" : "Parcel photo"}</span>
+                <select value={policyDraft.photoRequired ? "required" : "optional"} onChange={(event) => setPolicyDraft((current) => ({ ...current, photoRequired: event.target.value === "required" }))}>
+                  <option value="optional">{lang === "ar" ? "اختيارية" : "Optional"}</option>
+                  <option value="required">{lang === "ar" ? "إلزامية" : "Required"}</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>{lang === "ar" ? "إثبات التسليم للمصدر" : "Source handover proof"}</span>
+                <select value={policyDraft.handoverProof} onChange={(event) => setPolicyDraft((current) => ({ ...current, handoverProof: event.target.value as TrustPolicy["handoverProof"] }))}>
+                  <option value="none">{lang === "ar" ? "بدون إثبات إضافي" : "No extra proof"}</option>
+                  <option value="signature">{lang === "ar" ? "توقيع" : "Signature"}</option>
+                  <option value="photo">{lang === "ar" ? "صورة" : "Photo"}</option>
+                  <option value="otp">{lang === "ar" ? "رمز OTP" : "OTP"}</option>
+                </select>
+              </label>
+            </div>
+            {error && <div className="warehouse-error" role="alert"><CircleAlert size={16} />{error}</div>}
+            <div className="editor-modal__footer">
+              <button className="secondary-button" type="button" onClick={() => setShowPolicy(false)}>{lang === "ar" ? "إلغاء" : "Cancel"}</button>
+              <button className="primary-button" type="button" onClick={savePolicy}><Save size={17} />{lang === "ar" ? "حفظ السياسة" : "Save policy"}</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
+    </div>
+  );
 }
 
 function WarehouseScreen({
@@ -23711,7 +25025,9 @@ function AddShipmentScreen({
   governorates,
   statuses,
   priceLists,
+  trustConversion,
   onSaveShipments,
+  onCancelTrustConversion,
   onLang,
   onTheme,
   onNavigate,
@@ -23726,7 +25042,9 @@ function AddShipmentScreen({
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
   priceLists: PriceListRecord[];
+  trustConversion?: TrustRecord | null;
   onSaveShipments: (records: Shipment[]) => void;
+  onCancelTrustConversion?: () => void;
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -23753,9 +25071,23 @@ function AddShipmentScreen({
     )
       ?.shippingPayer ??
     "recipient";
-  const [draft, setDraft] = useState<ShipmentEntryDraft>(() =>
-    makeShipmentEntryDraft(initialPayer),
-  );
+  const makeInitialDraft = () => {
+    const initial = makeShipmentEntryDraft(initialPayer);
+    if (!trustConversion) return initial;
+    return {
+      ...initial,
+      pieces: "1",
+      contents: trustConversion.description,
+      notes: [
+        `${lang === "ar" ? "تحويل من الأمانة" : "Converted from trust"} ${trustConversion.id}`,
+        trustConversion.marks,
+        trustConversion.note,
+      ]
+        .filter(Boolean)
+        .join(" — "),
+    };
+  };
+  const [draft, setDraft] = useState<ShipmentEntryDraft>(makeInitialDraft);
   const [prepared, setPrepared] = useState<PreparedShipment[]>([]);
   const [error, setError] = useState("");
   const [savedCount, setSavedCount] = useState(0);
@@ -23975,6 +25307,14 @@ function AddShipmentScreen({
         lang === "ar" ? "تأكيد الطلب مع المستلم" : "Recipient order confirmation",
       );
     }
+    if (trustConversion && incompleteFields.length) {
+      setError(
+        lang === "ar"
+          ? `لا تتحول الأمانة إلى شحنة ناقصة. استكمل أولًا: ${incompleteFields.join("، ")}`
+          : `A trust cannot become an incomplete shipment. Complete first: ${incompleteFields.join(", ")}`,
+      );
+      return null;
+    }
     return {
       ...draft,
       localId: `prepared-${Date.now()}-${prepared.length}`,
@@ -23987,7 +25327,11 @@ function AddShipmentScreen({
   }
 
   function resetCurrent() {
-    setDraft(makeShipmentEntryDraft(policySettings.defaultShippingPayer));
+    setDraft(
+      trustConversion
+        ? makeInitialDraft()
+        : makeShipmentEntryDraft(policySettings.defaultShippingPayer),
+    );
     setError("");
   }
 
@@ -24038,9 +25382,11 @@ function AddShipmentScreen({
       const beforeWarehouse =
         incomplete &&
         policySettings.incompleteRoute === "complete_before_warehouse";
-      const warehouseLocation = incomplete
-        ? "data-completion"
-        : "dispatch-zone";
+      const warehouseLocation = trustConversion
+        ? trustConversion.locationId || "main-storage"
+        : incomplete
+          ? "data-completion"
+          : "dispatch-zone";
       const pieceCount = Math.max(1, Number(item.pieces) || 1);
       const confirmationText: Localized =
         item.confirmation === "confirmed"
@@ -24099,6 +25445,7 @@ function AddShipmentScreen({
         recipientShippingCharge: item.recipientShippingCharge,
         recipientShippingSource: item.recipientShippingSource,
         recipientShippingAreaId: item.areaId,
+        sourceTrustId: trustConversion?.id,
         shippingPayer: item.shippingPayer,
         customValues: item.customValues,
         customFinancialSnapshot: item.customFinancialSnapshot,
@@ -24110,10 +25457,21 @@ function AddShipmentScreen({
                 id: `warehouse-entry-${now + index}`,
                 type: "entered",
                 pieces: pieceCount,
-                from: { ar: "تسجيل الشحنة", en: "Shipment intake" },
+                from: trustConversion
+                  ? {
+                      ar: `الأمانة ${trustConversion.id}`,
+                      en: `Trust ${trustConversion.id}`,
+                    }
+                  : { ar: "تسجيل الشحنة", en: "Shipment intake" },
                 to: warehouseLocationLabel(warehouseLocation),
                 performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
-                note: lang === "ar" ? "إدخال أولي للمخزن" : "Initial warehouse entry",
+                note: trustConversion
+                  ? lang === "ar"
+                    ? "تحويل ذري من أمانة إلى شحنة صحيحة"
+                    : "Atomic conversion from trust to valid shipment"
+                  : lang === "ar"
+                    ? "إدخال أولي للمخزن"
+                    : "Initial warehouse entry",
                 timestamp: createdAt,
               },
             ],
@@ -24203,24 +25561,46 @@ function AddShipmentScreen({
               <button
                 className="entry-back"
                 type="button"
-                onClick={() => onNavigate("shipments")}
+                onClick={() =>
+                  trustConversion && onCancelTrustConversion
+                    ? onCancelTrustConversion()
+                    : onNavigate("shipments")
+                }
               >
                 {lang === "ar" ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
-                {lang === "ar" ? "العودة إلى الشحنات" : "Back to shipments"}
+                {trustConversion
+                  ? lang === "ar"
+                    ? "العودة إلى الأمانات"
+                    : "Back to trusts"
+                  : lang === "ar"
+                    ? "العودة إلى الشحنات"
+                    : "Back to shipments"}
               </button>
               <div className="page-title-line">
-                <h1>{lang === "ar" ? "إضافة الشحنات" : "Add shipments"}</h1>
+                <h1>
+                  {trustConversion
+                    ? lang === "ar"
+                      ? "تحويل الأمانة إلى شحنة"
+                      : "Convert trust to shipment"
+                    : lang === "ar"
+                      ? "إضافة الشحنات"
+                      : "Add shipments"}
+                </h1>
                 <span className="demo-chip">
                   {lang === "ar" ? "حسب سياسات الشركة" : "Policy-driven"}
                 </span>
               </div>
               <p>
                 {lang === "ar"
-                  ? "سجّل شحنة واحدة أو جهّز مجموعة كاملة لنفس الراسل."
-                  : "Register one shipment or prepare a complete batch for one sender."}
+                  ? trustConversion
+                    ? "أكمل بيانات الشحنة الصحيحة؛ لن تُغلق الأمانة إلا بعد نجاح الحفظ."
+                    : "سجّل شحنة واحدة أو جهّز مجموعة كاملة لنفس الراسل."
+                  : trustConversion
+                    ? "Complete the valid shipment data; the trust closes only after a successful save."
+                    : "Register one shipment or prepare a complete batch for one sender."}
               </p>
             </div>
-            <div className="entry-mode-switch">
+            {!trustConversion && <div className="entry-mode-switch">
               <button
                 type="button"
                 className={entryMode === "manual" ? "entry-mode--active" : ""}
@@ -24237,8 +25617,30 @@ function AddShipmentScreen({
                 <FileSpreadsheet size={17} />
                 Excel
               </button>
-            </div>
+            </div>}
           </div>
+
+          {trustConversion && (
+            <section className="trust-conversion-banner">
+              <span><ScanBarcode size={22} /></span>
+              <div>
+                <strong>
+                  {lang === "ar"
+                    ? `تحويل الأمانة ${trustConversion.id}`
+                    : `Converting trust ${trustConversion.id}`}
+                </strong>
+                <small>
+                  {trustConversion.description} —{" "}
+                  {trustConversion.locationId
+                    ? warehouseLocationLabel(trustConversion.locationId)[lang]
+                    : lang === "ar"
+                      ? "مكان غير محدد"
+                      : "Location not set"}
+                </small>
+              </div>
+              <b>{lang === "ar" ? "شحنة واحدة فقط" : "One shipment only"}</b>
+            </section>
+          )}
 
           <section className="entry-sender-bar">
             <div>
@@ -24917,10 +26319,12 @@ function AddShipmentScreen({
                   <button className="secondary-button" type="button" onClick={resetCurrent}>
                     {lang === "ar" ? "تفريغ الحقول" : "Clear fields"}
                   </button>
-                  <button className="secondary-button" type="button" onClick={addAnother}>
-                    <Plus size={17} />
-                    {lang === "ar" ? "إضافة شحنة أخرى" : "Add another shipment"}
-                  </button>
+                  {!trustConversion && (
+                    <button className="secondary-button" type="button" onClick={addAnother}>
+                      <Plus size={17} />
+                      {lang === "ar" ? "إضافة شحنة أخرى" : "Add another shipment"}
+                    </button>
+                  )}
                   <button className="primary-button" type="button" onClick={savePrepared}>
                     <Save size={17} />
                     {prepared.length
@@ -25753,6 +27157,11 @@ export default function Home() {
   const [sharedTreasuryMovements, setSharedTreasuryMovements] = useState(
     treasuryMovementsData,
   );
+  const [sharedTrusts, setSharedTrusts] = useState(trustRecordsDemoData);
+  const [sharedTrustPolicy, setSharedTrustPolicy] =
+    useState<TrustPolicy>(trustPolicyDefault);
+  const [trustConversionTarget, setTrustConversionTarget] =
+    useState<TrustRecord | null>(null);
   const [activeSenderDraftId, setActiveSenderDraftId] = useState("");
   const [senderProfileTarget, setSenderProfileTarget] = useState<{
     id: string;
@@ -25786,6 +27195,8 @@ export default function Home() {
           senderDrafts?: SenderSettlementDraft[];
           senderReceipts?: SenderSettlementReceipt[];
           treasuryMovements?: TreasuryMovement[];
+          trusts?: TrustRecord[];
+          trustPolicy?: TrustPolicy;
         };
         if (Array.isArray(parsed.statuses)) {
           setSharedStatuses(
@@ -25826,7 +27237,12 @@ export default function Home() {
         }
         if (parsed.shipmentSettings) {
           setSharedShipmentSettings(
-            normalizeShipmentDataSettings(parsed.shipmentSettings),
+            normalizeShipmentDataSettings({
+              ...parsed.shipmentSettings,
+              trustsEnabled: Array.isArray(parsed.trusts)
+                ? parsed.shipmentSettings.trustsEnabled
+                : true,
+            }),
           );
         }
         if (
@@ -25900,6 +27316,15 @@ export default function Home() {
           parsed.treasuryMovements.length > 0
         ) {
           setSharedTreasuryMovements(parsed.treasuryMovements);
+        }
+        if (Array.isArray(parsed.trusts)) {
+          setSharedTrusts(parsed.trusts);
+        }
+        if (parsed.trustPolicy) {
+          setSharedTrustPolicy({
+            ...trustPolicyDefault,
+            ...parsed.trustPolicy,
+          });
         }
         if (Array.isArray(parsed.shipments)) {
           const migratedShipments = parsed.shipments.map((shipment) => {
@@ -26161,6 +27586,8 @@ export default function Home() {
         senderDrafts: sharedSenderDrafts,
         senderReceipts: sharedSenderReceipts,
         treasuryMovements: sharedTreasuryMovements,
+        trusts: sharedTrusts,
+        trustPolicy: sharedTrustPolicy,
       }),
     );
   }, [
@@ -26174,6 +27601,8 @@ export default function Home() {
     sharedSenderDrafts,
     sharedSenderReceipts,
     sharedTreasuryMovements,
+    sharedTrustPolicy,
+    sharedTrusts,
     sharedShipmentFields,
     sharedShipmentSettings,
     sharedSenderPolicies,
@@ -26182,6 +27611,55 @@ export default function Home() {
     sharedSenders,
     sharedCouriers,
   ]);
+
+  function saveShipmentRecords(records: Shipment[]) {
+    setSharedShipments((current) => [...records, ...current]);
+    if (!trustConversionTarget || records.length !== 1) return;
+    const shipment = records[0];
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    setSharedTrusts((current) =>
+      current.map((record) =>
+        record.id === trustConversionTarget.id
+          ? {
+              ...record,
+              state: "resolved" as const,
+              resolution: "converted" as const,
+              linkedShipmentId: shipment.id,
+              resolvedAt: timestamp,
+              history: [
+                {
+                  id: `trust-event-converted-${Date.now()}`,
+                  type: "converted" as const,
+                  title: {
+                    ar: "تحولت إلى شحنة جديدة",
+                    en: "Converted to new shipment",
+                  },
+                  details: {
+                    ar: `نجح إنشاء الشحنة ${shipment.id} وتوقّف باركود الأمانة عن الاستخدام التشغيلي.`,
+                    en: `Shipment ${shipment.id} was created and the trust barcode stopped operational use.`,
+                  },
+                  performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                  timestamp,
+                },
+                ...record.history,
+              ],
+            }
+          : record,
+      ),
+    );
+    setTrustConversionTarget(null);
+    setScreen("trusts");
+  }
 
   return (
     <div className="app-root" data-theme={theme} dir={lang === "ar" ? "rtl" : "ltr"}>
@@ -26418,6 +27896,34 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
+      ) : screen === "trusts" ? (
+        <TrustsScreen
+          lang={lang}
+          theme={theme}
+          enabled={sharedShipmentSettings.trustsEnabled}
+          policy={sharedTrustPolicy}
+          records={sharedTrusts}
+          shipmentRecords={sharedShipments}
+          onEnabledChange={(enabled) =>
+            setSharedShipmentSettings((current) => ({
+              ...current,
+              trustsEnabled: enabled,
+            }))
+          }
+          onPolicyChange={setSharedTrustPolicy}
+          onRecordsChange={setSharedTrusts}
+          onShipmentsChange={setSharedShipments}
+          onConvertToShipment={(record) => {
+            setTrustConversionTarget(record);
+            setScreen("addShipment");
+          }}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
       ) : screen === "confirmation" ? (
         <ConfirmationScreen
           lang={lang}
@@ -26444,14 +27950,22 @@ export default function Home() {
           governorates={sharedGovernorates}
           statuses={sharedStatuses}
           priceLists={sharedPriceLists}
-          onSaveShipments={(records) =>
-            setSharedShipments((current) => [...records, ...current])
-          }
+          trustConversion={trustConversionTarget}
+          onSaveShipments={saveShipmentRecords}
+          onCancelTrustConversion={() => {
+            setTrustConversionTarget(null);
+            setScreen("trusts");
+          }}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
-          onNavigate={setScreen}
+          onNavigate={(nextScreen) => {
+            if (nextScreen !== "addShipment") {
+              setTrustConversionTarget(null);
+            }
+            setScreen(nextScreen);
+          }}
           onLogout={() => setScreen("login")}
         />
       ) : screen === "statuses" ? (
