@@ -2683,6 +2683,20 @@ type SenderShipmentPolicy = {
   sender: Localized;
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
+  state?: "draft" | "published";
+  version?: number;
+  updatedAt?: Localized;
+  updatedBy?: Localized;
+  history?: SenderPolicyHistoryEntry[];
+};
+
+type SenderPolicyHistoryEntry = {
+  version: number;
+  state: "draft" | "published";
+  updatedAt: Localized;
+  updatedBy: Localized;
+  fields: ShipmentFieldPolicy[];
+  settings: ShipmentDataSettings;
 };
 
 function normalizeShipmentField(field: ShipmentFieldPolicy): ShipmentFieldPolicy {
@@ -2977,13 +2991,23 @@ function findSenderShipmentPolicy(
   );
 }
 
+function findEffectiveSenderShipmentPolicy(
+  sender: Localized,
+  senderPolicies: SenderShipmentPolicy[],
+) {
+  const policy = findSenderShipmentPolicy(sender, senderPolicies);
+  return policy && (policy.state ?? "published") === "published"
+    ? policy
+    : undefined;
+}
+
 function resolveShipmentDataSettings(
   shipment: Shipment,
   companySettings: ShipmentDataSettings,
   senderPolicies: SenderShipmentPolicy[],
 ) {
   return normalizeShipmentDataSettings(
-    findSenderShipmentPolicy(shipment.sender, senderPolicies)?.settings ??
+    findEffectiveSenderShipmentPolicy(shipment.sender, senderPolicies)?.settings ??
       companySettings,
   );
 }
@@ -3539,7 +3563,7 @@ function Sidebar({
           screen: "courierRates" as const,
         },
         {
-          label: lang === "ar" ? "مراجعة سياسات الشحنات" : "Shipment policy review",
+          label: lang === "ar" ? "سياسات الرسل" : "Sender policies",
           icon: ClipboardCheck,
           screen: "shipmentPolicies" as const,
         },
@@ -4528,6 +4552,7 @@ function StatusesScreen({
 
   function openNew() {
     setIsNew(true);
+    setEditorInitialTab("profile");
     setEditing({
       id: `status-${Date.now()}`,
       name: { ar: "حالة جديدة", en: "New status" },
@@ -5646,6 +5671,8 @@ function SenderEditor({
   companyFields,
   companySettings,
   senderPolicy,
+  availablePolicies,
+  initialTab,
   onClose,
   onSave,
 }: {
@@ -5656,6 +5683,8 @@ function SenderEditor({
   companyFields: ShipmentFieldPolicy[];
   companySettings: ShipmentDataSettings;
   senderPolicy: SenderShipmentPolicy | null;
+  availablePolicies: SenderShipmentPolicy[];
+  initialTab: "profile" | "policy";
   onClose: () => void;
   onSave: (
     sender: SenderRecord,
@@ -5663,9 +5692,12 @@ function SenderEditor({
   ) => void;
 }) {
   const [draft, setDraft] = useState(() => normalizeSenderRecord(sender));
-  const [activeTab, setActiveTab] = useState<"profile" | "policy">("profile");
+  const [activeTab, setActiveTab] = useState<"profile" | "policy">(initialTab);
   const [policyMode, setPolicyMode] = useState<"company" | "custom">(
     senderPolicy ? "custom" : "company",
+  );
+  const [policyState, setPolicyState] = useState<"draft" | "published">(
+    senderPolicy?.state ?? "published",
   );
   const [policyFields, setPolicyFields] = useState<ShipmentFieldPolicy[]>(
     () =>
@@ -5693,12 +5725,29 @@ function SenderEditor({
             sender: draft.name,
             fields: policyFields.map(normalizeShipmentField),
             settings: normalizeShipmentDataSettings(policySettings),
+            state: policyState,
+            version: senderPolicy?.version ?? 0,
+            updatedAt: senderPolicy?.updatedAt,
+            updatedBy: senderPolicy?.updatedBy,
+            history: senderPolicy?.history ?? [],
           }
         : null,
     );
   }
 
   function choosePolicyMode(mode: "company" | "custom") {
+    if (
+      mode === "company" &&
+      policyMode === "custom" &&
+      senderPolicy &&
+      !window.confirm(
+        lang === "ar"
+          ? "سيؤدي الحفظ إلى إيقاف التخصيص والرجوع لقالب الشركة. هل تريد المتابعة؟"
+          : "Saving will remove the custom policy and return to the company template. Continue?",
+      )
+    ) {
+      return;
+    }
     if (mode === "custom" && policyMode === "company") {
       setPolicyFields(
         companyFields.map((field) => ({
@@ -5742,6 +5791,39 @@ function SenderEditor({
     );
     setEditingPolicyField(null);
     setIsNewPolicyField(false);
+  }
+
+  function copyPolicyFromSender(senderName: string) {
+    if (!senderName) return;
+    const source = availablePolicies.find(
+      (policy) => policy.sender.en === senderName,
+    );
+    if (!source) return;
+    setPolicyFields(
+      source.fields.map((field) => ({
+        ...normalizeShipmentField(field),
+        name: { ...field.name },
+        description: { ...field.description },
+        placements: [...(field.placements ?? [])],
+      })),
+    );
+    setPolicySettings(normalizeShipmentDataSettings(source.settings));
+    setPolicyState("draft");
+    setPolicyMode("custom");
+  }
+
+  function restorePolicyVersion(entry: SenderPolicyHistoryEntry) {
+    setPolicyFields(
+      entry.fields.map((field) => ({
+        ...normalizeShipmentField(field),
+        name: { ...field.name },
+        description: { ...field.description },
+        placements: [...(field.placements ?? [])],
+      })),
+    );
+    setPolicySettings(normalizeShipmentDataSettings(entry.settings));
+    setPolicyState("draft");
+    setPolicyMode("custom");
   }
 
   return (
@@ -6240,6 +6322,68 @@ function SenderEditor({
                       {lang === "ar" ? "سياسة مخصصة" : "Custom policy"}
                     </button>
                   </div>
+                  {policyMode === "custom" && (
+                    <div className="sender-policy-source__tools">
+                      <label className="select-field">
+                        <span>
+                          {lang === "ar" ? "حالة السياسة" : "Policy state"}
+                        </span>
+                        <span className="select-wrap">
+                          <select
+                            value={policyState}
+                            onChange={(event) =>
+                              setPolicyState(
+                                event.target.value as "draft" | "published",
+                              )
+                            }
+                          >
+                            <option value="published">
+                              {lang === "ar" ? "منشورة ومطبقة" : "Published and active"}
+                            </option>
+                            <option value="draft">
+                              {lang === "ar" ? "مسودة غير مطبقة" : "Draft, not applied"}
+                            </option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <label className="select-field">
+                        <span>
+                          {lang === "ar"
+                            ? "نسخ إعدادات من راسل"
+                            : "Copy settings from sender"}
+                        </span>
+                        <span className="select-wrap">
+                          <select
+                            defaultValue=""
+                            onChange={(event) => {
+                              copyPolicyFromSender(event.target.value);
+                              event.currentTarget.value = "";
+                            }}
+                          >
+                            <option value="">
+                              {lang === "ar" ? "اختر راسلًا..." : "Choose a sender..."}
+                            </option>
+                            {availablePolicies
+                              .filter(
+                                (policy) =>
+                                  policy.sender.en !== sender.name.en &&
+                                  (policy.state ?? "published") === "published",
+                              )
+                              .map((policy) => (
+                                <option
+                                  key={policy.sender.en}
+                                  value={policy.sender.en}
+                                >
+                                  {policy.sender[lang]}
+                                </option>
+                              ))}
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                    </div>
+                  )}
                 </section>
 
                 {policyMode === "company" ? (
@@ -6541,6 +6685,80 @@ function SenderEditor({
                           ))}
                       </div>
                     </section>
+
+                    <section className="sender-policy-impact">
+                      <ShieldCheck size={19} />
+                      <div>
+                        <strong>
+                          {lang === "ar"
+                            ? "أثر الحفظ واضح وآمن"
+                            : "Clear and safe save impact"}
+                        </strong>
+                        <p>
+                          {lang === "ar"
+                            ? policyState === "published"
+                              ? "سيُنشأ إصدار جديد ويُطبّق على الشحنات الجديدة لهذا الراسل. تحتفظ الشحنات القديمة ببصمتها المالية والتشغيلية."
+                              : "سيُحفظ إصدار كمسودة للمراجعة ولن يؤثر في التشغيل حتى يتم نشره."
+                            : policyState === "published"
+                              ? "A new version will apply to future shipments only. Existing shipments keep their financial and operating snapshot."
+                              : "This version will be saved as a draft and will not affect operations until published."}
+                        </p>
+                      </div>
+                    </section>
+
+                    {(senderPolicy?.history?.length ?? 0) > 0 && (
+                      <section className="policy-form-section sender-policy-history">
+                        <div className="policy-form-section__title">
+                          <span><Clock3 size={16} /></span>
+                          <div>
+                            <strong>
+                              {lang === "ar" ? "الإصدارات السابقة" : "Previous versions"}
+                            </strong>
+                            <small>
+                              {lang === "ar"
+                                ? "الاستعادة تجهز الإصدار كمسودة قبل الحفظ."
+                                : "Restoring loads the version as a draft before saving."}
+                            </small>
+                          </div>
+                        </div>
+                        <div className="sender-policy-history__list">
+                          {[...(senderPolicy?.history ?? [])]
+                            .reverse()
+                            .slice(0, 5)
+                            .map((entry) => (
+                              <article key={`${entry.version}-${entry.updatedAt.en}`}>
+                                <span>
+                                  <strong>
+                                    {lang === "ar"
+                                      ? `الإصدار ${entry.version}`
+                                      : `Version ${entry.version}`}
+                                  </strong>
+                                  <small>
+                                    {entry.updatedAt[lang]} · {entry.updatedBy[lang]}
+                                  </small>
+                                </span>
+                                <em>
+                                  {entry.state === "published"
+                                    ? lang === "ar"
+                                      ? "منشور"
+                                      : "Published"
+                                    : lang === "ar"
+                                      ? "مسودة"
+                                      : "Draft"}
+                                </em>
+                                <button
+                                  className="secondary-button"
+                                  type="button"
+                                  onClick={() => restorePolicyVersion(entry)}
+                                >
+                                  <Clock3 size={14} />
+                                  {lang === "ar" ? "استعادة" : "Restore"}
+                                </button>
+                              </article>
+                            ))}
+                        </div>
+                      </section>
+                    )}
                   </>
                 )}
               </div>
@@ -6584,6 +6802,9 @@ function SendersScreen({
   senderPolicies,
   companyFields,
   companySettings,
+  initialSenderId,
+  initialSenderTab,
+  onInitialSenderHandled,
   onRecordsChange,
   onPriceListsChange,
   onSenderPoliciesChange,
@@ -6600,6 +6821,9 @@ function SendersScreen({
   senderPolicies: SenderShipmentPolicy[];
   companyFields: ShipmentFieldPolicy[];
   companySettings: ShipmentDataSettings;
+  initialSenderId?: string;
+  initialSenderTab?: "profile" | "policy";
+  onInitialSenderHandled?: () => void;
   onRecordsChange: (
     updater: (current: SenderRecord[]) => SenderRecord[],
   ) => void;
@@ -6623,7 +6847,25 @@ function SendersScreen({
   );
   const [editing, setEditing] = useState<SenderRecord | null>(null);
   const [isNew, setIsNew] = useState(false);
+  const [editorInitialTab, setEditorInitialTab] = useState<
+    "profile" | "policy"
+  >("profile");
   const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    if (!initialSenderId) return;
+    const target = records.find((sender) => sender.id === initialSenderId);
+    if (!target) return;
+    setIsNew(false);
+    setEditorInitialTab(initialSenderTab ?? "profile");
+    setEditing(target);
+    onInitialSenderHandled?.();
+  }, [
+    initialSenderId,
+    initialSenderTab,
+    onInitialSenderHandled,
+    records,
+  ]);
 
   const filteredRecords = records.filter((sender) => {
     const normalized = search.trim().toLowerCase();
@@ -6709,6 +6951,14 @@ function SendersScreen({
       );
     }
     onSenderPoliciesChange((current) => {
+      const previousPolicy = current.find(
+        (policy) =>
+          policy.sender.en === next.name.en ||
+          policy.sender.ar === next.name.ar ||
+          (previous &&
+            (policy.sender.en === previous.name.en ||
+              policy.sender.ar === previous.name.ar)),
+      );
       const remaining = current.filter(
         (policy) =>
           !(
@@ -6719,9 +6969,37 @@ function SendersScreen({
                 policy.sender.ar === previous.name.ar))
           ),
       );
-      return nextPolicy
-        ? [...remaining, { ...nextPolicy, sender: next.name }]
-        : remaining;
+      if (!nextPolicy) return remaining;
+      const history = [...(previousPolicy?.history ?? [])];
+      if (previousPolicy) {
+        history.push({
+          version: previousPolicy.version ?? 1,
+          state: previousPolicy.state ?? "published",
+          updatedAt:
+            previousPolicy.updatedAt ?? {
+              ar: "الإصدار السابق",
+              en: "Previous version",
+            },
+          updatedBy:
+            previousPolicy.updatedBy ?? {
+              ar: "مدير النظام",
+              en: "System administrator",
+            },
+          fields: previousPolicy.fields.map(normalizeShipmentField),
+          settings: normalizeShipmentDataSettings(previousPolicy.settings),
+        });
+      }
+      return [
+        ...remaining,
+        {
+          ...nextPolicy,
+          sender: next.name,
+          version: previousPolicy ? (previousPolicy.version ?? 1) + 1 : 1,
+          updatedAt: { ar: "الآن", en: "Just now" },
+          updatedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+          history,
+        },
+      ];
     });
     setEditing(null);
     setIsNew(false);
@@ -6955,6 +7233,7 @@ function SendersScreen({
                         type="button"
                         onClick={() => {
                           setIsNew(false);
+                          setEditorInitialTab("profile");
                           setEditing(sender);
                         }}
                         aria-label={lang === "ar" ? "تعديل الراسل" : "Edit sender"}
@@ -6978,7 +7257,7 @@ function SendersScreen({
 
       {editing && (
         <SenderEditor
-          key={editing.id}
+          key={`${editing.id}-${editorInitialTab}`}
           sender={editing}
           isNew={isNew}
           lang={lang}
@@ -6988,6 +7267,8 @@ function SendersScreen({
           senderPolicy={
             findSenderShipmentPolicy(editing.name, senderPolicies) ?? null
           }
+          availablePolicies={senderPolicies}
+          initialTab={editorInitialTab}
           onClose={() => {
             setEditing(null);
             setIsNew(false);
@@ -9825,7 +10106,7 @@ function ShipmentFieldEditor({
   );
 }
 
-function ShipmentPoliciesScreen({
+function LegacyShipmentPoliciesScreen({
   lang,
   theme,
   fields,
@@ -10792,6 +11073,829 @@ function ShipmentPoliciesScreen({
           {toast}
         </div>
       )}
+    </div>
+  );
+}
+
+type SenderPolicyCenterRow = {
+  sender: SenderRecord;
+  policy: SenderShipmentPolicy | null;
+  effectiveFields: ShipmentFieldPolicy[];
+  effectiveSettings: ShipmentDataSettings;
+  source: "company" | "custom" | "draft";
+  priceList: PriceListRecord | null;
+  issues: Localized[];
+  differences: Localized[];
+};
+
+function ShipmentPoliciesScreen({
+  lang,
+  theme,
+  fields,
+  settings,
+  senderPolicies,
+  senders,
+  priceLists,
+  onLang,
+  onTheme,
+  onNavigate,
+  onOpenSenderPolicy,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  fields: ShipmentFieldPolicy[];
+  settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
+  senders: SenderRecord[];
+  priceLists: PriceListRecord[];
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onOpenSenderPolicy: (senderId: string) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<
+    "all" | "company" | "custom" | "draft"
+  >("all");
+  const [confirmationFilter, setConfirmationFilter] = useState<
+    "all" | ShipmentDataSettings["confirmationMode"]
+  >("all");
+  const [payerFilter, setPayerFilter] = useState<
+    "all" | ShipmentDataSettings["defaultShippingPayer"]
+  >("all");
+  const [readinessFilter, setReadinessFilter] = useState<
+    "all" | "ready" | "issues"
+  >("all");
+  const [expandedSenderId, setExpandedSenderId] = useState("");
+  const [showCompanyTemplate, setShowCompanyTemplate] = useState(false);
+
+  const normalizedCompanyFields = fields.map(normalizeShipmentField);
+  const normalizedCompanySettings = normalizeShipmentDataSettings(settings);
+
+  function linkedPriceList(sender: SenderRecord) {
+    return (
+      priceLists.find((priceList) =>
+        priceList.senders.some(
+          (name) => name.en === sender.name.en || name.ar === sender.name.ar,
+        ),
+      ) ??
+      priceLists.find((priceList) => priceList.isDefault) ??
+      null
+    );
+  }
+
+  function settingsLabel(
+    key: keyof ShipmentDataSettings,
+    value: ShipmentDataSettings[keyof ShipmentDataSettings],
+  ): Localized {
+    if (key === "confirmationMode") {
+      return value === "required_before_assignment"
+        ? { ar: "التأكيد إلزامي قبل الإسناد", en: "Confirmation required before assignment" }
+        : value === "optional"
+          ? { ar: "التأكيد اختياري", en: "Confirmation optional" }
+          : { ar: "التأكيد غير مستخدم", en: "Confirmation off" };
+    }
+    if (key === "incompleteRoute") {
+      return value === "warehouse_and_queue"
+        ? { ar: "الناقص يدخل المخزن وقائمة الاستكمال", en: "Incomplete goes to warehouse and completion queue" }
+        : { ar: "الاستكمال قبل دخول المخزن", en: "Completion required before warehouse" };
+    }
+    if (key === "defaultShippingPayer") {
+      return value === "recipient"
+        ? { ar: "مصاريف الشحن على المستلم", en: "Recipient pays shipping" }
+        : { ar: "مصاريف الشحن على الراسل", en: "Sender pays shipping" };
+    }
+    if (key === "shippingChargeMode") {
+      const labels: Record<ShippingChargeMode, Localized> = {
+        company_price: { ar: "شحن المستلم = سعر الشركة", en: "Recipient charge = company fee" },
+        company_plus: { ar: "سعر الشركة + زيادة", en: "Company fee + markup" },
+        fixed: { ar: "شحن المستلم مبلغ ثابت", en: "Fixed recipient shipping charge" },
+        manual: { ar: "شحن المستلم يدوي", en: "Manual recipient shipping charge" },
+      };
+      return labels[value as ShippingChargeMode];
+    }
+    return { ar: String(value), en: String(value) };
+  }
+
+  function policyDifferences(policy: SenderShipmentPolicy | null) {
+    if (!policy) {
+      return [
+        {
+          ar: "مطابقة بالكامل لقالب الشركة وتتابع تحديثاته تلقائيًا.",
+          en: "Fully matches the company template and follows its updates.",
+        },
+      ];
+    }
+    const differences: Localized[] = [];
+    const policySettings = normalizeShipmentDataSettings(policy.settings);
+    (
+      [
+        "confirmationMode",
+        "incompleteRoute",
+        "defaultShippingPayer",
+        "shippingChargeMode",
+        "shippingChargeValue",
+        "shippingPayerOverride",
+        "phoneLookupEnabled",
+      ] as (keyof ShipmentDataSettings)[]
+    ).forEach((key) => {
+      if (policySettings[key] !== normalizedCompanySettings[key]) {
+        differences.push(settingsLabel(key, policySettings[key]));
+      }
+    });
+    const companyFieldMap = new Map(
+      normalizedCompanyFields.map((field) => [field.code, field]),
+    );
+    const changedFields = policy.fields
+      .map(normalizeShipmentField)
+      .filter((field) => {
+        const companyField = companyFieldMap.get(field.code);
+        return (
+          !companyField ||
+          companyField.mode !== field.mode ||
+          companyField.inExcel !== field.inExcel
+        );
+      });
+    if (changedFields.length) {
+      differences.push({
+        ar: `${changedFields.length} حقل مختلف عن قالب الشركة`,
+        en: `${changedFields.length} fields differ from the company template`,
+      });
+    }
+    return differences.length
+      ? differences
+      : [
+          {
+            ar: "السياسة مخصصة لكن إعداداتها الحالية مطابقة لقالب الشركة.",
+            en: "Custom policy currently matches the company template.",
+          },
+        ];
+  }
+
+  const rows = useMemo<SenderPolicyCenterRow[]>(() => {
+    return senders.map((sender) => {
+      const policy =
+        findSenderShipmentPolicy(sender.name, senderPolicies) ?? null;
+      const policyState = policy?.state ?? "published";
+      const isPublished = Boolean(policy && policyState === "published");
+      const effectiveFields = (
+        isPublished ? policy?.fields ?? fields : fields
+      ).map(normalizeShipmentField);
+      const effectiveSettings = normalizeShipmentDataSettings(
+        isPublished ? policy?.settings ?? settings : settings,
+      );
+      const source: SenderPolicyCenterRow["source"] = !policy
+        ? "company"
+        : policyState === "draft"
+          ? "draft"
+          : "custom";
+      const priceList = linkedPriceList(sender);
+      const issues: Localized[] = [];
+      const recipientPhone = effectiveFields.find(
+        (field) => field.code === "RECIPIENT_PHONE",
+      );
+      if (!priceList) {
+        issues.push({
+          ar: "لا توجد قائمة أسعار مطبقة",
+          en: "No applied price list",
+        });
+      }
+      if (source === "draft") {
+        issues.push({
+          ar: "توجد مسودة لم تُنشر",
+          en: "Unpublished draft exists",
+        });
+      }
+      if (
+        recipientPhone?.mode === "hidden" &&
+        (effectiveSettings.confirmationMode !== "off" ||
+          effectiveSettings.phoneLookupEnabled)
+      ) {
+        issues.push({
+          ar: "هاتف المستلم مخفي مع تفعيل التأكيد أو البحث",
+          en: "Recipient phone is hidden while confirmation or lookup is enabled",
+        });
+      }
+      if (effectiveFields.every((field) => field.mode === "hidden")) {
+        issues.push({
+          ar: "كل حقول الشحنة مخفية",
+          en: "All shipment fields are hidden",
+        });
+      }
+      if (
+        policy?.fields.some(
+          (field) => !field.code || !field.name.ar || !field.name.en,
+        )
+      ) {
+        issues.push({
+          ar: "يوجد حقل مخصص غير مكتمل",
+          en: "An incomplete custom field exists",
+        });
+      }
+      return {
+        sender,
+        policy,
+        effectiveFields,
+        effectiveSettings,
+        source,
+        priceList,
+        issues,
+        differences: policyDifferences(policy),
+      };
+    });
+  }, [
+    fields,
+    normalizedCompanyFields,
+    normalizedCompanySettings,
+    priceLists,
+    senderPolicies,
+    senders,
+    settings,
+  ]);
+
+  const filteredRows = rows.filter((row) => {
+    const query = search.trim().toLowerCase();
+    const matchesSearch =
+      !query ||
+      [
+        row.sender.name.ar,
+        row.sender.name.en,
+        row.sender.code,
+        row.sender.pageName,
+        row.sender.phone,
+        row.priceList?.name.ar ?? "",
+        row.priceList?.name.en ?? "",
+      ].some((value) => value.toLowerCase().includes(query));
+    const matchesSource =
+      sourceFilter === "all" || row.source === sourceFilter;
+    const matchesConfirmation =
+      confirmationFilter === "all" ||
+      row.effectiveSettings.confirmationMode === confirmationFilter;
+    const matchesPayer =
+      payerFilter === "all" ||
+      row.effectiveSettings.defaultShippingPayer === payerFilter;
+    const matchesReadiness =
+      readinessFilter === "all" ||
+      (readinessFilter === "ready" && row.issues.length === 0) ||
+      (readinessFilter === "issues" && row.issues.length > 0);
+    return (
+      matchesSearch &&
+      matchesSource &&
+      matchesConfirmation &&
+      matchesPayer &&
+      matchesReadiness
+    );
+  });
+
+  const customCount = rows.filter((row) => row.source === "custom").length;
+  const companyCount = rows.filter((row) => row.source === "company").length;
+  const draftCount = rows.filter((row) => row.source === "draft").length;
+  const issueCount = rows.filter((row) => row.issues.length > 0).length;
+
+  function confirmationLabel(
+    mode: ShipmentDataSettings["confirmationMode"],
+  ) {
+    if (mode === "required_before_assignment") {
+      return lang === "ar" ? "إلزامي قبل الإسناد" : "Required before assignment";
+    }
+    if (mode === "optional") {
+      return lang === "ar" ? "اختياري" : "Optional";
+    }
+    return lang === "ar" ? "غير مستخدم" : "Off";
+  }
+
+  function shippingModeLabel(mode: ShippingChargeMode) {
+    const labels: Record<ShippingChargeMode, Localized> = {
+      company_price: { ar: "سعر الشركة", en: "Company fee" },
+      company_plus: { ar: "سعر الشركة + زيادة", en: "Company fee + markup" },
+      fixed: { ar: "مبلغ ثابت", en: "Fixed amount" },
+      manual: { ar: "يدوي لكل شحنة", en: "Manual per shipment" },
+    };
+    return labels[mode][lang];
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="shipmentPolicies"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><ClipboardCheck size={20} /></span>
+            <span>
+              <strong>
+                {lang === "ar" ? "مركز سياسات الرسل" : "Sender policy center"}
+              </strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content sender-policy-center-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar" ? "مركز سياسات الرسل" : "Sender policy center"}
+                </h1>
+                <span className="demo-chip">
+                  {senders.length} {lang === "ar" ? "راسل" : "senders"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "راجع سياسة كل راسل وجاهزيتها وافتح ملفه للتعديل. لا توجد تعديلات جماعية من هذه الصفحة."
+                  : "Review every sender policy and its readiness, then open the sender profile to edit. No bulk policy changes live here."}
+              </p>
+            </div>
+            <div className="page-heading-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setShowCompanyTemplate((value) => !value)}
+              >
+                <ShieldCheck size={17} />
+                {showCompanyTemplate
+                  ? lang === "ar"
+                    ? "إخفاء قالب الشركة"
+                    : "Hide company template"
+                  : lang === "ar"
+                    ? "استعراض قالب الشركة"
+                    : "View company template"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => onNavigate("senders")}
+              >
+                <UsersRound size={17} />
+                {lang === "ar" ? "فتح ملفات الرسل" : "Open sender profiles"}
+              </button>
+            </div>
+          </div>
+
+          {showCompanyTemplate && (
+            <section className="policy-center-template">
+              <div className="policy-center-template__heading">
+                <span className="workflow-policy-icon workflow-policy-icon--blue">
+                  <ShieldCheck size={19} />
+                </span>
+                <span>
+                  <strong>
+                    {lang === "ar" ? "قالب الشركة الافتراضي" : "Company default template"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "مرجع البداية للرسل الذين لم تنشأ لهم سياسة مخصصة."
+                      : "The starting point for senders without a custom policy."}
+                  </small>
+                </span>
+                <em>
+                  <LockKeyhole size={13} />
+                  {lang === "ar" ? "للمراجعة" : "Review only"}
+                </em>
+              </div>
+              <div className="policy-center-template__facts">
+                <span>
+                  <small>{lang === "ar" ? "تأكيد الطلب" : "Confirmation"}</small>
+                  <strong>{confirmationLabel(normalizedCompanySettings.confirmationMode)}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "البيانات الناقصة" : "Incomplete data"}</small>
+                  <strong>
+                    {normalizedCompanySettings.incompleteRoute === "warehouse_and_queue"
+                      ? lang === "ar"
+                        ? "المخزن + الاستكمال"
+                        : "Warehouse + completion"
+                      : lang === "ar"
+                        ? "الاستكمال أولًا"
+                        : "Completion first"}
+                  </strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "متحمل الشحن" : "Shipping payer"}</small>
+                  <strong>
+                    {normalizedCompanySettings.defaultShippingPayer === "recipient"
+                      ? lang === "ar"
+                        ? "المستلم"
+                        : "Recipient"
+                      : lang === "ar"
+                        ? "الراسل"
+                        : "Sender"}
+                  </strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "الحقول المستخدمة" : "Active fields"}</small>
+                  <strong>
+                    {normalizedCompanyFields.filter((field) => field.mode !== "hidden").length}
+                  </strong>
+                </span>
+              </div>
+            </section>
+          )}
+
+          <section className="policy-center-metrics">
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue">
+                <UsersRound size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "إجمالي الرسل" : "Total senders"}</small>
+                <strong>{rows.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--green">
+                <SlidersHorizontal size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "سياسات مخصصة" : "Custom policies"}</small>
+                <strong>{customCount}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--gray">
+                <ShieldCheck size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "يتبعون قالب الشركة" : "Using company template"}</small>
+                <strong>{companyCount}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange">
+                <Clock3 size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "مسودات غير منشورة" : "Unpublished drafts"}</small>
+                <strong>{draftCount}</strong>
+              </div>
+            </article>
+            <article className={issueCount ? "policy-center-metric--danger" : ""}>
+              <span className="status-summary-icon status-summary-icon--red">
+                <CircleAlert size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "تحتاج مراجعة" : "Needs review"}</small>
+                <strong>{issueCount}</strong>
+              </div>
+            </article>
+          </section>
+
+          <section className="policy-center-panel">
+            <div className="policy-center-toolbar">
+              <label className="shipment-search">
+                <Search size={17} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "ابحث باسم الراسل أو الكود أو الهاتف أو قائمة الأسعار..."
+                      : "Search sender, code, phone or price list..."
+                  }
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")}>
+                    <X size={15} />
+                  </button>
+                )}
+              </label>
+              <label className="select-wrap">
+                <select
+                  value={sourceFilter}
+                  onChange={(event) =>
+                    setSourceFilter(
+                      event.target.value as typeof sourceFilter,
+                    )
+                  }
+                >
+                  <option value="all">{lang === "ar" ? "كل مصادر السياسة" : "All policy sources"}</option>
+                  <option value="custom">{lang === "ar" ? "سياسة مخصصة" : "Custom policy"}</option>
+                  <option value="company">{lang === "ar" ? "قالب الشركة" : "Company template"}</option>
+                  <option value="draft">{lang === "ar" ? "مسودة" : "Draft"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="select-wrap">
+                <select
+                  value={confirmationFilter}
+                  onChange={(event) =>
+                    setConfirmationFilter(
+                      event.target.value as typeof confirmationFilter,
+                    )
+                  }
+                >
+                  <option value="all">{lang === "ar" ? "كل سياسات التأكيد" : "All confirmation policies"}</option>
+                  <option value="required_before_assignment">{lang === "ar" ? "إلزامي" : "Required"}</option>
+                  <option value="optional">{lang === "ar" ? "اختياري" : "Optional"}</option>
+                  <option value="off">{lang === "ar" ? "غير مستخدم" : "Off"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="select-wrap">
+                <select
+                  value={payerFilter}
+                  onChange={(event) =>
+                    setPayerFilter(event.target.value as typeof payerFilter)
+                  }
+                >
+                  <option value="all">{lang === "ar" ? "كل متحملي الشحن" : "All shipping payers"}</option>
+                  <option value="recipient">{lang === "ar" ? "المستلم" : "Recipient"}</option>
+                  <option value="sender">{lang === "ar" ? "الراسل" : "Sender"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="select-wrap">
+                <select
+                  value={readinessFilter}
+                  onChange={(event) =>
+                    setReadinessFilter(
+                      event.target.value as typeof readinessFilter,
+                    )
+                  }
+                >
+                  <option value="all">{lang === "ar" ? "كل درجات الجاهزية" : "All readiness states"}</option>
+                  <option value="ready">{lang === "ar" ? "جاهزة" : "Ready"}</option>
+                  <option value="issues">{lang === "ar" ? "تحتاج مراجعة" : "Needs review"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="policy-center-list">
+              <div className="policy-center-list__head">
+                <span>{lang === "ar" ? "الراسل والسياسة" : "Sender & policy"}</span>
+                <span>{lang === "ar" ? "التشغيل" : "Operations"}</span>
+                <span>{lang === "ar" ? "الشحن والتحصيل" : "Shipping & collection"}</span>
+                <span>{lang === "ar" ? "الحقول" : "Fields"}</span>
+                <span>{lang === "ar" ? "الجاهزية والتحديث" : "Readiness & update"}</span>
+                <span>{lang === "ar" ? "الإجراء" : "Action"}</span>
+              </div>
+              {filteredRows.map((row) => {
+                const requiredOnCreate = row.effectiveFields.filter(
+                  (field) => field.mode === "required_on_create",
+                ).length;
+                const requiredBeforeAssignment = row.effectiveFields.filter(
+                  (field) => field.mode === "required_before_assignment",
+                ).length;
+                const hidden = row.effectiveFields.filter(
+                  (field) => field.mode === "hidden",
+                ).length;
+                const expanded = expandedSenderId === row.sender.id;
+                return (
+                  <article
+                    className={`policy-center-record ${
+                      row.issues.length ? "policy-center-record--attention" : ""
+                    }`}
+                    key={row.sender.id}
+                  >
+                    <div className="policy-center-record__main">
+                      <div className="policy-center-sender">
+                        <span className="mini-avatar">
+                          {row.sender.name[lang].slice(0, 1)}
+                        </span>
+                        <span>
+                          <strong>{row.sender.name[lang]}</strong>
+                          <small dir="ltr">{row.sender.code}</small>
+                          <em
+                            className={
+                              row.source === "custom"
+                                ? "policy-source-badge policy-source-badge--custom"
+                                : row.source === "draft"
+                                  ? "policy-source-badge policy-source-badge--draft"
+                                  : "policy-source-badge"
+                            }
+                          >
+                            {row.source === "custom"
+                              ? lang === "ar"
+                                ? "مخصصة ومنشورة"
+                                : "Custom · published"
+                              : row.source === "draft"
+                                ? lang === "ar"
+                                  ? "مسودة · قالب الشركة مطبق"
+                                  : "Draft · company template active"
+                                : lang === "ar"
+                                  ? "قالب الشركة"
+                                  : "Company template"}
+                          </em>
+                        </span>
+                      </div>
+                      <div className="policy-center-cell">
+                        <small>{lang === "ar" ? "تأكيد الطلب" : "Confirmation"}</small>
+                        <strong>
+                          {confirmationLabel(
+                            row.effectiveSettings.confirmationMode,
+                          )}
+                        </strong>
+                        <span>
+                          {row.effectiveSettings.incompleteRoute ===
+                          "warehouse_and_queue"
+                            ? lang === "ar"
+                              ? "الناقص: المخزن + الاستكمال"
+                              : "Incomplete: warehouse + queue"
+                            : lang === "ar"
+                              ? "الاستكمال قبل المخزن"
+                              : "Complete before warehouse"}
+                        </span>
+                      </div>
+                      <div className="policy-center-cell">
+                        <small>{lang === "ar" ? "متحمل الشحن" : "Shipping payer"}</small>
+                        <strong>
+                          {row.effectiveSettings.defaultShippingPayer === "recipient"
+                            ? lang === "ar"
+                              ? "المستلم"
+                              : "Recipient"
+                            : lang === "ar"
+                              ? "الراسل"
+                              : "Sender"}
+                        </strong>
+                        <span>
+                          {shippingModeLabel(
+                            row.effectiveSettings.shippingChargeMode,
+                          )}
+                          {" · "}
+                          {row.priceList?.name[lang] ?? "—"}
+                        </span>
+                      </div>
+                      <div className="policy-center-field-counts">
+                        <span>
+                          <strong>{requiredOnCreate}</strong>
+                          <small>{lang === "ar" ? "عند التسجيل" : "on entry"}</small>
+                        </span>
+                        <span>
+                          <strong>{requiredBeforeAssignment}</strong>
+                          <small>{lang === "ar" ? "قبل الإسناد" : "before assignment"}</small>
+                        </span>
+                        <span>
+                          <strong>{hidden}</strong>
+                          <small>{lang === "ar" ? "مخفي" : "hidden"}</small>
+                        </span>
+                      </div>
+                      <div className="policy-center-readiness">
+                        <span
+                          className={
+                            row.issues.length
+                              ? "policy-readiness-badge policy-readiness-badge--attention"
+                              : "policy-readiness-badge"
+                          }
+                        >
+                          {row.issues.length ? <CircleAlert size={13} /> : <Check size={13} />}
+                          {row.issues.length
+                            ? `${row.issues.length} ${
+                                lang === "ar" ? "تنبيه" : "alerts"
+                              }`
+                            : lang === "ar"
+                              ? "جاهزة"
+                              : "Ready"}
+                        </span>
+                        <small>
+                          {row.policy
+                            ? `${lang === "ar" ? "إصدار" : "Version"} ${
+                                row.policy.version ?? 1
+                              } · ${
+                                row.policy.updatedAt?.[lang] ??
+                                (lang === "ar" ? "غير محدد" : "Not recorded")
+                              }`
+                            : lang === "ar"
+                              ? "يتبع تحديثات الشركة"
+                              : "Follows company updates"}
+                        </small>
+                      </div>
+                      <div className="policy-center-actions">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() =>
+                            setExpandedSenderId(expanded ? "" : row.sender.id)
+                          }
+                        >
+                          <Eye size={15} />
+                          {expanded
+                            ? lang === "ar"
+                              ? "إخفاء"
+                              : "Hide"
+                            : lang === "ar"
+                              ? "مقارنة"
+                              : "Compare"}
+                        </button>
+                        <button
+                          className="primary-button"
+                          type="button"
+                          onClick={() => onOpenSenderPolicy(row.sender.id)}
+                        >
+                          <Pencil size={15} />
+                          {lang === "ar" ? "فتح السياسة" : "Open policy"}
+                        </button>
+                      </div>
+                    </div>
+                    {expanded && (
+                      <div className="policy-center-record__details">
+                        <div>
+                          <strong>
+                            {lang === "ar"
+                              ? "الاختلاف عن قالب الشركة"
+                              : "Difference from company template"}
+                          </strong>
+                          <ul>
+                            {row.differences.map((difference, index) => (
+                              <li key={`${difference.en}-${index}`}>
+                                {difference[lang]}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <strong>
+                            {lang === "ar" ? "الجاهزية" : "Readiness"}
+                          </strong>
+                          {row.issues.length ? (
+                            <ul className="policy-center-issues">
+                              {row.issues.map((issue, index) => (
+                                <li key={`${issue.en}-${index}`}>{issue[lang]}</li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p>
+                              {lang === "ar"
+                                ? "لا توجد تعارضات تمنع استخدام السياسة."
+                                : "No conflicts prevent using this policy."}
+                            </p>
+                          )}
+                        </div>
+                        <div>
+                          <strong>
+                            {lang === "ar" ? "الحماية" : "Protection"}
+                          </strong>
+                          <p>
+                            {lang === "ar"
+                              ? "التعديل والنشر لمدير النظام. كل حفظ ينشئ إصدارًا ويحافظ على أثر الشحنات القديمة."
+                              : "Editing and publishing are restricted to system administrators. Every save creates a version and preserves old shipment snapshots."}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+              {filteredRows.length === 0 && (
+                <div className="status-empty">
+                  <Search size={22} />
+                  <span>
+                    {lang === "ar"
+                      ? "لا توجد سياسات تطابق البحث والفلاتر الحالية"
+                      : "No policies match the current search and filters"}
+                  </span>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
     </div>
   );
 }
@@ -18527,7 +19631,7 @@ function AddShipmentScreen({
   );
   const firstSender = activeSenderRecords[0] ?? senderRecordsData[0];
   const [senderKey, setSenderKey] = useState(firstSender.id);
-  const initialSenderPolicy = findSenderShipmentPolicy(
+  const initialSenderPolicy = findEffectiveSenderShipmentPolicy(
     firstSender.name,
     senderPolicies,
   );
@@ -18556,7 +19660,10 @@ function AddShipmentScreen({
   const selectedSender =
     activeSenderRecords.find((sender) => sender.id === senderKey)?.name ??
     firstSender.name;
-  const senderPolicy = findSenderShipmentPolicy(selectedSender, senderPolicies);
+  const senderPolicy = findEffectiveSenderShipmentPolicy(
+    selectedSender,
+    senderPolicies,
+  );
   const policySettings = normalizeShipmentDataSettings(
     senderPolicy?.settings ?? settings,
   );
@@ -18653,7 +19760,10 @@ function AddShipmentScreen({
     const nextSender =
       activeSenderRecords.find((sender) => sender.id === nextKey) ??
       firstSender;
-    const nextPolicy = findSenderShipmentPolicy(nextSender.name, senderPolicies);
+    const nextPolicy = findEffectiveSenderShipmentPolicy(
+      nextSender.name,
+      senderPolicies,
+    );
     const nextSettings = normalizeShipmentDataSettings(
       nextPolicy?.settings ?? settings,
     );
@@ -20515,6 +21625,10 @@ export default function Home() {
     treasuryMovementsData,
   );
   const [activeSenderDraftId, setActiveSenderDraftId] = useState("");
+  const [senderProfileTarget, setSenderProfileTarget] = useState<{
+    id: string;
+    tab: "profile" | "policy";
+  } | null>(null);
   const [controlCenterReady, setControlCenterReady] = useState(false);
 
   useEffect(() => {
@@ -20590,10 +21704,19 @@ export default function Home() {
           setSharedSenderPolicies(
             parsed.senderShipmentPolicies.map((policy) => ({
               ...policy,
+              state: policy.state ?? "published",
+              version: policy.version ?? 1,
               fields: (policy.fields ?? shipmentFieldPoliciesData).map(
                 normalizeShipmentField,
               ),
               settings: normalizeShipmentDataSettings(policy.settings),
+              history: (policy.history ?? []).map((entry) => ({
+                ...entry,
+                fields: (entry.fields ?? shipmentFieldPoliciesData).map(
+                  normalizeShipmentField,
+                ),
+                settings: normalizeShipmentDataSettings(entry.settings),
+              })),
             })),
           );
         }
@@ -20917,6 +22040,9 @@ export default function Home() {
           senderPolicies={sharedSenderPolicies}
           companyFields={sharedShipmentFields}
           companySettings={sharedShipmentSettings}
+          initialSenderId={senderProfileTarget?.id}
+          initialSenderTab={senderProfileTarget?.tab}
+          onInitialSenderHandled={() => setSenderProfileTarget(null)}
           onRecordsChange={setSharedSenders}
           onPriceListsChange={setSharedPriceLists}
           onSenderPoliciesChange={setSharedSenderPolicies}
@@ -21185,16 +22311,16 @@ export default function Home() {
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           senders={sharedSenders}
+          priceLists={sharedPriceLists}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
-          onSave={(nextFields, nextSettings, nextSenderPolicies) => {
-            setSharedShipmentFields(nextFields);
-            setSharedShipmentSettings(nextSettings);
-            setSharedSenderPolicies(nextSenderPolicies);
-          }}
           onNavigate={setScreen}
+          onOpenSenderPolicy={(senderId) => {
+            setSenderProfileTarget({ id: senderId, tab: "policy" });
+            setScreen("senders");
+          }}
           onLogout={() => setScreen("login")}
         />
       )}
