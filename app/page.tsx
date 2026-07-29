@@ -100,10 +100,21 @@ type SenderRecord = {
   id: string;
   code: string;
   name: Localized;
+  businessType: "company" | "store" | "individual";
+  legalName: string;
+  pageName: string;
+  commercialRegistration: string;
+  taxRegistration: string;
+  nationalId: string;
   contactName: string;
   phone: string;
   secondaryPhone: string;
+  whatsapp: string;
+  email: string;
+  website: string;
   address: string;
+  pickupAddress: string;
+  returnsAddress: string;
   state: "active" | "paused";
   notes: string;
   createdAt: Localized;
@@ -1648,6 +1659,12 @@ const senderRecordsData: SenderRecord[] = availableSenders.map(
     id: `sender-${index + 1}`,
     code: `SN-${String(index + 1).padStart(4, "0")}`,
     name,
+    businessType: index === 2 ? "individual" : "store",
+    legalName: name.ar,
+    pageName: name.ar,
+    commercialRegistration: index === 2 ? "" : `CR-${2026001 + index}`,
+    taxRegistration: index === 2 ? "" : `TX-${310000001 + index}`,
+    nationalId: "",
     contactName: [
       "محمود عادل",
       "يوسف نبيل",
@@ -1665,7 +1682,40 @@ const senderRecordsData: SenderRecord[] = availableSenders.map(
       "0111 842 5506",
     ][index],
     secondaryPhone: "",
+    whatsapp: [
+      "0100 331 8421",
+      "0112 504 7190",
+      "0122 715 9034",
+      "0109 441 2780",
+      "0155 620 1843",
+      "0111 842 5506",
+    ][index],
+    email: [
+      "accounts@lamsa.example",
+      "orders@nawa.example",
+      "heba@example.com",
+      "operations@orchid.example",
+      "orders@bareeq.example",
+      "support@avenue.example",
+    ][index],
+    website: "",
     address: [
+      "مدينة نصر، القاهرة",
+      "الدقي، الجيزة",
+      "سيدي جابر، الإسكندرية",
+      "مصر الجديدة، القاهرة",
+      "الزقازيق، الشرقية",
+      "المنصورة، الدقهلية",
+    ][index],
+    pickupAddress: [
+      "مدينة نصر، القاهرة",
+      "الدقي، الجيزة",
+      "سيدي جابر، الإسكندرية",
+      "مصر الجديدة، القاهرة",
+      "الزقازيق، الشرقية",
+      "المنصورة، الدقهلية",
+    ][index],
+    returnsAddress: [
       "مدينة نصر، القاهرة",
       "الدقي، الجيزة",
       "سيدي جابر، الإسكندرية",
@@ -1678,6 +1728,38 @@ const senderRecordsData: SenderRecord[] = availableSenders.map(
     createdAt: { ar: "عميل حالي", en: "Existing sender" },
   }),
 );
+
+function normalizeSenderRecord(
+  sender: Partial<SenderRecord> & Pick<SenderRecord, "id" | "code" | "name">,
+): SenderRecord {
+  return {
+    id: sender.id,
+    code: sender.code,
+    name: sender.name,
+    businessType: sender.businessType ?? "store",
+    legalName: sender.legalName ?? sender.name.ar,
+    pageName: sender.pageName ?? sender.name.ar,
+    commercialRegistration: sender.commercialRegistration ?? "",
+    taxRegistration: sender.taxRegistration ?? "",
+    nationalId: sender.nationalId ?? "",
+    contactName: sender.contactName ?? "",
+    phone: sender.phone ?? "",
+    secondaryPhone: sender.secondaryPhone ?? "",
+    whatsapp: sender.whatsapp ?? sender.phone ?? "",
+    email: sender.email ?? "",
+    website: sender.website ?? "",
+    address: sender.address ?? "",
+    pickupAddress: sender.pickupAddress ?? sender.address ?? "",
+    returnsAddress:
+      sender.returnsAddress ?? sender.pickupAddress ?? sender.address ?? "",
+    state: sender.state ?? "active",
+    notes: sender.notes ?? "",
+    createdAt: sender.createdAt ?? {
+      ar: "سجل راسل حالي",
+      en: "Existing sender",
+    },
+  };
+}
 
 type SenderEntryProfile = {
   sender: Localized;
@@ -5573,7 +5655,7 @@ function SenderEditor({
   onClose: () => void;
   onSave: (sender: SenderRecord, priceListId: string) => void;
 }) {
-  const [draft, setDraft] = useState(sender);
+  const [draft, setDraft] = useState(() => normalizeSenderRecord(sender));
   const [priceListId, setPriceListId] = useState(selectedPriceListId);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -5699,6 +5781,54 @@ function SenderEditor({
                     <ChevronDown size={16} />
                   </span>
                 </label>
+                <label className="select-field">
+                  <span>{lang === "ar" ? "نوع الراسل" : "Sender type"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.businessType}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          businessType:
+                            event.target.value as SenderRecord["businessType"],
+                        }))
+                      }
+                    >
+                      <option value="store">{lang === "ar" ? "متجر أو صفحة" : "Store or page"}</option>
+                      <option value="company">{lang === "ar" ? "شركة" : "Company"}</option>
+                      <option value="individual">{lang === "ar" ? "فرد" : "Individual"}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "اسم المتجر أو الصفحة" : "Store or page name"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.pageName}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          pageName: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "الاسم القانوني أو اسم صاحب النشاط" : "Legal or owner name"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.legalName}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          legalName: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
                 <label className="field">
                   <span>{lang === "ar" ? "اسم مسؤول التواصل" : "Contact person"}</span>
                   <span className="field__control">
@@ -5746,14 +5876,152 @@ function SenderEditor({
                   </span>
                 </label>
                 <label className="field">
-                  <span>{lang === "ar" ? "العنوان" : "Address"}</span>
+                  <span>{lang === "ar" ? "رقم واتساب" : "WhatsApp number"}</span>
                   <span className="field__control">
                     <input
-                      value={draft.address}
+                      dir="ltr"
+                      value={draft.whatsapp}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          whatsapp: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "البريد الإلكتروني" : "Email"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      type="email"
+                      value={draft.email}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          email: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "رابط الصفحة أو المتجر" : "Page or store URL"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.website}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          website: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><ShieldCheck size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "البيانات القانونية" : "Legal information"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "تُسجل حسب نوع الراسل ولا تظهر للمستلم."
+                      : "Stored by sender type and never shown to recipients."}
+                  </small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{lang === "ar" ? "رقم السجل التجاري" : "Commercial registration"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.commercialRegistration}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          commercialRegistration: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "رقم التسجيل الضريبي" : "Tax registration"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.taxRegistration}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          taxRegistration: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "الرقم القومي — عند التعامل كفرد" : "National ID — for individuals"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.nationalId}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          nationalId: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><MapPin size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "عناوين التشغيل" : "Operational addresses"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "يمكن فصل مكان استلام الشحنات عن مكان تسليم المرتجعات."
+                      : "Pickup and return addresses can be different."}
+                  </small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{lang === "ar" ? "عنوان استلام الشحنات" : "Shipment pickup address"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.pickupAddress}
                       onChange={(event) =>
                         setDraft((current) => ({
                           ...current,
                           address: event.target.value,
+                          pickupAddress: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "عنوان تسليم المرتجعات" : "Returns address"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.returnsAddress}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          returnsAddress: event.target.value,
                         }))
                       }
                     />
@@ -5886,6 +6154,10 @@ function SendersScreen({
         sender.code,
         sender.phone,
         sender.contactName,
+        sender.pageName,
+        sender.legalName,
+        sender.commercialRegistration,
+        sender.taxRegistration,
       ].some((value) => value.toLowerCase().includes(normalized));
     return (
       matchesSearch &&
@@ -5911,10 +6183,21 @@ function SendersScreen({
       id: `sender-${records.length + 1}-${Date.now()}`,
       code: `SN-${String(records.length + 1).padStart(4, "0")}`,
       name: { ar: "", en: "" },
+      businessType: "store",
+      legalName: "",
+      pageName: "",
+      commercialRegistration: "",
+      taxRegistration: "",
+      nationalId: "",
       contactName: "",
       phone: "",
       secondaryPhone: "",
+      whatsapp: "",
+      email: "",
+      website: "",
       address: "",
+      pickupAddress: "",
+      returnsAddress: "",
       state: "active",
       notes: "",
       createdAt: { ar: "أضيف الآن", en: "Added now" },
@@ -5922,6 +6205,7 @@ function SendersScreen({
   }
 
   function saveSender(next: SenderRecord, priceListId: string) {
+    next = normalizeSenderRecord(next);
     const previous = records.find((record) => record.id === next.id);
     onRecordsChange((current) =>
       current.some((record) => record.id === next.id)
@@ -9092,6 +9376,7 @@ function ShipmentPoliciesScreen({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scopeKey, setScopeKey] = useState("company");
+  const [scopeSearch, setScopeSearch] = useState("");
   const [companyFieldsDraft, setCompanyFieldsDraft] = useState(
     fields.map(normalizeShipmentField),
   );
@@ -9121,6 +9406,19 @@ function ShipmentPoliciesScreen({
   );
   const inheritedSenderScope = Boolean(scopedSender && !scopedPolicy);
   const scopeControlsDisabled = inheritedSenderScope;
+  const visiblePolicySenders = senders.filter((sender) => {
+    const normalized = scopeSearch.trim().toLowerCase();
+    return (
+      !normalized ||
+      [
+        sender.name.ar,
+        sender.name.en,
+        sender.code,
+        sender.pageName,
+        sender.phone,
+      ].some((value) => value.toLowerCase().includes(normalized))
+    );
+  });
 
   function updateDraftFields(
     updater: (current: ShipmentFieldPolicy[]) => ShipmentFieldPolicy[],
@@ -9467,6 +9765,110 @@ function ShipmentPoliciesScreen({
                 )}
               </div>
             )}
+            <div className="sender-policy-registry">
+              <div className="sender-policy-registry__heading">
+                <span>
+                  <strong>
+                    {lang === "ar" ? "سياسات الرسل" : "Sender policies"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "اختر الشركة أو راسلًا لعرض السياسة الفعلية المطبقة عليه."
+                      : "Choose the company or a sender to view the policy actually applied."}
+                  </small>
+                </span>
+                <label className="shipment-search">
+                  <Search size={16} />
+                  <input
+                    value={scopeSearch}
+                    onChange={(event) => setScopeSearch(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "ابحث عن راسل..."
+                        : "Search senders..."
+                    }
+                  />
+                  {scopeSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setScopeSearch("")}
+                      aria-label={t.clear}
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
+                </label>
+              </div>
+              <div className="sender-policy-registry__items">
+                <button
+                  className={
+                    scopeKey === "company"
+                      ? "sender-policy-card sender-policy-card--active"
+                      : "sender-policy-card"
+                  }
+                  type="button"
+                  onClick={() => {
+                    setScopeKey("company");
+                    setEditing(null);
+                    setSearch("");
+                    setGroupFilter("all");
+                  }}
+                >
+                  <span className="mini-avatar">
+                    <UsersRound size={16} />
+                  </span>
+                  <span>
+                    <strong>
+                      {lang === "ar" ? "سياسة الشركة" : "Company policy"}
+                    </strong>
+                    <small>
+                      {lang === "ar" ? "الأساس لكل الرسل" : "Default for every sender"}
+                    </small>
+                  </span>
+                  <em>{lang === "ar" ? "الأساس" : "Default"}</em>
+                </button>
+                {visiblePolicySenders.map((sender) => {
+                  const customPolicy = findSenderShipmentPolicy(
+                    sender.name,
+                    draftSenderPolicies,
+                  );
+                  return (
+                    <button
+                      className={
+                        scopeKey === sender.id
+                          ? "sender-policy-card sender-policy-card--active"
+                          : "sender-policy-card"
+                      }
+                      type="button"
+                      key={sender.id}
+                      onClick={() => {
+                        setScopeKey(sender.id);
+                        setEditing(null);
+                        setSearch("");
+                        setGroupFilter("all");
+                      }}
+                    >
+                      <span className="mini-avatar">
+                        {sender.name[lang].slice(0, 1)}
+                      </span>
+                      <span>
+                        <strong>{sender.name[lang]}</strong>
+                        <small dir="ltr">{sender.code}</small>
+                      </span>
+                      <em className={customPolicy ? "sender-policy-card__custom" : ""}>
+                        {customPolicy
+                          ? lang === "ar"
+                            ? "مخصصة"
+                            : "Custom"
+                          : lang === "ar"
+                            ? "سياسة الشركة"
+                            : "Company policy"}
+                      </em>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </section>
 
           <div className="shipment-summary-heading">
@@ -19694,7 +20096,7 @@ export default function Home() {
           );
         }
         if (Array.isArray(parsed.senders) && parsed.senders.length > 0) {
-          setSharedSenders(parsed.senders);
+          setSharedSenders(parsed.senders.map(normalizeSenderRecord));
         }
         if (Array.isArray(parsed.couriers) && parsed.couriers.length > 0) {
           setSharedCouriers(parsed.couriers);
