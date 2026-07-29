@@ -77,7 +77,8 @@ type Screen =
   | "courierAccount"
   | "senderAccountPrep"
   | "senderAccount"
-  | "senderAccountHistory";
+  | "senderAccountHistory"
+  | "treasury";
 type Scenario =
   | "ready"
   | "loading"
@@ -244,6 +245,38 @@ type SenderSettlementReceipt = {
     returnPieces: number;
   }[];
   timestamp: Localized;
+};
+
+type TreasuryAccount = {
+  id: "main-cash" | "bank" | "wallet";
+  name: Localized;
+  kind: "cash" | "bank" | "wallet";
+  openingBalance: number;
+  state: "active" | "stopped";
+};
+
+type TreasuryMovement = {
+  id: string;
+  accountId: TreasuryAccount["id"];
+  direction: "in" | "out";
+  category:
+    | "courier_collection"
+    | "sender_payment"
+    | "company_deposit"
+    | "operating_expense"
+    | "other_income"
+    | "other_expense"
+    | "transfer";
+  amount: number;
+  party: Localized;
+  description: Localized;
+  reference: string;
+  source: "system" | "manual" | "transfer";
+  createdBy: Localized;
+  timestamp: Localized;
+  sequence: number;
+  linkedScreen?: "courierAccount" | "senderAccountHistory";
+  linkedMovementId?: string;
 };
 
 const copy = {
@@ -2121,6 +2154,85 @@ const senderSettlementReceiptsData: SenderSettlementReceipt[] = [
   },
 ];
 
+const treasuryAccountsData: TreasuryAccount[] = [
+  {
+    id: "main-cash",
+    name: { ar: "الخزنة الرئيسية", en: "Main cash treasury" },
+    kind: "cash",
+    openingBalance: 20000,
+    state: "active",
+  },
+  {
+    id: "bank",
+    name: { ar: "الحساب البنكي", en: "Bank account" },
+    kind: "bank",
+    openingBalance: 50000,
+    state: "active",
+  },
+  {
+    id: "wallet",
+    name: { ar: "المحفظة الإلكترونية", en: "E-wallet" },
+    kind: "wallet",
+    openingBalance: 8000,
+    state: "active",
+  },
+];
+
+const treasuryMovementsData: TreasuryMovement[] = [
+  {
+    id: "TM-240729-003",
+    accountId: "main-cash",
+    direction: "out",
+    category: "operating_expense",
+    amount: 180,
+    party: { ar: "مورد خدمات", en: "Service supplier" },
+    description: {
+      ar: "مستلزمات تغليف للمخزن",
+      en: "Warehouse packaging supplies",
+    },
+    reference: "EXP-2026-031",
+    source: "manual",
+    createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    timestamp: { ar: "اليوم، 11:35 ص", en: "Today, 11:35 AM" },
+    sequence: 3,
+  },
+  {
+    id: "TM-240729-002",
+    accountId: "main-cash",
+    direction: "in",
+    category: "courier_collection",
+    amount: 1480,
+    party: { ar: "أحمد رجب", en: "Ahmed Ragab" },
+    description: {
+      ar: "تحصيل حساب مندوب مثبت",
+      en: "Posted courier settlement collection",
+    },
+    reference: "CS-1032",
+    source: "system",
+    createdBy: { ar: "منى علي", en: "Mona Ali" },
+    timestamp: { ar: "اليوم، 10:42 ص", en: "Today, 10:42 AM" },
+    sequence: 2,
+    linkedScreen: "courierAccount",
+  },
+  {
+    id: "TM-240729-001",
+    accountId: "main-cash",
+    direction: "in",
+    category: "company_deposit",
+    amount: 2000,
+    party: { ar: "إدارة الشركة", en: "Company management" },
+    description: {
+      ar: "تغذية عهدة التشغيل اليومية",
+      en: "Daily operations cash funding",
+    },
+    reference: "DEP-2026-074",
+    source: "manual",
+    createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    timestamp: { ar: "اليوم، 9:10 ص", en: "Today, 9:10 AM" },
+    sequence: 1,
+  },
+];
+
 const courierRateCopy = {
   ar: {
     title: "قوائم عمولات المناديب",
@@ -2994,6 +3106,12 @@ function Sidebar({
             lang === "ar" ? "سجل حسابات الراسل" : "Sender account history",
           icon: CalendarDays,
           screen: "senderAccountHistory" as const,
+        },
+        {
+          label:
+            lang === "ar" ? "الخزنة والحركات المالية" : "Treasury & cash movements",
+          icon: Landmark,
+          screen: "treasury" as const,
         },
         { label: t.warehouse, icon: Warehouse },
       ],
@@ -9165,6 +9283,961 @@ function CourierPrintScreen({
           </section>
         </main>
       </div>
+    </div>
+  );
+}
+
+function TreasuryScreen({
+  lang,
+  theme,
+  accounts,
+  movements,
+  onMovementsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  accounts: TreasuryAccount[];
+  movements: TreasuryMovement[];
+  onMovementsChange: (movements: TreasuryMovement[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [accountId, setAccountId] =
+    useState<TreasuryAccount["id"]>("main-cash");
+  const [search, setSearch] = useState("");
+  const [directionFilter, setDirectionFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [selectedMovement, setSelectedMovement] =
+    useState<TreasuryMovement | null>(null);
+  const [dialog, setDialog] = useState<"movement" | "transfer" | null>(null);
+  const [manualDirection, setManualDirection] =
+    useState<TreasuryMovement["direction"]>("out");
+  const [manualCategory, setManualCategory] =
+    useState<TreasuryMovement["category"]>("operating_expense");
+  const [manualAmount, setManualAmount] = useState("");
+  const [manualParty, setManualParty] = useState("");
+  const [manualReference, setManualReference] = useState("");
+  const [manualDescription, setManualDescription] = useState("");
+  const [transferTo, setTransferTo] =
+    useState<TreasuryAccount["id"]>("bank");
+  const [formError, setFormError] = useState("");
+  const [toast, setToast] = useState("");
+  const money = useMemo(
+    () =>
+      new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
+        style: "currency",
+        currency: "EGP",
+        maximumFractionDigits: 0,
+      }),
+    [lang],
+  );
+  const categoryLabels: Record<TreasuryMovement["category"], Localized> = {
+    courier_collection: { ar: "تحصيل مندوب", en: "Courier collection" },
+    sender_payment: { ar: "دفع للراسل", en: "Sender payment" },
+    company_deposit: { ar: "تغذية خزنة", en: "Treasury funding" },
+    operating_expense: { ar: "مصروف تشغيلي", en: "Operating expense" },
+    other_income: { ar: "إيراد آخر", en: "Other income" },
+    other_expense: { ar: "مصروف آخر", en: "Other expense" },
+    transfer: { ar: "تحويل بين الخزن", en: "Treasury transfer" },
+  };
+  const sourceLabels: Record<TreasuryMovement["source"], Localized> = {
+    system: { ar: "تلقائي من النظام", en: "System generated" },
+    manual: { ar: "حركة يدوية", en: "Manual movement" },
+    transfer: { ar: "تحويل داخلي", en: "Internal transfer" },
+  };
+  const selectedAccount =
+    accounts.find((account) => account.id === accountId) ?? accounts[0];
+  const accountMovements = movements.filter(
+    (movement) => movement.accountId === selectedAccount.id,
+  );
+  const movementsAscending = [...accountMovements].sort(
+    (a, b) => a.sequence - b.sequence,
+  );
+  let runningBalance = selectedAccount.openingBalance;
+  const balanceAfter = new Map<string, number>();
+  movementsAscending.forEach((movement) => {
+    runningBalance += movement.direction === "in" ? movement.amount : -movement.amount;
+    balanceAfter.set(movement.id, runningBalance);
+  });
+  const totalIn = accountMovements
+    .filter((movement) => movement.direction === "in")
+    .reduce((sum, movement) => sum + movement.amount, 0);
+  const totalOut = accountMovements
+    .filter((movement) => movement.direction === "out")
+    .reduce((sum, movement) => sum + movement.amount, 0);
+  const currentBalance =
+    selectedAccount.openingBalance + totalIn - totalOut;
+  const totalTreasuryBalance = accounts.reduce((total, account) => {
+    const accountTotal = movements
+      .filter((movement) => movement.accountId === account.id)
+      .reduce(
+        (sum, movement) =>
+          sum + (movement.direction === "in" ? movement.amount : -movement.amount),
+        account.openingBalance,
+      );
+    return total + accountTotal;
+  }, 0);
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredMovements = [...accountMovements]
+    .sort((a, b) => b.sequence - a.sequence)
+    .filter(
+      (movement) =>
+        directionFilter === "all" || movement.direction === directionFilter,
+    )
+    .filter(
+      (movement) =>
+        categoryFilter === "all" || movement.category === categoryFilter,
+    )
+    .filter((movement) => {
+      if (!normalizedSearch) return true;
+      return [
+        movement.id,
+        movement.reference,
+        movement.party.ar,
+        movement.party.en,
+        movement.description.ar,
+        movement.description.en,
+        movement.createdBy.ar,
+        movement.createdBy.en,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch));
+    });
+
+  function accountIcon(account: TreasuryAccount) {
+    if (account.kind === "bank") return <Landmark size={20} />;
+    if (account.kind === "wallet") return <Phone size={20} />;
+    return <Banknote size={20} />;
+  }
+
+  function accountBalance(account: TreasuryAccount) {
+    return movements
+      .filter((movement) => movement.accountId === account.id)
+      .reduce(
+        (sum, movement) =>
+          sum + (movement.direction === "in" ? movement.amount : -movement.amount),
+        account.openingBalance,
+      );
+  }
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  function resetDialog() {
+    setDialog(null);
+    setFormError("");
+    setManualAmount("");
+    setManualParty("");
+    setManualReference("");
+    setManualDescription("");
+  }
+
+  function openMovementDialog() {
+    setManualDirection("out");
+    setManualCategory("operating_expense");
+    setFormError("");
+    setDialog("movement");
+  }
+
+  function openTransferDialog() {
+    const destination =
+      accounts.find((account) => account.id !== selectedAccount.id)?.id ??
+      "bank";
+    setTransferTo(destination);
+    setFormError("");
+    setDialog("transfer");
+  }
+
+  function submitManualMovement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amount = Number(manualAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFormError(
+        lang === "ar" ? "أدخل مبلغًا صحيحًا أكبر من صفر." : "Enter a valid amount above zero.",
+      );
+      return;
+    }
+    if (!manualDescription.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "سبب الحركة إلزامي لحماية سجل الخزنة."
+          : "A movement reason is required to protect the treasury record.",
+      );
+      return;
+    }
+    const now = Date.now();
+    const category =
+      manualDirection === "in" &&
+      ["operating_expense", "other_expense"].includes(manualCategory)
+        ? "other_income"
+        : manualDirection === "out" &&
+            ["company_deposit", "other_income"].includes(manualCategory)
+          ? "other_expense"
+          : manualCategory;
+    const movement: TreasuryMovement = {
+      id: `TM-${now.toString().slice(-9)}`,
+      accountId: selectedAccount.id,
+      direction: manualDirection,
+      category,
+      amount,
+      party: {
+        ar: manualParty.trim() || "بدون طرف",
+        en: manualParty.trim() || "No counterparty",
+      },
+      description: {
+        ar: manualDescription.trim(),
+        en: manualDescription.trim(),
+      },
+      reference:
+        manualReference.trim() || `MAN-${now.toString().slice(-6)}`,
+      source: "manual",
+      createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      timestamp: {
+        ar: new Intl.DateTimeFormat("ar-EG", {
+          day: "numeric",
+          month: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(now)),
+        en: new Intl.DateTimeFormat("en-US", {
+          day: "numeric",
+          month: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(now)),
+      },
+      sequence: now,
+    };
+    onMovementsChange([movement, ...movements]);
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? `تم إثبات الحركة ${movement.id}`
+        : `Movement ${movement.id} was posted`,
+    );
+  }
+
+  function submitTransfer(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const amount = Number(manualAmount);
+    if (transferTo === selectedAccount.id) {
+      setFormError(
+        lang === "ar"
+          ? "اختر حسابًا مختلفًا للتحويل إليه."
+          : "Choose a different destination account.",
+      );
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFormError(
+        lang === "ar" ? "أدخل مبلغ تحويل صحيحًا." : "Enter a valid transfer amount.",
+      );
+      return;
+    }
+    if (amount > currentBalance) {
+      setFormError(
+        lang === "ar"
+          ? "المبلغ أكبر من الرصيد الحالي للخزنة."
+          : "The amount exceeds the current treasury balance.",
+      );
+      return;
+    }
+    if (!manualDescription.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب سبب التحويل قبل التأكيد."
+          : "Enter the transfer reason before confirmation.",
+      );
+      return;
+    }
+    const destination = accounts.find((account) => account.id === transferTo);
+    if (!destination) return;
+    const now = Date.now();
+    const reference =
+      manualReference.trim() || `TF-${now.toString().slice(-6)}`;
+    const timestamp = {
+      ar: new Intl.DateTimeFormat("ar-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(new Date(now)),
+      en: new Intl.DateTimeFormat("en-US", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(new Date(now)),
+    };
+    const outId = `TM-${now.toString().slice(-9)}-O`;
+    const inId = `TM-${now.toString().slice(-9)}-I`;
+    const outMovement: TreasuryMovement = {
+      id: outId,
+      accountId: selectedAccount.id,
+      direction: "out",
+      category: "transfer",
+      amount,
+      party: destination.name,
+      description: {
+        ar: `تحويل إلى ${destination.name.ar} — ${manualDescription.trim()}`,
+        en: `Transfer to ${destination.name.en} — ${manualDescription.trim()}`,
+      },
+      reference,
+      source: "transfer",
+      createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      timestamp,
+      sequence: now,
+      linkedMovementId: inId,
+    };
+    const inMovement: TreasuryMovement = {
+      id: inId,
+      accountId: destination.id,
+      direction: "in",
+      category: "transfer",
+      amount,
+      party: selectedAccount.name,
+      description: {
+        ar: `تحويل من ${selectedAccount.name.ar} — ${manualDescription.trim()}`,
+        en: `Transfer from ${selectedAccount.name.en} — ${manualDescription.trim()}`,
+      },
+      reference,
+      source: "transfer",
+      createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      timestamp,
+      sequence: now + 1,
+      linkedMovementId: outId,
+    };
+    onMovementsChange([inMovement, outMovement, ...movements]);
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? `تم تحويل ${money.format(amount)} بنجاح`
+        : `${money.format(amount)} transferred successfully`,
+    );
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="treasury"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <Landmark size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar" ? "الخزنة والحركات المالية" : "Treasury & cash movements"}
+              </strong>
+              <small>
+                {lang === "ar" ? "ما دخل وخرج فعليًا" : "What actually moved in and out"}
+              </small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content treasury-page">
+          <div className="welcome-row page-heading-row treasury-heading">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar" ? "الخزنة والحركات المالية" : "Treasury & cash movements"}
+                </h1>
+                <span className="demo-chip">
+                  {movements.length} {lang === "ar" ? "حركة مثبتة" : "posted movements"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "سجل مالي واحد يطابق ما حدث فعليًا؛ من استلام تحصيل المندوب حتى دفع مستحق الراسل."
+                  : "One financial ledger mirroring reality, from courier collection to sender payment."}
+              </p>
+            </div>
+            <div className="treasury-heading__actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={openTransferDialog}
+              >
+                <GitBranch size={17} />
+                {lang === "ar" ? "تحويل بين الخزن" : "Transfer funds"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={openMovementDialog}
+              >
+                <Plus size={17} />
+                {lang === "ar" ? "تسجيل حركة يدوية" : "Record manual movement"}
+              </button>
+            </div>
+          </div>
+
+          <section className="treasury-truth">
+            <ShieldCheck size={19} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "الخزنة تثبت الحركة ولا تعيد تنفيذ الحساب"
+                  : "Treasury records the movement; it does not repeat settlement"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "الحركات الناتجة عن حساب مندوب أو راسل تُسجّل تلقائيًا، ولا يمكن تعديل الأصل أو حذفه من هنا."
+                  : "Courier and sender settlement movements are generated automatically and cannot be edited or deleted here."}
+              </small>
+            </span>
+            <b>
+              {lang === "ar" ? "إجمالي أرصدة الشركة" : "Company total"}{" "}
+              {money.format(totalTreasuryBalance)}
+            </b>
+          </section>
+
+          <section className="treasury-accounts" aria-label={lang === "ar" ? "حسابات الخزنة" : "Treasury accounts"}>
+            {accounts.map((account) => {
+              const active = account.id === selectedAccount.id;
+              const accountMovementCount = movements.filter(
+                (movement) => movement.accountId === account.id,
+              ).length;
+              return (
+                <button
+                  type="button"
+                  className={`treasury-account-card ${active ? "treasury-account-card--active" : ""}`}
+                  key={account.id}
+                  onClick={() => setAccountId(account.id)}
+                >
+                  <span className="treasury-account-card__icon">
+                    {accountIcon(account)}
+                  </span>
+                  <span>
+                    <small>{account.name[lang]}</small>
+                    <strong>{money.format(accountBalance(account))}</strong>
+                  </span>
+                  <b>
+                    {accountMovementCount} {lang === "ar" ? "حركة" : "movements"}
+                  </b>
+                </button>
+              );
+            })}
+          </section>
+
+          <section className="treasury-metrics">
+            <article>
+              <small>{lang === "ar" ? "رصيد أول المدة" : "Opening balance"}</small>
+              <strong>{money.format(selectedAccount.openingBalance)}</strong>
+              <span>{selectedAccount.name[lang]}</span>
+            </article>
+            <article className="treasury-metric treasury-metric--in">
+              <small>{lang === "ar" ? "إجمالي الداخل" : "Total inflow"}</small>
+              <strong>+ {money.format(totalIn)}</strong>
+              <span>{lang === "ar" ? "حركات مثبتة" : "Posted movements"}</span>
+            </article>
+            <article className="treasury-metric treasury-metric--out">
+              <small>{lang === "ar" ? "إجمالي الخارج" : "Total outflow"}</small>
+              <strong>− {money.format(totalOut)}</strong>
+              <span>{lang === "ar" ? "حركات مثبتة" : "Posted movements"}</span>
+            </article>
+            <article className="treasury-metric treasury-metric--balance">
+              <small>{lang === "ar" ? "الرصيد الحالي المحسوب" : "Calculated balance"}</small>
+              <strong>{money.format(currentBalance)}</strong>
+              <span>{lang === "ar" ? "يتحدث مع كل حركة" : "Updates with every movement"}</span>
+            </article>
+          </section>
+
+          <section className="treasury-ledger-card">
+            <div className="treasury-ledger-head">
+              <div>
+                <span className="eyebrow">
+                  {lang === "ar" ? "دفتر الحركة" : "Movement ledger"}
+                </span>
+                <h2>{selectedAccount.name[lang]}</h2>
+              </div>
+              <span>
+                {filteredMovements.length} {lang === "ar" ? "نتيجة" : "results"}
+              </span>
+            </div>
+            <div className="treasury-filters">
+              <label className="treasury-search">
+                <Search size={17} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "رقم الحركة، المرجع، الطرف أو البيان..."
+                      : "Movement, reference, party or description..."
+                  }
+                />
+              </label>
+              <label className="entry-select">
+                <select
+                  value={directionFilter}
+                  onChange={(event) => setDirectionFilter(event.target.value)}
+                >
+                  <option value="all">{lang === "ar" ? "كل الاتجاهات" : "All directions"}</option>
+                  <option value="in">{lang === "ar" ? "داخل" : "Inflow"}</option>
+                  <option value="out">{lang === "ar" ? "خارج" : "Outflow"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="entry-select">
+                <select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                >
+                  <option value="all">{lang === "ar" ? "كل أنواع الحركة" : "All movement types"}</option>
+                  {Object.entries(categoryLabels).map(([value, label]) => (
+                    <option value={value} key={value}>
+                      {label[lang]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="treasury-ledger-row treasury-ledger-row--head">
+              <span>{lang === "ar" ? "الحركة" : "Movement"}</span>
+              <span>{lang === "ar" ? "النوع" : "Type"}</span>
+              <span>{lang === "ar" ? "الطرف والبيان" : "Party & description"}</span>
+              <span>{lang === "ar" ? "المرجع" : "Reference"}</span>
+              <span>{lang === "ar" ? "المبلغ" : "Amount"}</span>
+              <span>{lang === "ar" ? "الرصيد بعدها" : "Balance after"}</span>
+              <span>{lang === "ar" ? "المصدر" : "Source"}</span>
+              <span>{lang === "ar" ? "فتح" : "Open"}</span>
+            </div>
+            <div className="treasury-ledger-body">
+              {filteredMovements.length ? (
+                filteredMovements.map((movement) => (
+                  <button
+                    type="button"
+                    className="treasury-ledger-row"
+                    key={movement.id}
+                    onClick={() => setSelectedMovement(movement)}
+                  >
+                    <span className="treasury-ledger-id">
+                      <strong>{movement.id}</strong>
+                      <small>{movement.timestamp[lang]}</small>
+                    </span>
+                    <span>
+                      <b className={`treasury-direction treasury-direction--${movement.direction}`}>
+                        {movement.direction === "in"
+                          ? lang === "ar"
+                            ? "داخل"
+                            : "In"
+                          : lang === "ar"
+                            ? "خارج"
+                            : "Out"}
+                      </b>
+                      <small>{categoryLabels[movement.category][lang]}</small>
+                    </span>
+                    <span>
+                      <strong>{movement.party[lang]}</strong>
+                      <small>{movement.description[lang]}</small>
+                    </span>
+                    <strong className="treasury-reference">{movement.reference}</strong>
+                    <strong className={`treasury-amount treasury-amount--${movement.direction}`}>
+                      {movement.direction === "in" ? "+" : "−"}{" "}
+                      {money.format(movement.amount)}
+                    </strong>
+                    <strong>{money.format(balanceAfter.get(movement.id) ?? 0)}</strong>
+                    <span>
+                      <strong>{sourceLabels[movement.source][lang]}</strong>
+                      <small>{movement.createdBy[lang]}</small>
+                    </span>
+                    <span className="treasury-open">
+                      <Eye size={17} />
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="treasury-empty">
+                  <Search size={24} />
+                  <strong>
+                    {lang === "ar"
+                      ? "لا توجد حركات تطابق البحث"
+                      : "No movements match the search"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "غيّر الفلاتر لعرض حركات أخرى."
+                      : "Change the filters to view other movements."}
+                  </small>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {selectedMovement && (
+        <div
+          className="treasury-overlay"
+          role="presentation"
+          onClick={() => setSelectedMovement(null)}
+        >
+          <aside
+            className="treasury-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label={lang === "ar" ? "تفاصيل حركة الخزنة" : "Treasury movement details"}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="treasury-drawer__head">
+              <span className={`treasury-drawer__mark treasury-drawer__mark--${selectedMovement.direction}`}>
+                {selectedMovement.direction === "in" ? "+" : "−"}
+              </span>
+              <span>
+                <small>{categoryLabels[selectedMovement.category][lang]}</small>
+                <h2>{selectedMovement.id}</h2>
+                <b>{selectedMovement.timestamp[lang]}</b>
+              </span>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setSelectedMovement(null)}
+                aria-label={lang === "ar" ? "إغلاق" : "Close"}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="treasury-drawer__amount">
+              <small>{lang === "ar" ? "قيمة الحركة" : "Movement amount"}</small>
+              <strong className={`treasury-amount--${selectedMovement.direction}`}>
+                {selectedMovement.direction === "in" ? "+" : "−"}{" "}
+                {money.format(selectedMovement.amount)}
+              </strong>
+              <span>{selectedAccount.name[lang]}</span>
+            </div>
+            <dl className="treasury-drawer__facts">
+              <div>
+                <dt>{lang === "ar" ? "الطرف" : "Counterparty"}</dt>
+                <dd>{selectedMovement.party[lang]}</dd>
+              </div>
+              <div>
+                <dt>{lang === "ar" ? "المرجع" : "Reference"}</dt>
+                <dd>{selectedMovement.reference}</dd>
+              </div>
+              <div>
+                <dt>{lang === "ar" ? "البيان" : "Description"}</dt>
+                <dd>{selectedMovement.description[lang]}</dd>
+              </div>
+              <div>
+                <dt>{lang === "ar" ? "مصدر التسجيل" : "Record source"}</dt>
+                <dd>{sourceLabels[selectedMovement.source][lang]}</dd>
+              </div>
+              <div>
+                <dt>{lang === "ar" ? "نفّذ بواسطة" : "Created by"}</dt>
+                <dd>{selectedMovement.createdBy[lang]}</dd>
+              </div>
+              <div>
+                <dt>{lang === "ar" ? "الرصيد بعد الحركة" : "Balance after movement"}</dt>
+                <dd>{money.format(balanceAfter.get(selectedMovement.id) ?? 0)}</dd>
+              </div>
+            </dl>
+            <div className="treasury-drawer__audit">
+              <LockKeyhole size={17} />
+              <span>
+                <strong>
+                  {lang === "ar" ? "حركة مثبتة في السجل" : "Posted ledger movement"}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "لا تُعدّل ولا تُحذف. التصحيح يكون بحركة مقابلة مرتبطة بالأصل."
+                    : "It cannot be edited or deleted. Corrections use a linked opposite movement."}
+                </small>
+              </span>
+            </div>
+            {selectedMovement.linkedScreen && (
+              <button
+                className="secondary-button treasury-drawer__source"
+                type="button"
+                onClick={() => {
+                  const destination = selectedMovement.linkedScreen;
+                  setSelectedMovement(null);
+                  if (destination) onNavigate(destination);
+                }}
+              >
+                <ReceiptText size={17} />
+                {selectedMovement.linkedScreen === "courierAccount"
+                  ? lang === "ar"
+                    ? "فتح حساب المندوب المرتبط"
+                    : "Open linked courier account"
+                  : lang === "ar"
+                    ? "فتح إيصال الراسل المرتبط"
+                    : "Open linked sender receipt"}
+              </button>
+            )}
+          </aside>
+        </div>
+      )}
+
+      {dialog && (
+        <div className="treasury-overlay" role="presentation" onClick={resetDialog}>
+          <form
+            className="treasury-dialog"
+            onSubmit={dialog === "transfer" ? submitTransfer : submitManualMovement}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="treasury-dialog__head">
+              <span>
+                <small>
+                  {dialog === "transfer"
+                    ? lang === "ar"
+                      ? "حركتان مرتبطتان"
+                      : "Two linked movements"
+                    : lang === "ar"
+                      ? "إثبات مالي جديد"
+                      : "New financial record"}
+                </small>
+                <h2>
+                  {dialog === "transfer"
+                    ? lang === "ar"
+                      ? "تحويل بين الخزن"
+                      : "Transfer between accounts"
+                    : lang === "ar"
+                      ? "تسجيل حركة يدوية"
+                      : "Record manual movement"}
+                </h2>
+              </span>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={resetDialog}
+                aria-label={lang === "ar" ? "إغلاق" : "Close"}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {dialog === "movement" ? (
+              <>
+                <div className="treasury-direction-control">
+                  <button
+                    type="button"
+                    className={manualDirection === "in" ? "active active--in" : ""}
+                    onClick={() => {
+                      setManualDirection("in");
+                      setManualCategory("other_income");
+                    }}
+                  >
+                    <Plus size={16} />
+                    {lang === "ar" ? "مبلغ داخل" : "Money in"}
+                  </button>
+                  <button
+                    type="button"
+                    className={manualDirection === "out" ? "active active--out" : ""}
+                    onClick={() => {
+                      setManualDirection("out");
+                      setManualCategory("operating_expense");
+                    }}
+                  >
+                    <Banknote size={16} />
+                    {lang === "ar" ? "مبلغ خارج" : "Money out"}
+                  </button>
+                </div>
+                <label className="treasury-form-field">
+                  <span>{lang === "ar" ? "نوع الحركة" : "Movement type"}</span>
+                  <select
+                    value={manualCategory}
+                    onChange={(event) =>
+                      setManualCategory(
+                        event.target.value as TreasuryMovement["category"],
+                      )
+                    }
+                  >
+                    {manualDirection === "in" ? (
+                      <>
+                        <option value="company_deposit">{categoryLabels.company_deposit[lang]}</option>
+                        <option value="other_income">{categoryLabels.other_income[lang]}</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="operating_expense">{categoryLabels.operating_expense[lang]}</option>
+                        <option value="other_expense">{categoryLabels.other_expense[lang]}</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+              </>
+            ) : (
+              <div className="treasury-transfer-route">
+                <article>
+                  <small>{lang === "ar" ? "من" : "From"}</small>
+                  <strong>{selectedAccount.name[lang]}</strong>
+                  <span>{money.format(currentBalance)}</span>
+                </article>
+                <GitBranch size={20} />
+                <label>
+                  <small>{lang === "ar" ? "إلى" : "To"}</small>
+                  <select
+                    value={transferTo}
+                    onChange={(event) =>
+                      setTransferTo(
+                        event.target.value as TreasuryAccount["id"],
+                      )
+                    }
+                  >
+                    {accounts
+                      .filter((account) => account.id !== selectedAccount.id)
+                      .map((account) => (
+                        <option value={account.id} key={account.id}>
+                          {account.name[lang]}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+            )}
+
+            <div className="treasury-form-grid">
+              <label className="treasury-form-field">
+                <span>{lang === "ar" ? "المبلغ" : "Amount"}</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={manualAmount}
+                  onChange={(event) => setManualAmount(event.target.value)}
+                  placeholder="0"
+                />
+              </label>
+              {dialog === "movement" && (
+                <label className="treasury-form-field">
+                  <span>{lang === "ar" ? "الطرف" : "Counterparty"}</span>
+                  <input
+                    value={manualParty}
+                    onChange={(event) => setManualParty(event.target.value)}
+                    placeholder={lang === "ar" ? "اسم الشخص أو الجهة" : "Person or entity"}
+                  />
+                </label>
+              )}
+              <label className="treasury-form-field">
+                <span>{lang === "ar" ? "مرجع خارجي — اختياري" : "External reference — optional"}</span>
+                <input
+                  value={manualReference}
+                  onChange={(event) => setManualReference(event.target.value)}
+                  placeholder={lang === "ar" ? "رقم فاتورة أو إيصال" : "Invoice or receipt number"}
+                />
+              </label>
+            </div>
+            <label className="treasury-form-field">
+              <span>
+                {dialog === "transfer"
+                  ? lang === "ar"
+                    ? "سبب التحويل"
+                    : "Transfer reason"
+                  : lang === "ar"
+                    ? "سبب الحركة"
+                    : "Movement reason"}
+              </span>
+              <textarea
+                value={manualDescription}
+                onChange={(event) => setManualDescription(event.target.value)}
+                placeholder={
+                  lang === "ar"
+                    ? "اكتب وصفًا واضحًا لما حدث فعليًا..."
+                    : "Describe clearly what actually happened..."
+                }
+              />
+            </label>
+            <div className="treasury-dialog__notice">
+              <LockKeyhole size={16} />
+              <span>
+                {dialog === "transfer"
+                  ? lang === "ar"
+                    ? "التأكيد ينشئ حركة خروج وحركة دخول بنفس المرجع."
+                    : "Confirmation creates linked outflow and inflow movements."
+                  : lang === "ar"
+                    ? "بعد التأكيد لن تُعدّل الحركة أو تُحذف."
+                    : "After confirmation, the movement cannot be edited or deleted."}
+              </span>
+            </div>
+            {formError && (
+              <div className="treasury-form-error" role="alert">
+                <CircleAlert size={16} />
+                {formError}
+              </div>
+            )}
+            <div className="treasury-dialog__actions">
+              <button className="secondary-button" type="button" onClick={resetDialog}>
+                {lang === "ar" ? "إلغاء" : "Cancel"}
+              </button>
+              <button className="primary-button" type="submit">
+                <Save size={17} />
+                {dialog === "transfer"
+                  ? lang === "ar"
+                    ? "تأكيد التحويل"
+                    : "Confirm transfer"
+                  : lang === "ar"
+                    ? "تأكيد وإثبات"
+                    : "Confirm and post"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -16207,6 +17280,9 @@ export default function Home() {
   const [sharedSenderReceipts, setSharedSenderReceipts] = useState(
     senderSettlementReceiptsData,
   );
+  const [sharedTreasuryMovements, setSharedTreasuryMovements] = useState(
+    treasuryMovementsData,
+  );
   const [activeSenderDraftId, setActiveSenderDraftId] = useState("");
   const [controlCenterReady, setControlCenterReady] = useState(false);
 
@@ -16232,6 +17308,7 @@ export default function Home() {
           senderBalances?: SenderBalance[];
           senderDrafts?: SenderSettlementDraft[];
           senderReceipts?: SenderSettlementReceipt[];
+          treasuryMovements?: TreasuryMovement[];
         };
         if (Array.isArray(parsed.statuses)) {
           setSharedStatuses(
@@ -16277,6 +17354,12 @@ export default function Home() {
           parsed.senderReceipts.length > 0
         ) {
           setSharedSenderReceipts(parsed.senderReceipts);
+        }
+        if (
+          Array.isArray(parsed.treasuryMovements) &&
+          parsed.treasuryMovements.length > 0
+        ) {
+          setSharedTreasuryMovements(parsed.treasuryMovements);
         }
         if (Array.isArray(parsed.shipments)) {
           const migratedShipments = parsed.shipments.map((shipment) => {
@@ -16419,6 +17502,77 @@ export default function Home() {
 
   useEffect(() => {
     if (!controlCenterReady) return;
+    setSharedTreasuryMovements((current) => {
+      const existingIds = new Set(current.map((movement) => movement.id));
+      const additions: TreasuryMovement[] = [];
+      sharedCourierSettlements.forEach((settlement, index) => {
+        const id = `TR-COURIER-${settlement.id}`;
+        if (
+          existingIds.has(id) ||
+          !settlement.actualCash ||
+          settlement.actualCash <= 0
+        ) {
+          return;
+        }
+        additions.push({
+          id,
+          accountId: "main-cash",
+          direction: "in",
+          category: "courier_collection",
+          amount: settlement.actualCash,
+          party: settlement.courier,
+          description: {
+            ar: `تحصيل مثبت من حساب المندوب ${settlement.courier.ar}`,
+            en: `Posted collection from ${settlement.courier.en}'s account`,
+          },
+          reference: settlement.id,
+          source: "system",
+          createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+          timestamp: settlement.timestamp,
+          sequence: Date.now() + index,
+          linkedScreen: "courierAccount",
+        });
+      });
+      sharedSenderReceipts.forEach((receipt, index) => {
+        const id = `TR-SENDER-${receipt.id}`;
+        if (
+          existingIds.has(id) ||
+          !receipt.moneyExecuted ||
+          receipt.paidNow <= 0 ||
+          !["main-cash", "bank", "wallet"].includes(receipt.paymentSource)
+        ) {
+          return;
+        }
+        additions.push({
+          id,
+          accountId: receipt.paymentSource as TreasuryAccount["id"],
+          direction: "out",
+          category: "sender_payment",
+          amount: receipt.paidNow,
+          party: receipt.sender,
+          description: {
+            ar: `دفع مثبت من حساب الراسل ${receipt.sender.ar}`,
+            en: `Posted payment from ${receipt.sender.en}'s account`,
+          },
+          reference: receipt.id,
+          source: "system",
+          createdBy:
+            receipt.executor ?? { ar: "أحمد حسن", en: "Ahmed Hassan" },
+          timestamp: receipt.timestamp,
+          sequence: Date.now() + sharedCourierSettlements.length + index,
+          linkedScreen: "senderAccountHistory",
+        });
+      });
+      return additions.length ? [...additions, ...current] : current;
+    });
+  }, [
+    controlCenterReady,
+    sharedCourierSettlements,
+    sharedSenderReceipts,
+  ]);
+
+  useEffect(() => {
+    if (!controlCenterReady) return;
     window.localStorage.setItem(
       "tasleem-control-center-v2",
       JSON.stringify({
@@ -16434,6 +17588,7 @@ export default function Home() {
         senderBalances: sharedSenderBalances,
         senderDrafts: sharedSenderDrafts,
         senderReceipts: sharedSenderReceipts,
+        treasuryMovements: sharedTreasuryMovements,
       }),
     );
   }, [
@@ -16446,6 +17601,7 @@ export default function Home() {
     sharedSenderBalances,
     sharedSenderDrafts,
     sharedSenderReceipts,
+    sharedTreasuryMovements,
     sharedShipmentFields,
     sharedShipmentSettings,
     sharedShipments,
@@ -16544,6 +17700,20 @@ export default function Home() {
           theme={theme}
           receipts={sharedSenderReceipts}
           balances={sharedSenderBalances}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "treasury" ? (
+        <TreasuryScreen
+          lang={lang}
+          theme={theme}
+          accounts={treasuryAccountsData}
+          movements={sharedTreasuryMovements}
+          onMovementsChange={setSharedTreasuryMovements}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
