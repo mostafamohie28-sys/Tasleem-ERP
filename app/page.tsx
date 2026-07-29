@@ -79,6 +79,8 @@ type Screen =
   | "senderAccountPrep"
   | "senderAccount"
   | "senderAccountHistory"
+  | "senders"
+  | "couriers"
   | "treasury";
 type Scenario =
   | "ready"
@@ -92,6 +94,33 @@ type TabId = "all" | "action" | "warehouse" | "courier" | "incomplete";
 type Localized = {
   ar: string;
   en: string;
+};
+
+type SenderRecord = {
+  id: string;
+  code: string;
+  name: Localized;
+  contactName: string;
+  phone: string;
+  secondaryPhone: string;
+  address: string;
+  state: "active" | "paused";
+  notes: string;
+  createdAt: Localized;
+};
+
+type CourierRecord = {
+  id: string;
+  code: string;
+  name: Localized;
+  phone: string;
+  secondaryPhone: string;
+  nationalId: string;
+  vehicle: Localized;
+  vehicleNumber: string;
+  state: "active" | "paused";
+  notes: string;
+  createdAt: Localized;
 };
 
 type Shipment = {
@@ -1614,6 +1643,42 @@ const availableSenders: Localized[] = [
   { ar: "أفينيو", en: "Avenue" },
 ];
 
+const senderRecordsData: SenderRecord[] = availableSenders.map(
+  (name, index) => ({
+    id: `sender-${index + 1}`,
+    code: `SN-${String(index + 1).padStart(4, "0")}`,
+    name,
+    contactName: [
+      "محمود عادل",
+      "يوسف نبيل",
+      "هبة أحمد",
+      "أحمد طارق",
+      "سارة خالد",
+      "كريم سامح",
+    ][index],
+    phone: [
+      "0100 331 8421",
+      "0112 504 7190",
+      "0122 715 9034",
+      "0109 441 2780",
+      "0155 620 1843",
+      "0111 842 5506",
+    ][index],
+    secondaryPhone: "",
+    address: [
+      "مدينة نصر، القاهرة",
+      "الدقي، الجيزة",
+      "سيدي جابر، الإسكندرية",
+      "مصر الجديدة، القاهرة",
+      "الزقازيق، الشرقية",
+      "المنصورة، الدقهلية",
+    ][index],
+    state: "active",
+    notes: "",
+    createdAt: { ar: "عميل حالي", en: "Existing sender" },
+  }),
+);
+
 type SenderEntryProfile = {
   sender: Localized;
   shippingPayer: "recipient" | "sender";
@@ -2010,6 +2075,44 @@ const availableCouriers: Localized[] = [
   { ar: "عمر خالد", en: "Omar Khaled" },
   { ar: "محمد صابر", en: "Mohamed Saber" },
 ];
+
+const courierRecordsData: CourierRecord[] = availableCouriers.map(
+  (name, index) => ({
+    id: `courier-${index + 1}`,
+    code: `CR-${String(2001 + index)}`,
+    name,
+    phone: [
+      "0100 842 1975",
+      "0111 304 8821",
+      "0122 507 6140",
+      "0109 118 3302",
+      "0112 670 9415",
+      "0155 204 7811",
+    ][index],
+    secondaryPhone: "",
+    nationalId: "",
+    vehicle:
+      index === 2
+        ? { ar: "سيارة", en: "Car" }
+        : index === 4
+          ? { ar: "فان", en: "Van" }
+          : { ar: "دراجة نارية", en: "Motorbike" },
+    vehicleNumber: "",
+    state: "active",
+    notes: "",
+    createdAt: { ar: "مندوب حالي", en: "Existing courier" },
+  }),
+);
+
+function courierProfiles(records: CourierRecord[]) {
+  const available = records.filter((record) => record.state === "active");
+  return (available.length ? available : records).map((record) => ({
+    courier: record.name,
+    phone: record.phone,
+    vehicle: record.vehicle,
+    code: record.code,
+  }));
+}
 
 function createCourierRateMatrix(
   base: number,
@@ -3318,8 +3421,16 @@ function Sidebar({
     {
       label: t.parties,
       items: [
-        { label: t.senders, icon: UsersRound },
-        { label: t.couriers, icon: UserRound },
+        {
+          label: t.senders,
+          icon: UsersRound,
+          screen: "senders" as const,
+        },
+        {
+          label: t.couriers,
+          icon: UserRound,
+          screen: "couriers" as const,
+        },
       ],
     },
     {
@@ -5445,16 +5556,1403 @@ function AreasScreen({
   );
 }
 
+function SenderEditor({
+  sender,
+  isNew,
+  lang,
+  priceLists,
+  selectedPriceListId,
+  onClose,
+  onSave,
+}: {
+  sender: SenderRecord;
+  isNew: boolean;
+  lang: Lang;
+  priceLists: PriceListRecord[];
+  selectedPriceListId: string;
+  onClose: () => void;
+  onSave: (sender: SenderRecord, priceListId: string) => void;
+}) {
+  const [draft, setDraft] = useState(sender);
+  const [priceListId, setPriceListId] = useState(selectedPriceListId);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(draft, priceListId);
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={lang === "ar" ? "إغلاق" : "Close"}
+        onClick={onClose}
+      />
+      <aside className="policy-editor sender-editor" aria-label={lang === "ar" ? "بيانات الراسل" : "Sender details"}>
+        <form onSubmit={handleSubmit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span className="price-editor-badge">
+                <UsersRound size={20} />
+              </span>
+              <span>
+                <small>
+                  {isNew
+                    ? lang === "ar"
+                      ? "راسل جديد"
+                      : "New sender"
+                    : lang === "ar"
+                      ? "تعديل الراسل"
+                      : "Edit sender"}
+                </small>
+                <strong>
+                  {draft.name[lang] ||
+                    (lang === "ar" ? "بيانات الراسل" : "Sender details")}
+                </strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={lang === "ar" ? "إغلاق" : "Close"}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><UsersRound size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "البيانات الأساسية" : "Basic information"}</strong>
+                  <small>{lang === "ar" ? "الهوية ووسائل التواصل" : "Identity and contact details"}</small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{lang === "ar" ? "اسم الراسل بالعربية" : "Arabic name"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.name.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, ar: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "اسم الراسل بالإنجليزية" : "English name"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.name.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, en: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "كود الراسل" : "Sender code"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.code}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          code: event.target.value
+                            .toUpperCase()
+                            .replace(/\s+/g, "-"),
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{lang === "ar" ? "حالة التعامل" : "Operating state"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.state}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          state: event.target.value as SenderRecord["state"],
+                        }))
+                      }
+                    >
+                      <option value="active">{lang === "ar" ? "نشط" : "Active"}</option>
+                      <option value="paused">{lang === "ar" ? "موقوف مؤقتًا" : "Paused"}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "اسم مسؤول التواصل" : "Contact person"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.contactName}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          contactName: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "رقم الهاتف الأساسي" : "Primary phone"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.phone}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          phone: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "رقم هاتف إضافي" : "Secondary phone"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.secondaryPhone}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          secondaryPhone: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "العنوان" : "Address"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.address}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          address: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><HandCoins size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "قائمة الأسعار" : "Price list"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "اربط الراسل بقائمة واحدة، ويمكن تغييرها لاحقًا."
+                      : "Link the sender to one list; it can be changed later."}
+                  </small>
+                </div>
+              </div>
+              <label className="select-field">
+                <span>{lang === "ar" ? "القائمة المستخدمة" : "Applied list"}</span>
+                <span className="select-wrap">
+                  <select
+                    value={priceListId}
+                    onChange={(event) => setPriceListId(event.target.value)}
+                  >
+                    <option value="">
+                      {lang === "ar"
+                        ? "القائمة الافتراضية للشركة"
+                        : "Company default list"}
+                    </option>
+                    {priceLists
+                      .filter((priceList) => priceList.state === "active")
+                      .map((priceList) => (
+                        <option key={priceList.id} value={priceList.id}>
+                          {priceList.name[lang]}
+                        </option>
+                      ))}
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
+            </section>
+
+            <label className="field sender-notes-field">
+              <span>{lang === "ar" ? "ملاحظات داخلية" : "Internal notes"}</span>
+              <span className="field__control">
+                <textarea
+                  value={draft.notes}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                />
+              </span>
+            </label>
+          </div>
+
+          <div className="drawer__footer drawer__footer--split">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {lang === "ar" ? "إلغاء" : "Cancel"}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {lang === "ar" ? "حفظ الراسل" : "Save sender"}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function SendersScreen({
+  lang,
+  theme,
+  records,
+  priceLists,
+  shipmentRecords,
+  senderPolicies,
+  onRecordsChange,
+  onPriceListsChange,
+  onSenderPoliciesChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  records: SenderRecord[];
+  priceLists: PriceListRecord[];
+  shipmentRecords: Shipment[];
+  senderPolicies: SenderShipmentPolicy[];
+  onRecordsChange: (
+    updater: (current: SenderRecord[]) => SenderRecord[],
+  ) => void;
+  onPriceListsChange: (
+    updater: (current: PriceListRecord[]) => PriceListRecord[],
+  ) => void;
+  onSenderPoliciesChange: (
+    updater: (current: SenderShipmentPolicy[]) => SenderShipmentPolicy[],
+  ) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState<"all" | SenderRecord["state"]>(
+    "all",
+  );
+  const [editing, setEditing] = useState<SenderRecord | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [toast, setToast] = useState("");
+
+  const filteredRecords = records.filter((sender) => {
+    const normalized = search.trim().toLowerCase();
+    const matchesSearch =
+      !normalized ||
+      [
+        sender.name.ar,
+        sender.name.en,
+        sender.code,
+        sender.phone,
+        sender.contactName,
+      ].some((value) => value.toLowerCase().includes(normalized));
+    return (
+      matchesSearch &&
+      (stateFilter === "all" || sender.state === stateFilter)
+    );
+  });
+
+  function linkedPriceList(sender: SenderRecord) {
+    return (
+      priceLists.find((priceList) =>
+        priceList.senders.some(
+          (name) => name.en === sender.name.en || name.ar === sender.name.ar,
+        ),
+      ) ??
+      priceLists.find((priceList) => priceList.isDefault) ??
+      null
+    );
+  }
+
+  function openNew() {
+    setIsNew(true);
+    setEditing({
+      id: `sender-${records.length + 1}-${Date.now()}`,
+      code: `SN-${String(records.length + 1).padStart(4, "0")}`,
+      name: { ar: "", en: "" },
+      contactName: "",
+      phone: "",
+      secondaryPhone: "",
+      address: "",
+      state: "active",
+      notes: "",
+      createdAt: { ar: "أضيف الآن", en: "Added now" },
+    });
+  }
+
+  function saveSender(next: SenderRecord, priceListId: string) {
+    const previous = records.find((record) => record.id === next.id);
+    onRecordsChange((current) =>
+      current.some((record) => record.id === next.id)
+        ? current.map((record) => (record.id === next.id ? next : record))
+        : [...current, next],
+    );
+    onPriceListsChange((current) =>
+      current.map((priceList) => {
+        const cleaned = priceList.senders.filter(
+          (name) =>
+            !previous ||
+            (name.en !== previous.name.en && name.ar !== previous.name.ar),
+        );
+        if (priceList.id !== priceListId) {
+          return { ...priceList, senders: cleaned };
+        }
+        return {
+          ...priceList,
+          senders: [
+            ...cleaned.filter(
+              (name) =>
+                name.en !== next.name.en && name.ar !== next.name.ar,
+            ),
+            next.name,
+          ],
+        };
+      }),
+    );
+    if (previous) {
+      onSenderPoliciesChange((current) =>
+        current.map((policy) =>
+          policy.sender.en === previous.name.en ||
+          policy.sender.ar === previous.name.ar
+            ? { ...policy, sender: next.name }
+            : policy,
+        ),
+      );
+    }
+    setEditing(null);
+    setIsNew(false);
+    setToast(
+      lang === "ar"
+        ? "تم حفظ الراسل وربطه بالتسعير والسياسات"
+        : "Sender saved and linked to pricing and policies",
+    );
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="senders"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><UsersRound size={20} /></span>
+            <span>
+              <strong>{lang === "ar" ? "إدارة الرسل" : "Sender management"}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content senders-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "الرسل" : "Senders"}</h1>
+                <span className="demo-chip">
+                  {records.length} {lang === "ar" ? "راسل" : "senders"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "هذا هو سجل الرسل الحقيقي الذي تعتمد عليه إضافة الشحنة والتسعير والسياسات."
+                  : "This is the real sender registry used by shipment entry, pricing and policies."}
+              </p>
+            </div>
+            <div className="page-heading-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onNavigate("shipmentPolicies")}
+              >
+                <SlidersHorizontal size={17} />
+                {lang === "ar" ? "سياسات الرسل" : "Sender policies"}
+              </button>
+              <button className="primary-button" type="button" onClick={openNew}>
+                <Plus size={17} />
+                {lang === "ar" ? "إضافة راسل" : "Add sender"}
+              </button>
+            </div>
+          </div>
+
+          <section className="sender-metrics">
+            <article>
+              <span><UsersRound size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "إجمالي الرسل" : "Total senders"}</small>
+                <strong>{records.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span><PackageCheck size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "نشطون" : "Active"}</small>
+                <strong>{records.filter((sender) => sender.state === "active").length}</strong>
+              </div>
+            </article>
+            <article>
+              <span><SlidersHorizontal size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "سياسات مخصصة" : "Custom policies"}</small>
+                <strong>{senderPolicies.length}</strong>
+              </div>
+            </article>
+          </section>
+
+          <section className="senders-panel">
+            <div className="senders-toolbar">
+              <label className="shipment-search">
+                <Search size={18} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "ابحث بالاسم أو الكود أو الهاتف..."
+                      : "Search name, code or phone..."
+                  }
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")}>
+                    <X size={16} />
+                  </button>
+                )}
+              </label>
+              <label className="select-wrap status-filter">
+                <select
+                  value={stateFilter}
+                  onChange={(event) =>
+                    setStateFilter(
+                      event.target.value as "all" | SenderRecord["state"],
+                    )
+                  }
+                >
+                  <option value="all">{lang === "ar" ? "كل الحالات" : "All states"}</option>
+                  <option value="active">{lang === "ar" ? "نشط" : "Active"}</option>
+                  <option value="paused">{lang === "ar" ? "موقوف" : "Paused"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="senders-table">
+              <div className="senders-table__head">
+                <span>{lang === "ar" ? "الراسل" : "Sender"}</span>
+                <span>{lang === "ar" ? "التواصل" : "Contact"}</span>
+                <span>{lang === "ar" ? "قائمة الأسعار" : "Price list"}</span>
+                <span>{lang === "ar" ? "السياسة" : "Policy"}</span>
+                <span>{lang === "ar" ? "الشحنات" : "Shipments"}</span>
+                <span>{lang === "ar" ? "الحالة" : "State"}</span>
+                <span />
+              </div>
+              <div className="senders-table__body">
+                {filteredRecords.map((sender) => {
+                  const priceList = linkedPriceList(sender);
+                  const customPolicy = findSenderShipmentPolicy(
+                    sender.name,
+                    senderPolicies,
+                  );
+                  const shipmentCount = shipmentRecords.filter(
+                    (shipment) =>
+                      shipment.sender.en === sender.name.en ||
+                      shipment.sender.ar === sender.name.ar,
+                  ).length;
+                  return (
+                    <article className="sender-row" key={sender.id}>
+                      <div className="sender-row__identity">
+                        <span className="mini-avatar">
+                          {sender.name[lang].slice(0, 1)}
+                        </span>
+                        <span>
+                          <strong>{sender.name[lang]}</strong>
+                          <small dir="ltr">{sender.code}</small>
+                        </span>
+                      </div>
+                      <div className="sender-row__contact">
+                        <strong>{sender.contactName}</strong>
+                        <small dir="ltr">{sender.phone}</small>
+                      </div>
+                      <div className="sender-row__price">
+                        <strong>{priceList?.name[lang] ?? "—"}</strong>
+                        <small dir="ltr">{priceList?.code ?? ""}</small>
+                      </div>
+                      <span
+                        className={
+                          customPolicy
+                            ? "policy-scope-chip policy-scope-chip--custom"
+                            : "policy-scope-chip"
+                        }
+                      >
+                        {customPolicy
+                          ? lang === "ar"
+                            ? "مخصصة"
+                            : "Custom"
+                          : lang === "ar"
+                            ? "سياسة الشركة"
+                            : "Company default"}
+                      </span>
+                      <strong className="sender-row__count">{shipmentCount}</strong>
+                      <span
+                        className={
+                          sender.state === "active"
+                            ? "policy-state policy-state--published"
+                            : "policy-state policy-state--draft"
+                        }
+                      >
+                        {sender.state === "active"
+                          ? lang === "ar"
+                            ? "نشط"
+                            : "Active"
+                          : lang === "ar"
+                            ? "موقوف"
+                            : "Paused"}
+                      </span>
+                      <button
+                        className="status-edit-button"
+                        type="button"
+                        onClick={() => {
+                          setIsNew(false);
+                          setEditing(sender);
+                        }}
+                        aria-label={lang === "ar" ? "تعديل الراسل" : "Edit sender"}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    </article>
+                  );
+                })}
+                {filteredRecords.length === 0 && (
+                  <div className="status-empty">
+                    <UsersRound size={22} />
+                    <span>{lang === "ar" ? "لا يوجد رسل مطابقون" : "No matching senders"}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editing && (
+        <SenderEditor
+          key={editing.id}
+          sender={editing}
+          isNew={isNew}
+          lang={lang}
+          priceLists={priceLists}
+          selectedPriceListId={linkedPriceList(editing)?.id ?? ""}
+          onClose={() => {
+            setEditing(null);
+            setIsNew(false);
+          }}
+          onSave={saveSender}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CourierEditor({
+  courier,
+  isNew,
+  lang,
+  plans,
+  selectedPlanId,
+  onClose,
+  onSave,
+}: {
+  courier: CourierRecord;
+  isNew: boolean;
+  lang: Lang;
+  plans: CourierRatePlan[];
+  selectedPlanId: string;
+  onClose: () => void;
+  onSave: (courier: CourierRecord, planId: string) => void;
+}) {
+  const [draft, setDraft] = useState(courier);
+  const [planId, setPlanId] = useState(selectedPlanId);
+
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onSave(draft, planId);
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={lang === "ar" ? "إغلاق" : "Close"}
+        onClick={onClose}
+      />
+      <aside
+        className="policy-editor sender-editor courier-editor"
+        aria-label={lang === "ar" ? "بيانات المندوب" : "Courier details"}
+      >
+        <form onSubmit={handleSubmit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span className="courier-editor-badge">
+                <Truck size={20} />
+              </span>
+              <span>
+                <small>
+                  {isNew
+                    ? lang === "ar"
+                      ? "مندوب جديد"
+                      : "New courier"
+                    : lang === "ar"
+                      ? "تعديل المندوب"
+                      : "Edit courier"}
+                </small>
+                <strong>
+                  {draft.name[lang] ||
+                    (lang === "ar" ? "بيانات المندوب" : "Courier details")}
+                </strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={lang === "ar" ? "إغلاق" : "Close"}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><UserRound size={16} /></span>
+                <div>
+                  <strong>
+                    {lang === "ar" ? "البيانات الأساسية" : "Basic information"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "هوية المندوب ووسائل التواصل"
+                      : "Courier identity and contact"}
+                  </small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{lang === "ar" ? "اسم المندوب بالعربية" : "Arabic name"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.name.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, ar: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "اسم المندوب بالإنجليزية" : "English name"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.name.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          name: { ...current.name, en: event.target.value },
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "كود المندوب" : "Courier code"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.code}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          code: event.target.value
+                            .toUpperCase()
+                            .replace(/\s+/g, "-"),
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{lang === "ar" ? "حالة التشغيل" : "Operating state"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.state}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          state: event.target.value as CourierRecord["state"],
+                        }))
+                      }
+                    >
+                      <option value="active">{lang === "ar" ? "نشط" : "Active"}</option>
+                      <option value="paused">{lang === "ar" ? "موقوف مؤقتًا" : "Paused"}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "رقم الهاتف الأساسي" : "Primary phone"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.phone}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          phone: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "رقم هاتف إضافي" : "Secondary phone"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.secondaryPhone}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          secondaryPhone: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "الرقم القومي" : "National ID"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.nationalId}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          nationalId: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Truck size={16} /></span>
+                <div>
+                  <strong>
+                    {lang === "ar" ? "التشغيل والحساب" : "Operations and account"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "المركبة وقائمة العمولة التي تحكم حسابه"
+                      : "Vehicle and the commission plan governing the account"}
+                  </small>
+                </div>
+              </div>
+              <div className="policy-form-grid">
+                <label className="field">
+                  <span>{lang === "ar" ? "نوع المركبة بالعربية" : "Arabic vehicle type"}</span>
+                  <span className="field__control">
+                    <input
+                      value={draft.vehicle.ar}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          vehicle: { ...current.vehicle, ar: event.target.value },
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "نوع المركبة بالإنجليزية" : "English vehicle type"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.vehicle.en}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          vehicle: { ...current.vehicle, en: event.target.value },
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>{lang === "ar" ? "رقم المركبة" : "Vehicle number"}</span>
+                  <span className="field__control">
+                    <input
+                      dir="ltr"
+                      value={draft.vehicleNumber}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          vehicleNumber: event.target.value,
+                        }))
+                      }
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{lang === "ar" ? "قائمة عمولة المندوب" : "Commission plan"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={planId}
+                      onChange={(event) => setPlanId(event.target.value)}
+                    >
+                      <option value="">
+                        {lang === "ar"
+                          ? "الخطة الافتراضية للشركة"
+                          : "Company default plan"}
+                      </option>
+                      {plans
+                        .filter((plan) => plan.state === "active")
+                        .map((plan) => (
+                          <option key={plan.id} value={plan.id}>
+                            {plan.name[lang]}
+                          </option>
+                        ))}
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            <label className="field sender-notes-field">
+              <span>{lang === "ar" ? "ملاحظات داخلية" : "Internal notes"}</span>
+              <span className="field__control">
+                <textarea
+                  value={draft.notes}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                />
+              </span>
+            </label>
+          </div>
+
+          <div className="drawer__footer drawer__footer--split">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {lang === "ar" ? "إلغاء" : "Cancel"}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {lang === "ar" ? "حفظ المندوب" : "Save courier"}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function CouriersScreen({
+  lang,
+  theme,
+  records,
+  plans,
+  shipmentRecords,
+  debts,
+  onRecordsChange,
+  onPlansChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  records: CourierRecord[];
+  plans: CourierRatePlan[];
+  shipmentRecords: Shipment[];
+  debts: CourierDebt[];
+  onRecordsChange: (
+    updater: (current: CourierRecord[]) => CourierRecord[],
+  ) => void;
+  onPlansChange: (
+    updater: (current: CourierRatePlan[]) => CourierRatePlan[],
+  ) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [stateFilter, setStateFilter] = useState<"all" | CourierRecord["state"]>(
+    "all",
+  );
+  const [editing, setEditing] = useState<CourierRecord | null>(null);
+  const [isNew, setIsNew] = useState(false);
+  const [toast, setToast] = useState("");
+
+  const filteredRecords = records.filter((courier) => {
+    const normalized = search.trim().toLowerCase();
+    const matchesSearch =
+      !normalized ||
+      [
+        courier.name.ar,
+        courier.name.en,
+        courier.code,
+        courier.phone,
+        courier.vehicle.ar,
+        courier.vehicle.en,
+      ].some((value) => value.toLowerCase().includes(normalized));
+    return (
+      matchesSearch &&
+      (stateFilter === "all" || courier.state === stateFilter)
+    );
+  });
+
+  function linkedPlan(courier: CourierRecord) {
+    return (
+      plans.find((plan) =>
+        plan.couriers.some(
+          (name) => name.en === courier.name.en || name.ar === courier.name.ar,
+        ),
+      ) ??
+      plans.find((plan) => plan.isDefault) ??
+      null
+    );
+  }
+
+  function openNew() {
+    setIsNew(true);
+    setEditing({
+      id: `courier-${records.length + 1}-${Date.now()}`,
+      code: `CR-${String(2001 + records.length).padStart(4, "0")}`,
+      name: { ar: "", en: "" },
+      phone: "",
+      secondaryPhone: "",
+      nationalId: "",
+      vehicle: { ar: "دراجة نارية", en: "Motorbike" },
+      vehicleNumber: "",
+      state: "active",
+      notes: "",
+      createdAt: { ar: "أضيف الآن", en: "Added now" },
+    });
+  }
+
+  function saveCourier(next: CourierRecord, planId: string) {
+    const previous = records.find((record) => record.id === next.id);
+    onRecordsChange((current) =>
+      current.some((record) => record.id === next.id)
+        ? current.map((record) => (record.id === next.id ? next : record))
+        : [...current, next],
+    );
+    onPlansChange((current) =>
+      current.map((plan) => {
+        const cleaned = plan.couriers.filter(
+          (name) =>
+            !previous ||
+            (name.en !== previous.name.en && name.ar !== previous.name.ar),
+        );
+        if (plan.id !== planId) {
+          return { ...plan, couriers: cleaned };
+        }
+        return {
+          ...plan,
+          couriers: [
+            ...cleaned.filter(
+              (name) =>
+                name.en !== next.name.en && name.ar !== next.name.ar,
+            ),
+            next.name,
+          ],
+        };
+      }),
+    );
+    setEditing(null);
+    setIsNew(false);
+    setToast(
+      lang === "ar"
+        ? "تم حفظ المندوب وربطه بقائمة عمولته"
+        : "Courier saved and linked to the commission plan",
+    );
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="couriers"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><Truck size={20} /></span>
+            <span>
+              <strong>{lang === "ar" ? "إدارة المناديب" : "Courier management"}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content senders-page couriers-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "المناديب" : "Couriers"}</h1>
+                <span className="demo-chip">
+                  {records.length} {lang === "ar" ? "مندوب" : "couriers"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "سجل المناديب الذي تعتمد عليه عملية الإسناد والشحنات والحساب والعمولات."
+                  : "The courier registry used by assignment, custody, accounts and commissions."}
+              </p>
+            </div>
+            <div className="page-heading-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onNavigate("courierRates")}
+              >
+                <HandCoins size={17} />
+                {lang === "ar" ? "عمولات المناديب" : "Courier commissions"}
+              </button>
+              <button className="primary-button" type="button" onClick={openNew}>
+                <Plus size={17} />
+                {lang === "ar" ? "إضافة مندوب" : "Add courier"}
+              </button>
+            </div>
+          </div>
+
+          <section className="sender-metrics">
+            <article>
+              <span><UserRound size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "إجمالي المناديب" : "Total couriers"}</small>
+                <strong>{records.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span><PackageCheck size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "نشطون" : "Active"}</small>
+                <strong>{records.filter((courier) => courier.state === "active").length}</strong>
+              </div>
+            </article>
+            <article>
+              <span><HandCoins size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "مديونيات قائمة" : "Open debts"}</small>
+                <strong>
+                  {debts.filter((debt) => debt.state === "active" && debt.balance > 0).length}
+                </strong>
+              </div>
+            </article>
+          </section>
+
+          <section className="senders-panel">
+            <div className="senders-toolbar">
+              <label className="shipment-search">
+                <Search size={18} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "ابحث بالاسم أو الكود أو الهاتف أو المركبة..."
+                      : "Search name, code, phone or vehicle..."
+                  }
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")}>
+                    <X size={16} />
+                  </button>
+                )}
+              </label>
+              <label className="select-wrap status-filter">
+                <select
+                  value={stateFilter}
+                  onChange={(event) =>
+                    setStateFilter(
+                      event.target.value as "all" | CourierRecord["state"],
+                    )
+                  }
+                >
+                  <option value="all">{lang === "ar" ? "كل الحالات" : "All states"}</option>
+                  <option value="active">{lang === "ar" ? "نشط" : "Active"}</option>
+                  <option value="paused">{lang === "ar" ? "موقوف" : "Paused"}</option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="senders-table">
+              <div className="senders-table__head">
+                <span>{lang === "ar" ? "المندوب" : "Courier"}</span>
+                <span>{lang === "ar" ? "التواصل" : "Contact"}</span>
+                <span>{lang === "ar" ? "المركبة" : "Vehicle"}</span>
+                <span>{lang === "ar" ? "قائمة العمولة" : "Commission plan"}</span>
+                <span>{lang === "ar" ? "الشحنات معه" : "In custody"}</span>
+                <span>{lang === "ar" ? "الحالة" : "State"}</span>
+                <span />
+              </div>
+              <div className="senders-table__body">
+                {filteredRecords.map((courier) => {
+                  const plan = linkedPlan(courier);
+                  const shipmentCount = shipmentRecords.filter(
+                    (shipment) =>
+                      shipment.custodyType === "courier" &&
+                      (shipment.courier?.en === courier.name.en ||
+                        shipment.courier?.ar === courier.name.ar),
+                  ).length;
+                  return (
+                    <article className="sender-row" key={courier.id}>
+                      <div className="sender-row__identity">
+                        <span className="mini-avatar">
+                          {courier.name[lang].slice(0, 1)}
+                        </span>
+                        <span>
+                          <strong>{courier.name[lang]}</strong>
+                          <small dir="ltr">{courier.code}</small>
+                        </span>
+                      </div>
+                      <div className="sender-row__contact">
+                        <strong dir="ltr">{courier.phone}</strong>
+                        <small>{courier.createdAt[lang]}</small>
+                      </div>
+                      <div className="sender-row__price">
+                        <strong>{courier.vehicle[lang]}</strong>
+                        <small dir="ltr">{courier.vehicleNumber || "—"}</small>
+                      </div>
+                      <span className="policy-scope-chip policy-scope-chip--custom">
+                        {plan?.name[lang] ??
+                          (lang === "ar" ? "خطة الشركة" : "Company plan")}
+                      </span>
+                      <strong className="sender-row__count">{shipmentCount}</strong>
+                      <span
+                        className={
+                          courier.state === "active"
+                            ? "policy-state policy-state--published"
+                            : "policy-state policy-state--draft"
+                        }
+                      >
+                        {courier.state === "active"
+                          ? lang === "ar"
+                            ? "نشط"
+                            : "Active"
+                          : lang === "ar"
+                            ? "موقوف"
+                            : "Paused"}
+                      </span>
+                      <button
+                        className="status-edit-button"
+                        type="button"
+                        onClick={() => {
+                          setIsNew(false);
+                          setEditing(courier);
+                        }}
+                        aria-label={lang === "ar" ? "تعديل المندوب" : "Edit courier"}
+                      >
+                        <Pencil size={16} />
+                      </button>
+                    </article>
+                  );
+                })}
+                {filteredRecords.length === 0 && (
+                  <div className="status-empty">
+                    <UserRound size={22} />
+                    <span>
+                      {lang === "ar" ? "لا يوجد مناديب مطابقون" : "No matching couriers"}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editing && (
+        <CourierEditor
+          key={editing.id}
+          courier={editing}
+          isNew={isNew}
+          lang={lang}
+          plans={plans}
+          selectedPlanId={linkedPlan(editing)?.id ?? ""}
+          onClose={() => {
+            setEditing(null);
+            setIsNew(false);
+          }}
+          onSave={saveCourier}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PriceListEditor({
   priceList,
   isNew,
   lang,
+  senders,
   onClose,
   onSave,
 }: {
   priceList: PriceListRecord;
   isNew: boolean;
   lang: Lang;
+  senders: SenderRecord[];
   onClose: () => void;
   onSave: (priceList: PriceListRecord) => void;
 }) {
@@ -5616,10 +7114,13 @@ function PriceListEditor({
                 </div>
               </div>
               <div className="policy-choice-grid price-sender-grid">
-                {availableSenders.map((sender) => {
+                {senders
+                  .filter((sender) => sender.state === "active")
+                  .map((record) => {
+                  const sender = record.name;
                   const checked = draft.senders.some((item) => item.en === sender.en);
                   return (
-                    <label className="policy-check" key={sender.en}>
+                    <label className="policy-check" key={record.id}>
                       <input
                         type="checkbox"
                         checked={checked}
@@ -5668,6 +7169,7 @@ function PriceListsScreen({
   priceLists,
   statuses,
   governorates,
+  senders,
   onLang,
   onTheme,
   onPriceListsChange,
@@ -5679,6 +7181,7 @@ function PriceListsScreen({
   priceLists: PriceListRecord[];
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
+  senders: SenderRecord[];
   onLang: () => void;
   onTheme: () => void;
   onPriceListsChange: (
@@ -6228,6 +7731,7 @@ function PriceListsScreen({
           priceList={editing}
           isNew={isNew}
           lang={lang}
+          senders={senders}
           onClose={() => {
             setEditing(null);
             setIsNew(false);
@@ -6249,12 +7753,14 @@ function CourierPlanEditor({
   plan,
   isNew,
   lang,
+  couriers,
   onClose,
   onSave,
 }: {
   plan: CourierRatePlan;
   isNew: boolean;
   lang: Lang;
+  couriers: CourierRecord[];
   onClose: () => void;
   onSave: (plan: CourierRatePlan) => void;
 }) {
@@ -6479,7 +7985,10 @@ function CourierPlanEditor({
                 </div>
               </div>
               <div className="policy-choice-grid">
-                {availableCouriers.map((courier) => {
+                {couriers
+                  .filter((courier) => courier.state === "active")
+                  .map((record) => {
+                  const courier = record.name;
                   const checked = draft.couriers.some(
                     (item) => item.en === courier.en,
                   );
@@ -6531,6 +8040,7 @@ function CourierRatesScreen({
   lang,
   theme,
   plans,
+  couriers,
   statuses,
   governorates,
   onLang,
@@ -6542,6 +8052,7 @@ function CourierRatesScreen({
   lang: Lang;
   theme: Theme;
   plans: CourierRatePlan[];
+  couriers: CourierRecord[];
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
   onLang: () => void;
@@ -7162,6 +8673,7 @@ function CourierRatesScreen({
           plan={editing}
           isNew={isNew}
           lang={lang}
+          couriers={couriers}
           onClose={() => {
             setEditing(null);
             setIsNew(false);
@@ -7552,6 +9064,7 @@ function ShipmentPoliciesScreen({
   fields,
   settings,
   senderPolicies,
+  senders,
   onLang,
   onTheme,
   onSave,
@@ -7563,6 +9076,7 @@ function ShipmentPoliciesScreen({
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
+  senders: SenderRecord[];
   onLang: () => void;
   onTheme: () => void;
   onSave: (
@@ -7596,7 +9110,7 @@ function ShipmentPoliciesScreen({
   const scopedSender =
     scopeKey === "company"
       ? null
-      : availableSenders.find((sender) => sender.en === scopeKey) ?? null;
+      : senders.find((sender) => sender.id === scopeKey)?.name ?? null;
   const scopedPolicy = scopedSender
     ? findSenderShipmentPolicy(scopedSender, draftSenderPolicies)
     : undefined;
@@ -7904,9 +9418,9 @@ function ShipmentPoliciesScreen({
                 <option value="company">
                   {lang === "ar" ? "الافتراضي العام للشركة" : "Company default"}
                 </option>
-                {availableSenders.map((sender) => (
-                  <option key={sender.en} value={sender.en}>
-                    {sender[lang]}
+                {senders.map((sender) => (
+                  <option key={sender.id} value={sender.id}>
+                    {sender.name[lang]}
                   </option>
                 ))}
               </select>
@@ -8482,30 +9996,12 @@ type ConfirmationFilter =
   | "no_answer"
   | "later";
 
-const assignmentCourierProfiles = availableCouriers.map((courier, index) => ({
-  courier,
-  phone: [
-    "0100 842 1975",
-    "0111 304 8821",
-    "0122 507 6140",
-    "0109 118 3302",
-    "0112 670 9415",
-    "0155 204 7811",
-  ][index],
-  vehicle:
-    index === 2
-      ? ({ ar: "سيارة", en: "Car" } as Localized)
-      : index === 4
-        ? ({ ar: "فان", en: "Van" } as Localized)
-        : ({ ar: "دراجة نارية", en: "Motorbike" } as Localized),
-  code: `CR-${String(2001 + index)}`,
-}));
-
 function CourierShipmentsScreen({
   lang,
   theme,
   shipmentRecords,
   statuses,
+  couriers,
   onShipmentsChange,
   onLang,
   onTheme,
@@ -8516,6 +10012,7 @@ function CourierShipmentsScreen({
   theme: Theme;
   shipmentRecords: Shipment[];
   statuses: StatusPolicy[];
+  couriers: CourierRecord[];
   onShipmentsChange: (records: Shipment[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -8524,6 +10021,7 @@ function CourierShipmentsScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const assignmentCourierProfiles = courierProfiles(couriers);
   const initialCourier =
     assignmentCourierProfiles.find((profile) =>
       shipmentRecords.some(
@@ -9374,6 +10872,7 @@ function CourierPrintScreen({
   lang,
   theme,
   shipmentRecords,
+  couriers,
   debts,
   onLang,
   onTheme,
@@ -9383,6 +10882,7 @@ function CourierPrintScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  couriers: CourierRecord[];
   debts: CourierDebt[];
   onLang: () => void;
   onTheme: () => void;
@@ -9391,6 +10891,7 @@ function CourierPrintScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const assignmentCourierProfiles = courierProfiles(couriers);
   const initialCourier =
     assignmentCourierProfiles.find((profile) =>
       shipmentRecords.some(
@@ -13553,6 +15054,7 @@ function CourierAccountScreen({
   lang,
   theme,
   shipmentRecords,
+  couriers,
   courierPlans,
   governorates,
   debts,
@@ -13568,6 +15070,7 @@ function CourierAccountScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  couriers: CourierRecord[];
   courierPlans: CourierRatePlan[];
   governorates: GovernorateRecord[];
   debts: CourierDebt[];
@@ -13582,6 +15085,7 @@ function CourierAccountScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const assignmentCourierProfiles = courierProfiles(couriers);
   const courierWithPending =
     assignmentCourierProfiles.find((profile) =>
       shipmentRecords.some((shipment) =>
@@ -14758,6 +16262,7 @@ function AssignmentScreen({
   shipmentRecords,
   statuses,
   governorates,
+  couriers,
   settings,
   senderPolicies,
   onShipmentsChange,
@@ -14771,6 +16276,7 @@ function AssignmentScreen({
   shipmentRecords: Shipment[];
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
+  couriers: CourierRecord[];
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
   onShipmentsChange: (records: Shipment[]) => void;
@@ -14781,7 +16287,10 @@ function AssignmentScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [courierKey, setCourierKey] = useState(availableCouriers[0].en);
+  const assignmentCourierProfiles = courierProfiles(couriers);
+  const [courierKey, setCourierKey] = useState(
+    assignmentCourierProfiles[0].courier.en,
+  );
   const [search, setSearch] = useState("");
   const [governorateFilter, setGovernorateFilter] = useState("");
   const [senderFilter, setSenderFilter] = useState("");
@@ -16124,6 +17633,7 @@ function AddShipmentScreen({
   fields,
   settings,
   senderPolicies,
+  senders,
   governorates,
   statuses,
   priceLists,
@@ -16138,6 +17648,7 @@ function AddShipmentScreen({
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
+  senders: SenderRecord[];
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
   priceLists: PriceListRecord[];
@@ -16150,15 +17661,21 @@ function AddShipmentScreen({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [entryMode, setEntryMode] = useState<"manual" | "excel">("manual");
-  const [senderKey, setSenderKey] = useState(availableSenders[0].en);
+  const activeSenderRecords = senders.filter(
+    (sender) => sender.state === "active",
+  );
+  const firstSender = activeSenderRecords[0] ?? senderRecordsData[0];
+  const [senderKey, setSenderKey] = useState(firstSender.id);
   const initialSenderPolicy = findSenderShipmentPolicy(
-    availableSenders[0],
+    firstSender.name,
     senderPolicies,
   );
   const initialPayer =
     initialSenderPolicy?.settings.defaultShippingPayer ??
     settings.defaultShippingPayer ??
-    senderEntryProfiles.find((profile) => profile.sender.en === senderKey)
+    senderEntryProfiles.find(
+      (profile) => profile.sender.en === firstSender.name.en,
+    )
       ?.shippingPayer ??
     "recipient";
   const [draft, setDraft] = useState<ShipmentEntryDraft>(() =>
@@ -16176,8 +17693,8 @@ function AddShipmentScreen({
     maximumFractionDigits: 0,
   });
   const selectedSender =
-    availableSenders.find((sender) => sender.en === senderKey) ??
-    availableSenders[0];
+    activeSenderRecords.find((sender) => sender.id === senderKey)?.name ??
+    firstSender.name;
   const senderPolicy = findSenderShipmentPolicy(selectedSender, senderPolicies);
   const policySettings = normalizeShipmentDataSettings(
     senderPolicy?.settings ?? settings,
@@ -16273,9 +17790,9 @@ function AddShipmentScreen({
 
   function chooseSender(nextKey: string) {
     const nextSender =
-      availableSenders.find((sender) => sender.en === nextKey) ??
-      availableSenders[0];
-    const nextPolicy = findSenderShipmentPolicy(nextSender, senderPolicies);
+      activeSenderRecords.find((sender) => sender.id === nextKey) ??
+      firstSender;
+    const nextPolicy = findSenderShipmentPolicy(nextSender.name, senderPolicies);
     const nextSettings = normalizeShipmentDataSettings(
       nextPolicy?.settings ?? settings,
     );
@@ -16620,9 +18137,9 @@ function AddShipmentScreen({
             </div>
             <label className="entry-select">
               <select value={senderKey} onChange={(event) => chooseSender(event.target.value)}>
-                {availableSenders.map((sender) => (
-                  <option key={sender.en} value={sender.en}>
-                    {sender[lang]}
+                {activeSenderRecords.map((sender) => (
+                  <option key={sender.id} value={sender.id}>
+                    {sender.name[lang]}
                   </option>
                 ))}
               </select>
@@ -18103,6 +19620,8 @@ export default function Home() {
   const [theme, setTheme] = useState<Theme>("light");
   const [screen, setScreen] = useState<Screen>("login");
   const [sharedStatuses, setSharedStatuses] = useState(statusPolicies);
+  const [sharedSenders, setSharedSenders] = useState(senderRecordsData);
+  const [sharedCouriers, setSharedCouriers] = useState(courierRecordsData);
   const [sharedGovernorates, setSharedGovernorates] = useState(governoratesData);
   const [sharedPriceLists, setSharedPriceLists] = useState(priceListsData);
   const [sharedCourierPlans, setSharedCourierPlans] = useState(
@@ -18148,6 +19667,8 @@ export default function Home() {
       if (saved) {
         const parsed = JSON.parse(saved) as {
           statuses?: StatusPolicy[];
+          senders?: SenderRecord[];
+          couriers?: CourierRecord[];
           governorates?: GovernorateRecord[];
           priceLists?: PriceListRecord[];
           courierPlans?: CourierRatePlan[];
@@ -18171,6 +19692,12 @@ export default function Home() {
                 status.appearsInCourierRates ?? status.appearsInPricing,
             })),
           );
+        }
+        if (Array.isArray(parsed.senders) && parsed.senders.length > 0) {
+          setSharedSenders(parsed.senders);
+        }
+        if (Array.isArray(parsed.couriers) && parsed.couriers.length > 0) {
+          setSharedCouriers(parsed.couriers);
         }
         if (Array.isArray(parsed.governorates)) {
           setSharedGovernorates(parsed.governorates);
@@ -18458,6 +19985,8 @@ export default function Home() {
       "tasleem-control-center-v2",
       JSON.stringify({
         statuses: sharedStatuses,
+        senders: sharedSenders,
+        couriers: sharedCouriers,
         governorates: sharedGovernorates,
         priceLists: sharedPriceLists,
         courierPlans: sharedCourierPlans,
@@ -18489,6 +20018,8 @@ export default function Home() {
     sharedSenderPolicies,
     sharedShipments,
     sharedStatuses,
+    sharedSenders,
+    sharedCouriers,
   ]);
 
   return (
@@ -18515,11 +20046,47 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
+      ) : screen === "senders" ? (
+        <SendersScreen
+          lang={lang}
+          theme={theme}
+          records={sharedSenders}
+          priceLists={sharedPriceLists}
+          shipmentRecords={sharedShipments}
+          senderPolicies={sharedSenderPolicies}
+          onRecordsChange={setSharedSenders}
+          onPriceListsChange={setSharedPriceLists}
+          onSenderPoliciesChange={setSharedSenderPolicies}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "couriers" ? (
+        <CouriersScreen
+          lang={lang}
+          theme={theme}
+          records={sharedCouriers}
+          plans={sharedCourierPlans}
+          shipmentRecords={sharedShipments}
+          debts={sharedCourierDebts}
+          onRecordsChange={setSharedCouriers}
+          onPlansChange={setSharedCourierPlans}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
       ) : screen === "courierAccount" ? (
         <CourierAccountScreen
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          couriers={sharedCouriers}
           courierPlans={sharedCourierPlans}
           governorates={sharedGovernorates}
           debts={sharedCourierDebts}
@@ -18609,6 +20176,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          couriers={sharedCouriers}
           debts={sharedCourierDebts}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
@@ -18623,6 +20191,7 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           statuses={sharedStatuses}
+          couriers={sharedCouriers}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
@@ -18638,6 +20207,7 @@ export default function Home() {
           shipmentRecords={sharedShipments}
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
+          couriers={sharedCouriers}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           onShipmentsChange={setSharedShipments}
@@ -18670,6 +20240,7 @@ export default function Home() {
           fields={sharedShipmentFields}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
+          senders={sharedSenders}
           governorates={sharedGovernorates}
           statuses={sharedStatuses}
           priceLists={sharedPriceLists}
@@ -18718,6 +20289,7 @@ export default function Home() {
           priceLists={sharedPriceLists}
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
+          senders={sharedSenders}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -18731,6 +20303,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           plans={sharedCourierPlans}
+          couriers={sharedCouriers}
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
@@ -18748,6 +20321,7 @@ export default function Home() {
           fields={sharedShipmentFields}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
+          senders={sharedSenders}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))

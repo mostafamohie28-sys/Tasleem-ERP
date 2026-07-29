@@ -16416,3 +16416,229 @@ table td small,
     grid-column: 1 / -1;
   }
 }
+
+.sender-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.page-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.sender-metrics article {
+  min-height: 82px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.sender-metrics article > span {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(37, 81, 185, 0.1);
+  color: var(--blue-600);
+}
+
+.sender-metrics article > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sender-metrics small {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.sender-metrics strong {
+  font-size: 22px;
+  font-weight: 950;
+}
+
+.senders-panel {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.senders-toolbar {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) 180px;
+  gap: 10px;
+  padding: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.senders-table__head,
+.sender-row {
+  display: grid;
+  grid-template-columns:
+    minmax(180px, 1.25fr)
+    minmax(145px, 0.9fr)
+    minmax(170px, 1.05fr)
+    minmax(115px, 0.65fr)
+    72px
+    86px
+    42px;
+  align-items: center;
+}
+
+.senders-table__head {
+  min-height: 42px;
+  padding: 0 13px;
+  border-bottom: 1px solid var(--table-grid);
+  background: var(--surface-soft);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.sender-row {
+  min-height: 68px;
+  padding: 8px 13px;
+  border-bottom: 1px solid var(--table-grid);
+}
+
+.sender-row:last-child {
+  border-bottom: 0;
+}
+
+.sender-row:hover {
+  background: color-mix(in srgb, var(--surface-soft) 62%, transparent);
+}
+
+.sender-row__identity,
+.sender-row__contact,
+.sender-row__price {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sender-row__identity {
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+}
+
+.sender-row__identity > span:last-child {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sender-row strong {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sender-row small {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sender-row__count {
+  text-align: center;
+}
+
+.sender-editor .policy-editor__body {
+  display: grid;
+  gap: 13px;
+}
+
+.sender-notes-field textarea {
+  min-height: 88px;
+  width: 100%;
+  resize: vertical;
+}
+
+@media (max-width: 1120px) {
+  .senders-table {
+    padding: 10px;
+  }
+
+  .senders-table__head {
+    display: none;
+  }
+
+  .senders-table__body {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .sender-row {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 13px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .sender-row__identity,
+  .sender-row__contact,
+  .sender-row__price {
+    grid-column: 1;
+  }
+
+  .sender-row > .policy-scope-chip,
+  .sender-row > .policy-state {
+    grid-column: 2;
+  }
+
+  .sender-row__count {
+    grid-column: 2;
+  }
+
+  .sender-row > .status-edit-button {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 720px) {
+  .page-heading-actions {
+    width: 100%;
+  }
+
+  .page-heading-actions > button {
+    flex: 1;
+  }
+
+  .sender-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .senders-toolbar,
+  .senders-table__body {
+    grid-template-columns: 1fr;
+  }
+
+  .sender-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
