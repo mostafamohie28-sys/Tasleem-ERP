@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import {
+  Banknote,
   Bell,
   Boxes,
   CalendarDays,
@@ -27,6 +28,7 @@ import {
   GitBranch,
   Globe2,
   HandCoins,
+  Landmark,
   LayoutDashboard,
   LockKeyhole,
   LogIn,
@@ -40,6 +42,7 @@ import {
   Plus,
   Phone,
   Printer,
+  ReceiptText,
   Search,
   Save,
   Settings2,
@@ -71,7 +74,9 @@ type Screen =
   | "assignment"
   | "courierShipments"
   | "courierPrint"
-  | "courierAccount";
+  | "courierAccount"
+  | "senderAccountPrep"
+  | "senderAccount";
 type Scenario =
   | "ready"
   | "loading"
@@ -131,6 +136,12 @@ type Shipment = {
     settlementStatus?: "pending" | "settled";
     settlementId?: string;
     settledAt?: Localized;
+    senderSettlementStatus?: "eligible" | "reserved" | "settled";
+    senderSettlementDraftId?: string;
+    senderMoneySettled?: boolean;
+    senderReturnSettled?: boolean;
+    senderOtherFees?: number;
+    senderOtherFeesLabel?: Localized;
   }[];
   pieces: number;
   shippingFee: number;
@@ -168,6 +179,52 @@ type CourierSettlement = {
   actualCash: number;
   difference: number;
   adjustmentReason: string;
+  timestamp: Localized;
+};
+
+type SenderBalance = {
+  id: string;
+  sender: Localized;
+  originalAmount: number;
+  paidAmount: number;
+  balance: number;
+  reason: string;
+  createdAt: Localized;
+  state: "active" | "closed";
+  history: {
+    id: string;
+    type: "created" | "payment";
+    amount: number;
+    note: string;
+    timestamp: Localized;
+  }[];
+};
+
+type SenderSettlementDraft = {
+  id: string;
+  sender: Localized;
+  shipmentEventIds: string[];
+  state: "open" | "completed" | "cancelled";
+  createdAt: Localized;
+  updatedAt: Localized;
+};
+
+type SenderSettlementReceipt = {
+  id: string;
+  draftId: string;
+  sender: Localized;
+  shipmentEventIds: string[];
+  newSenderDue: number;
+  companyDue: number;
+  previousBalanceRequested: number;
+  paidNow: number;
+  remainingBalance: number;
+  returnedShipmentCount: number;
+  returnedPieces: number;
+  paymentSource: string;
+  receiverName: string;
+  moneyExecuted: boolean;
+  returnsExecuted: boolean;
   timestamp: Localized;
 };
 
@@ -548,6 +605,9 @@ const shipments: Shipment[] = [
         nextDate: "",
         timestamp: { ar: "28 يوليو، 12:10 م", en: "28 Jul, 12:10 PM" },
         settlementStatus: "pending",
+        senderSettlementStatus: "eligible",
+        senderMoneySettled: false,
+        senderReturnSettled: true,
       },
     ],
     pieces: 1,
@@ -610,6 +670,152 @@ const shipments: Shipment[] = [
     address: {
       ar: "١٥ شارع شبرا، القاهرة",
       en: "15 Shubra St., Cairo",
+    },
+  },
+  {
+    id: "TS-12846",
+    reference: "OR-5624",
+    recipient: { ar: "هنا مصطفى", en: "Hana Mostafa" },
+    phone: "010 •••• 2846",
+    sender: { ar: "أوركيد", en: "Orchid" },
+    area: { ar: "المعادي", en: "Maadi" },
+    governorate: { ar: "القاهرة", en: "Cairo" },
+    status: { ar: "تسليم جزئي", en: "Partial delivery" },
+    statusPolicyId: "status-partial",
+    statusTone: "blue",
+    custody: { ar: "المخزن الرئيسي", en: "Main warehouse" },
+    custodyType: "warehouse",
+    courier: null,
+    amount: 500,
+    deliveryDate: { ar: "أمس، 6:20 م", en: "Yesterday, 6:20 PM" },
+    required: { ar: "تجهيز حساب الراسل", en: "Prepare sender account" },
+    requiredType: "attention",
+    lastEvent: { ar: "استلم المخزن المرتجع صباحًا", en: "Return received this morning" },
+    confirmation: { ar: "تم التأكيد", en: "Confirmed" },
+    statusHistory: [
+      {
+        id: "status-event-orchid-partial",
+        statusPolicyId: "status-partial",
+        status: { ar: "تسليم جزئي", en: "Partial delivery" },
+        color: "#2551b9",
+        recordedBy: { ar: "كريم فؤاد", en: "Karim Fouad" },
+        collectedAmount: 547,
+        deliveredPieces: 1,
+        returnedPieces: 1,
+        reason: "استلم قطعة واحدة فقط",
+        note: "القطعة المرتجعة موجودة في المخزن",
+        nextDate: "",
+        timestamp: { ar: "27 يوليو، 6:20 م", en: "27 Jul, 6:20 PM" },
+        settlementStatus: "settled",
+        senderSettlementStatus: "eligible",
+        senderMoneySettled: false,
+        senderReturnSettled: false,
+      },
+    ],
+    pieces: 2,
+    shippingFee: 47,
+    shippingPayer: "recipient",
+    address: {
+      ar: "٩ شارع اللاسلكي، المعادي الجديدة، القاهرة",
+      en: "9 El Laselky St., New Maadi, Cairo",
+    },
+  },
+  {
+    id: "TS-12839",
+    reference: "OR-5589",
+    recipient: { ar: "علي هشام", en: "Ali Hesham" },
+    phone: "012 •••• 6839",
+    sender: { ar: "أوركيد", en: "Orchid" },
+    area: { ar: "مصر الجديدة", en: "Heliopolis" },
+    governorate: { ar: "القاهرة", en: "Cairo" },
+    status: { ar: "لاغي", en: "Cancelled" },
+    statusPolicyId: "status-cancelled",
+    statusTone: "red",
+    custody: { ar: "المخزن الرئيسي", en: "Main warehouse" },
+    custodyType: "warehouse",
+    courier: null,
+    amount: 660,
+    deliveryDate: { ar: "26 يوليو", en: "26 Jul" },
+    required: { ar: "تسليم المرتجع للراسل", en: "Return handover to sender" },
+    requiredType: "attention",
+    lastEvent: { ar: "المرتجع جاهز بالفرع", en: "Return ready at branch" },
+    confirmation: { ar: "تم التأكيد", en: "Confirmed" },
+    statusHistory: [
+      {
+        id: "status-event-orchid-cancelled",
+        statusPolicyId: "status-cancelled",
+        status: { ar: "لاغي", en: "Cancelled" },
+        color: "#c43737",
+        recordedBy: { ar: "أحمد رجب", en: "Ahmed Ragab" },
+        collectedAmount: 0,
+        deliveredPieces: 0,
+        returnedPieces: 2,
+        reason: "رفض المستلم",
+        note: "عاد الطرد كاملًا إلى الفرع",
+        nextDate: "",
+        timestamp: { ar: "26 يوليو، 4:45 م", en: "26 Jul, 4:45 PM" },
+        settlementStatus: "settled",
+        senderSettlementStatus: "eligible",
+        senderMoneySettled: false,
+        senderReturnSettled: false,
+      },
+    ],
+    pieces: 2,
+    shippingFee: 25,
+    shippingPayer: "sender",
+    address: {
+      ar: "١٨ شارع الحجاز، مصر الجديدة، القاهرة",
+      en: "18 El Hegaz St., Heliopolis, Cairo",
+    },
+  },
+  {
+    id: "TS-12831",
+    reference: "OR-5517",
+    recipient: { ar: "دينا فؤاد", en: "Dina Fouad" },
+    phone: "011 •••• 5131",
+    sender: { ar: "أوركيد", en: "Orchid" },
+    area: { ar: "مدينة نصر", en: "Nasr City" },
+    governorate: { ar: "القاهرة", en: "Cairo" },
+    status: { ar: "تم التسليم", en: "Delivered" },
+    statusPolicyId: "status-delivered",
+    statusTone: "green",
+    custody: { ar: "تم التسليم للمستلم", en: "Delivered to recipient" },
+    custodyType: "recipient",
+    courier: null,
+    amount: 860,
+    deliveryDate: { ar: "25 يوليو، 3:15 م", en: "25 Jul, 3:15 PM" },
+    required: { ar: "تجهيز حساب الراسل", en: "Prepare sender account" },
+    requiredType: "attention",
+    lastEvent: { ar: "التحصيل مسلّم للشركة", en: "Collection handed to company" },
+    confirmation: { ar: "تم التأكيد", en: "Confirmed" },
+    statusHistory: [
+      {
+        id: "status-event-orchid-delivered-2",
+        statusPolicyId: "status-delivered",
+        status: { ar: "تم التسليم", en: "Delivered" },
+        color: "#07835a",
+        recordedBy: { ar: "كريم فؤاد", en: "Karim Fouad" },
+        collectedAmount: 917,
+        deliveredPieces: 1,
+        returnedPieces: 0,
+        reason: "",
+        note: "تم التحصيل كاملًا",
+        nextDate: "",
+        timestamp: { ar: "25 يوليو، 3:15 م", en: "25 Jul, 3:15 PM" },
+        settlementStatus: "settled",
+        senderSettlementStatus: "eligible",
+        senderMoneySettled: false,
+        senderReturnSettled: true,
+        senderOtherFees: 10,
+        senderOtherFeesLabel: { ar: "تغليف إضافي", en: "Extra packaging" },
+      },
+    ],
+    pieces: 1,
+    shippingFee: 47,
+    shippingPayer: "recipient",
+    address: {
+      ar: "٣٤ شارع عباس العقاد، مدينة نصر، القاهرة",
+      en: "34 Abbas El Akkad St., Nasr City, Cairo",
     },
   },
 ];
@@ -1475,6 +1681,88 @@ const priceListsData: PriceListRecord[] = [
   },
 ];
 
+type SenderSettlementLine = {
+  eventId: string;
+  shipment: Shipment;
+  statusEvent: NonNullable<Shipment["statusHistory"]>[number];
+  priceList: PriceListRecord | null;
+  shippingCharge: number;
+  otherFees: number;
+  senderDue: number;
+  companyDue: number;
+  netDue: number;
+  returnPieces: number;
+  returnReady: boolean;
+  moneySettled: boolean;
+  returnSettled: boolean;
+};
+
+function senderSettlementLines(
+  shipmentRecords: Shipment[],
+  statuses: StatusPolicy[],
+  governorates: GovernorateRecord[],
+  priceLists: PriceListRecord[],
+): SenderSettlementLine[] {
+  return shipmentRecords.flatMap((shipment) => {
+    const senderLists = priceLists
+      .filter(
+        (priceList) =>
+          priceList.state === "active" &&
+          priceList.senders.some((sender) => sender.en === shipment.sender.en),
+      )
+      .sort((first, second) => Number(first.isDefault) - Number(second.isDefault));
+    const priceList =
+      senderLists[0] ??
+      priceLists.find(
+        (candidate) => candidate.state === "active" && candidate.isDefault,
+      ) ??
+      null;
+    const areaId =
+      governorates
+        .flatMap((governorate) => governorate.areas)
+        .find((area) => area.name.en === shipment.area.en)?.id ?? "";
+
+    return (shipment.statusHistory ?? []).flatMap((statusEvent) => {
+      const status = statuses.find(
+        (candidate) => candidate.id === statusEvent.statusPolicyId,
+      );
+      if (!status || status.state !== "published" || !status.appearsInPricing) {
+        return [];
+      }
+
+      const configuredPrice = priceList?.prices[areaId]?.[statusEvent.statusPolicyId];
+      const shippingCharge =
+        typeof configuredPrice === "number" ? configuredPrice : shipment.shippingFee;
+      const otherFees = statusEvent.senderOtherFees ?? 0;
+      const collectedAmount = statusEvent.collectedAmount ?? 0;
+      const totalCompanyCharge = shippingCharge + otherFees;
+      const senderDue = Math.max(0, collectedAmount - totalCompanyCharge);
+      const companyDue = Math.max(0, totalCompanyCharge - collectedAmount);
+      const returnPieces = Math.max(0, statusEvent.returnedPieces ?? 0);
+
+      return [
+        {
+          eventId: statusEvent.id,
+          shipment,
+          statusEvent,
+          priceList,
+          shippingCharge,
+          otherFees,
+          senderDue,
+          companyDue,
+          netDue: senderDue - companyDue,
+          returnPieces,
+          returnReady:
+            returnPieces > 0 && shipment.custodyType === "warehouse",
+          moneySettled: statusEvent.senderMoneySettled ?? false,
+          returnSettled:
+            statusEvent.senderReturnSettled ?? returnPieces === 0,
+        },
+      ];
+    });
+  });
+}
+
 const priceListCopy = {
   ar: {
     title: "قوائم الأسعار",
@@ -1739,6 +2027,31 @@ const courierDebtsData: CourierDebt[] = [
 ];
 
 const courierSettlementsData: CourierSettlement[] = [];
+
+const senderBalancesData: SenderBalance[] = [
+  {
+    id: "sender-balance-orchid-1",
+    sender: { ar: "أوركيد", en: "Orchid" },
+    originalAmount: 415,
+    paidAmount: 0,
+    balance: 415,
+    reason: "متبقي من حساب SR-1048",
+    createdAt: { ar: "24 يوليو، 5:30 م", en: "24 Jul, 5:30 PM" },
+    state: "active",
+    history: [
+      {
+        id: "sender-balance-history-1",
+        type: "created",
+        amount: 415,
+        note: "المستحق 915 ج.م، المدفوع 500 ج.م",
+        timestamp: { ar: "24 يوليو، 5:30 م", en: "24 Jul, 5:30 PM" },
+      },
+    ],
+  },
+];
+
+const senderSettlementDraftsData: SenderSettlementDraft[] = [];
+const senderSettlementReceiptsData: SenderSettlementReceipt[] = [];
 
 const courierRateCopy = {
   ar: {
@@ -2596,6 +2909,17 @@ function Sidebar({
           label: lang === "ar" ? "حساب المندوب" : "Courier account",
           icon: HandCoins,
           screen: "courierAccount" as const,
+        },
+        {
+          label:
+            lang === "ar" ? "تجهيز حساب الراسل" : "Prepare sender account",
+          icon: ClipboardCheck,
+          screen: "senderAccountPrep" as const,
+        },
+        {
+          label: lang === "ar" ? "حساب الراسل" : "Sender account",
+          icon: ReceiptText,
+          screen: "senderAccount" as const,
         },
         { label: t.warehouse, icon: Warehouse },
       ],
@@ -8771,6 +9095,1980 @@ function CourierPrintScreen({
   );
 }
 
+function SenderSettlementLineDrawer({
+  line,
+  lang,
+  onClose,
+  onRemove,
+}: {
+  line: SenderSettlementLine;
+  lang: Lang;
+  onClose: () => void;
+  onRemove?: () => void;
+}) {
+  const money = useMemo(
+    () =>
+      new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
+        style: "currency",
+        currency: "EGP",
+        maximumFractionDigits: 0,
+      }),
+    [lang],
+  );
+
+  return (
+    <div className="sender-account-overlay" role="presentation" onClick={onClose}>
+      <aside
+        className="sender-account-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={lang === "ar" ? "تفاصيل استحقاق الشحنة" : "Shipment entitlement details"}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="sender-account-drawer__head">
+          <div>
+            <span className="eyebrow">
+              {lang === "ar" ? "شرح الحساب" : "Account breakdown"}
+            </span>
+            <h2>{line.shipment.id}</h2>
+            <p>
+              {line.shipment.recipient[lang]} · {line.shipment.phone}
+            </p>
+          </div>
+          <button className="icon-button" type="button" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="sender-account-drawer__status">
+          <span
+            className="status-dot"
+            style={{ backgroundColor: line.statusEvent.color }}
+          />
+          <span>
+            <strong>{line.statusEvent.status[lang]}</strong>
+            <small>{line.statusEvent.timestamp[lang]}</small>
+          </span>
+        </div>
+
+        <div className="sender-account-drawer__facts">
+          <article>
+            <small>{lang === "ar" ? "الراسل" : "Sender"}</small>
+            <strong>{line.shipment.sender[lang]}</strong>
+          </article>
+          <article>
+            <small>{lang === "ar" ? "المنطقة" : "Area"}</small>
+            <strong>
+              {line.shipment.area[lang]}، {line.shipment.governorate[lang]}
+            </strong>
+          </article>
+          <article>
+            <small>{lang === "ar" ? "التحصيل الفعلي" : "Actual collection"}</small>
+            <strong>{money.format(line.statusEvent.collectedAmount ?? 0)}</strong>
+          </article>
+          <article>
+            <small>{lang === "ar" ? "رسوم الشحن" : "Shipping charge"}</small>
+            <strong>{money.format(line.shippingCharge)}</strong>
+          </article>
+          <article>
+            <small>{lang === "ar" ? "رسوم أخرى" : "Other fees"}</small>
+            <strong>{money.format(line.otherFees)}</strong>
+          </article>
+          <article className="sender-account-drawer__net">
+            <small>{lang === "ar" ? "صافي حق الراسل" : "Net sender due"}</small>
+            <strong>{money.format(line.senderDue)}</strong>
+          </article>
+        </div>
+
+        <section className="sender-account-equation">
+          <span>{money.format(line.statusEvent.collectedAmount ?? 0)}</span>
+          <i>−</i>
+          <span>{money.format(line.shippingCharge)}</span>
+          <i>−</i>
+          <span>{money.format(line.otherFees)}</span>
+          <i>=</i>
+          <strong>{money.format(line.netDue)}</strong>
+        </section>
+
+        <section className="sender-account-policy-snapshot">
+          <ShieldCheck size={18} />
+          <span>
+            <strong>
+              {line.priceList?.name[lang] ??
+                (lang === "ar" ? "سعر الشحنة المحفوظ" : "Saved shipment price")}
+            </strong>
+            <small>
+              {line.priceList
+                ? `${line.priceList.code} · ${lang === "ar" ? "الإصدار" : "version"} ${line.priceList.version}`
+                : lang === "ar"
+                  ? "تم استخدام سعر الشحن المحفوظ مع الشحنة"
+                  : "The shipping price saved with the shipment was used"}
+            </small>
+          </span>
+        </section>
+
+        <section className="sender-account-return-card">
+          <PackageCheck size={18} />
+          <span>
+            <strong>
+              {line.returnPieces > 0
+                ? `${line.returnPieces} ${lang === "ar" ? "قطعة مرتجعة" : "returned pieces"}`
+                : lang === "ar"
+                  ? "لا يوجد مرتجع"
+                  : "No return"}
+            </strong>
+            <small>
+              {line.returnPieces === 0
+                ? lang === "ar"
+                  ? "لا يترتب على هذه الشحنة تسليم طرد للراسل"
+                  : "No parcel handover is required for this shipment"
+                : line.returnReady
+                  ? lang === "ar"
+                    ? "موجود فعليًا في الفرع وجاهز للتسليم"
+                    : "Physically at the branch and ready for handover"
+                  : lang === "ar"
+                    ? "لم يصل إلى حيازة الفرع بعد"
+                    : "Not yet in branch custody"}
+            </small>
+          </span>
+          {line.returnPieces > 0 && (
+            <b className={line.returnReady ? "is-ready" : "is-waiting"}>
+              {line.returnReady
+                ? lang === "ar"
+                  ? "جاهز"
+                  : "Ready"
+                : lang === "ar"
+                  ? "قيد الانتظار"
+                  : "Waiting"}
+            </b>
+          )}
+        </section>
+
+        {(line.statusEvent.reason || line.statusEvent.note) && (
+          <section className="sender-account-note">
+            <small>{lang === "ar" ? "بيانات الحالة" : "Status details"}</small>
+            <p>{line.statusEvent.reason || line.statusEvent.note}</p>
+          </section>
+        )}
+
+        {onRemove && (
+          <button className="sender-account-remove" type="button" onClick={onRemove}>
+            <Trash2 size={17} />
+            {lang === "ar" ? "إزالة الشحنة من المسودة" : "Remove from draft"}
+          </button>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function SenderAccountPreparationScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  statuses,
+  governorates,
+  priceLists,
+  balances,
+  drafts,
+  onShipmentsChange,
+  onDraftsChange,
+  onOpenDraft,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  priceLists: PriceListRecord[];
+  balances: SenderBalance[];
+  drafts: SenderSettlementDraft[];
+  onShipmentsChange: (records: Shipment[]) => void;
+  onDraftsChange: (records: SenderSettlementDraft[]) => void;
+  onOpenDraft: (draftId: string) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [view, setView] = useState<"all" | "money" | "returns">("all");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedLine, setSelectedLine] = useState<SenderSettlementLine | null>(
+    null,
+  );
+  const [toast, setToast] = useState("");
+  const money = useMemo(
+    () =>
+      new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
+        style: "currency",
+        currency: "EGP",
+        maximumFractionDigits: 0,
+      }),
+    [lang],
+  );
+  const allLines = useMemo(
+    () =>
+      senderSettlementLines(
+        shipmentRecords,
+        statuses,
+        governorates,
+        priceLists,
+      ),
+    [governorates, priceLists, shipmentRecords, statuses],
+  );
+  const eligibleLines = useMemo(
+    () =>
+      allLines.filter(
+        (line) =>
+          line.statusEvent.senderSettlementStatus !== "settled" &&
+          line.statusEvent.senderSettlementStatus !== "reserved" &&
+          (!line.moneySettled || !line.returnSettled),
+      ),
+    [allLines],
+  );
+  const senderOptions = useMemo(() => {
+    const map = new Map<string, Localized>();
+    eligibleLines.forEach((line) =>
+      map.set(line.shipment.sender.en, line.shipment.sender),
+    );
+    balances
+      .filter((balance) => balance.state === "active" && balance.balance > 0)
+      .forEach((balance) => map.set(balance.sender.en, balance.sender));
+    return [...map.values()];
+  }, [balances, eligibleLines]);
+  const [senderKey, setSenderKey] = useState(
+    senderOptions.find((sender) => sender.en === "Orchid")?.en ??
+      senderOptions[0]?.en ??
+      "",
+  );
+  const selectedSender =
+    senderOptions.find((sender) => sender.en === senderKey) ??
+    senderOptions[0] ??
+    ({ ar: "لا يوجد راسل", en: "No sender" } satisfies Localized);
+  const openDraft = drafts.find(
+    (draft) => draft.sender.en === selectedSender.en && draft.state === "open",
+  );
+  const senderLines = eligibleLines.filter(
+    (line) => line.shipment.sender.en === selectedSender.en,
+  );
+  const filteredLines = senderLines.filter((line) => {
+    const normalized = search.trim().toLowerCase();
+    const matchesSearch =
+      !normalized ||
+      [
+        line.shipment.id,
+        line.shipment.reference,
+        line.shipment.recipient.ar,
+        line.shipment.recipient.en,
+        line.shipment.phone,
+        line.shipment.area.ar,
+        line.shipment.area.en,
+      ].some((value) => value.toLowerCase().includes(normalized));
+    const matchesView =
+      view === "all" ||
+      (view === "money" && line.senderDue + line.companyDue > 0) ||
+      (view === "returns" && line.returnPieces > 0);
+    return matchesSearch && matchesView;
+  });
+  const selectedLines = allLines.filter((line) =>
+    selectedIds.includes(line.eventId),
+  );
+  const selectedSenderDue = selectedLines.reduce(
+    (sum, line) => sum + line.senderDue,
+    0,
+  );
+  const selectedCompanyDue = selectedLines.reduce(
+    (sum, line) => sum + line.companyDue,
+    0,
+  );
+  const selectedReturnShipments = selectedLines.filter(
+    (line) => line.returnPieces > 0,
+  ).length;
+  const selectedReturnPieces = selectedLines.reduce(
+    (sum, line) => sum + line.returnPieces,
+    0,
+  );
+  const previousBalance = balances
+    .filter(
+      (balance) =>
+        balance.sender.en === selectedSender.en && balance.state === "active",
+    )
+    .reduce((sum, balance) => sum + balance.balance, 0);
+
+  function selectSender(nextSender: string) {
+    setSenderKey(nextSender);
+    setSelectedIds([]);
+    setSearch("");
+    setView("all");
+  }
+
+  function toggleLine(eventId: string) {
+    setSelectedIds((current) =>
+      current.includes(eventId)
+        ? current.filter((id) => id !== eventId)
+        : [...current, eventId],
+    );
+  }
+
+  function prepareAccount() {
+    if (openDraft) {
+      onOpenDraft(openDraft.id);
+      onNavigate("senderAccount");
+      return;
+    }
+    if (!selectedIds.length && previousBalance <= 0) {
+      setToast(
+        lang === "ar"
+          ? "اختر شحنة واحدة على الأقل"
+          : "Select at least one shipment",
+      );
+      window.setTimeout(() => setToast(""), 2600);
+      return;
+    }
+
+    const now = new Date();
+    const draftId = `sender-draft-${now.getTime()}`;
+    const timestamp = {
+      ar: now.toLocaleString("ar-EG", {
+        day: "numeric",
+        month: "long",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      en: now.toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    };
+    onShipmentsChange(
+      shipmentRecords.map((shipment) => ({
+        ...shipment,
+        statusHistory: shipment.statusHistory?.map((statusEvent) =>
+          selectedIds.includes(statusEvent.id)
+            ? {
+                ...statusEvent,
+                senderSettlementStatus: "reserved" as const,
+                senderSettlementDraftId: draftId,
+                senderMoneySettled: statusEvent.senderMoneySettled ?? false,
+                senderReturnSettled:
+                  statusEvent.senderReturnSettled ??
+                  (statusEvent.returnedPieces ?? 0) === 0,
+              }
+            : statusEvent,
+        ),
+      })),
+    );
+    onDraftsChange([
+      ...drafts,
+      {
+        id: draftId,
+        sender: selectedSender,
+        shipmentEventIds: selectedIds,
+        state: "open",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+    ]);
+    onOpenDraft(draftId);
+    onNavigate("senderAccount");
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="senderAccountPrep"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <ClipboardCheck size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "تجهيز حساب الراسل"
+                  : "Prepare sender account"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "اختيار الشحنات المؤهلة"
+                  : "Select eligible shipments"}
+              </small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content sender-account-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar"
+                    ? "تجهيز حساب الراسل"
+                    : "Prepare sender account"}
+                </h1>
+                <span className="demo-chip">
+                  {senderLines.length} {lang === "ar" ? "مؤهلة" : "eligible"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "اختر فقط الشحنات التي تريد محاسبة الراسل عليها الآن؛ والباقي يظل مستحقًا للحساب القادم."
+                  : "Choose only the shipments to settle now; everything else remains available for the next account."}
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("senderAccount")}
+              disabled={!openDraft}
+            >
+              <ReceiptText size={17} />
+              {lang === "ar" ? "فتح الحساب الجاري" : "Open current account"}
+            </button>
+          </div>
+
+          <section className="sender-prep-truth">
+            <ShieldCheck size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "المعروض هنا مؤهل ماليًا فقط، واختيار الشحنة لا يعني أن مرتجعها سُلّم"
+                  : "Only financially eligible shipments appear here; selecting one does not mean its return was handed over"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "حجز الشحنات يبدأ عند تجهيز الحساب، ويمنع إدخالها في مسودة أخرى حتى الإتمام أو الإلغاء."
+                  : "Preparing the account reserves its shipments so another open draft cannot use them."}
+              </small>
+            </span>
+          </section>
+
+          <section className="sender-prep-selector">
+            <label>
+              <span>{lang === "ar" ? "الراسل" : "Sender"}</span>
+              <span className="entry-select">
+                <select
+                  value={selectedSender.en}
+                  onChange={(event) => selectSender(event.target.value)}
+                >
+                  {senderOptions.map((sender) => (
+                    <option value={sender.en} key={sender.en}>
+                      {sender[lang]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} />
+              </span>
+            </label>
+            <div className="sender-prep-profile">
+              <span className="mini-avatar">{selectedSender[lang].slice(0, 1)}</span>
+              <span>
+                <strong>{selectedSender[lang]}</strong>
+                <small>
+                  {lang === "ar"
+                    ? "حساب مستقل عن عهدة المندوب"
+                    : "Independent from courier custody"}
+                </small>
+              </span>
+            </div>
+            <div className="sender-prep-balance">
+              <small>{lang === "ar" ? "رصيد سابق مستحق" : "Previous balance due"}</small>
+              <strong>{money.format(previousBalance)}</strong>
+              <span>
+                {previousBalance > 0
+                  ? lang === "ar"
+                    ? "يظهر منفصلًا في الحساب النهائي"
+                    : "Shown separately in final account"
+                  : lang === "ar"
+                    ? "لا يوجد رصيد سابق"
+                    : "No previous balance"}
+              </span>
+            </div>
+          </section>
+
+          <section className="sender-prep-metrics">
+            <article>
+              <span className="metric-icon metric-icon--blue">
+                <Boxes size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "شحنات مؤهلة" : "Eligible shipments"}</small>
+                <strong>{senderLines.length}</strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--green">
+                <HandCoins size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "صافي المتاح" : "Available net due"}</small>
+                <strong>
+                  {money.format(
+                    Math.max(
+                      0,
+                      senderLines.reduce((sum, line) => sum + line.netDue, 0),
+                    ),
+                  )}
+                </strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--orange">
+                <PackageCheck size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "مرتجعات جاهزة" : "Ready returns"}</small>
+                <strong>
+                  {senderLines.filter((line) => line.returnReady).length}
+                </strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--red">
+                <Landmark size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "مستحق للشركة" : "Due to company"}</small>
+                <strong>
+                  {money.format(
+                    senderLines.reduce((sum, line) => sum + line.companyDue, 0),
+                  )}
+                </strong>
+              </span>
+            </article>
+          </section>
+
+          {openDraft && (
+            <section className="sender-prep-open-draft">
+              <CircleAlert size={18} />
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? "يوجد حساب مفتوح لهذا الراسل"
+                    : "This sender already has an open account"}
+                </strong>
+                <small>
+                  {openDraft.shipmentEventIds.length}{" "}
+                  {lang === "ar"
+                    ? "شحنة محجوزة — افتحه لإكمال الدفع أو المرتجعات."
+                    : "reserved shipments — open it to finish money or returns."}
+                </small>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  onOpenDraft(openDraft.id);
+                  onNavigate("senderAccount");
+                }}
+              >
+                {lang === "ar" ? "فتح الحساب" : "Open account"}
+                <ChevronLeft size={16} />
+              </button>
+            </section>
+          )}
+
+          <section className="sender-prep-table-card">
+            <div className="sender-prep-toolbar">
+              <label>
+                <Search size={17} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "رقم الشحنة، المستلم أو الهاتف..."
+                      : "Shipment, recipient or phone..."
+                  }
+                />
+              </label>
+              <div className="sender-prep-views">
+                {(["all", "money", "returns"] as const).map((viewId) => (
+                  <button
+                    type="button"
+                    className={view === viewId ? "is-active" : ""}
+                    onClick={() => setView(viewId)}
+                    key={viewId}
+                  >
+                    {viewId === "all"
+                      ? lang === "ar"
+                        ? "الكل"
+                        : "All"
+                      : viewId === "money"
+                        ? lang === "ar"
+                          ? "لها مبلغ"
+                          : "Money"
+                        : lang === "ar"
+                          ? "لها مرتجع"
+                          : "Returns"}
+                  </button>
+                ))}
+              </div>
+              <span>
+                {filteredLines.length} {lang === "ar" ? "شحنة" : "shipments"}
+              </span>
+            </div>
+
+            <div className="sender-prep-row sender-prep-row--head">
+              <span>{lang === "ar" ? "اختيار" : "Select"}</span>
+              <span>{lang === "ar" ? "الشحنة" : "Shipment"}</span>
+              <span>{lang === "ar" ? "المستلم" : "Recipient"}</span>
+              <span>{lang === "ar" ? "الحالة" : "Status"}</span>
+              <span>{lang === "ar" ? "التحصيل" : "Collection"}</span>
+              <span>{lang === "ar" ? "رسوم الشركة" : "Company fees"}</span>
+              <span>{lang === "ar" ? "صافي الراسل" : "Sender net"}</span>
+              <span>{lang === "ar" ? "المرتجع" : "Return"}</span>
+              <span>{lang === "ar" ? "مراجعة" : "Review"}</span>
+            </div>
+            <div className="sender-prep-table-body">
+              {filteredLines.length ? (
+                filteredLines.map((line) => {
+                  const selected = selectedIds.includes(line.eventId);
+                  return (
+                    <div
+                      className={`sender-prep-row ${selected ? "is-selected" : ""}`}
+                      key={line.eventId}
+                    >
+                      <label className="sender-prep-check">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleLine(line.eventId)}
+                        />
+                        <span>
+                          <Check size={14} />
+                        </span>
+                      </label>
+                      <span className="sender-prep-shipment">
+                        <strong>{line.shipment.id}</strong>
+                        <small>{line.shipment.reference}</small>
+                      </span>
+                      <span className="sender-prep-person">
+                        <strong>{line.shipment.recipient[lang]}</strong>
+                        <small dir="ltr">{line.shipment.phone}</small>
+                      </span>
+                      <span>
+                        <b
+                          className="sender-prep-status"
+                          style={{ "--status-color": line.statusEvent.color } as CSSProperties}
+                        >
+                          {line.statusEvent.status[lang]}
+                        </b>
+                        <small>{line.statusEvent.timestamp[lang]}</small>
+                      </span>
+                      <strong className="money">
+                        {money.format(line.statusEvent.collectedAmount ?? 0)}
+                      </strong>
+                      <span className="sender-prep-fees">
+                        <strong>
+                          {money.format(line.shippingCharge + line.otherFees)}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? `${money.format(line.shippingCharge)} شحن`
+                            : `${money.format(line.shippingCharge)} shipping`}
+                        </small>
+                      </span>
+                      <span className="sender-prep-net">
+                        <strong>{money.format(line.senderDue)}</strong>
+                        {line.companyDue > 0 && (
+                          <small>
+                            {lang === "ar" ? "للشركة" : "to company"}{" "}
+                            {money.format(line.companyDue)}
+                          </small>
+                        )}
+                      </span>
+                      <span className="sender-prep-return">
+                        {line.returnPieces > 0 ? (
+                          <>
+                            <strong>
+                              {line.returnPieces} {lang === "ar" ? "قطعة" : "pcs"}
+                            </strong>
+                            <small className={line.returnReady ? "is-ready" : ""}>
+                              {line.returnReady
+                                ? lang === "ar"
+                                  ? "جاهز بالفرع"
+                                  : "Ready at branch"
+                                : lang === "ar"
+                                  ? "لم يصل"
+                                  : "Not received"}
+                            </small>
+                          </>
+                        ) : (
+                          <small>—</small>
+                        )}
+                      </span>
+                      <button
+                        className="sender-prep-review"
+                        type="button"
+                        onClick={() => setSelectedLine(line)}
+                        aria-label={
+                          lang === "ar"
+                            ? `مراجعة ${line.shipment.id}`
+                            : `Review ${line.shipment.id}`
+                        }
+                      >
+                        <Eye size={17} />
+                      </button>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="sender-prep-empty">
+                  <Search size={24} />
+                  <strong>
+                    {lang === "ar"
+                      ? "لا توجد شحنات مؤهلة تطابق البحث"
+                      : "No eligible shipments match the search"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "الشحنات غير المؤهلة أو المحجوزة لا تظهر في هذا الجدول."
+                      : "Ineligible or reserved shipments do not appear in this table."}
+                  </small>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="sender-prep-selection">
+            <div className="sender-prep-selection__count">
+              <span>{selectedIds.length}</span>
+              <p>
+                <strong>{lang === "ar" ? "شحنة مختارة" : "selected shipments"}</strong>
+                <small>
+                  {selectedReturnShipments}{" "}
+                  {lang === "ar"
+                    ? `شحنة لها مرتجع · ${selectedReturnPieces} قطعة`
+                    : `with returns · ${selectedReturnPieces} pieces`}
+                </small>
+              </p>
+            </div>
+            <div className="sender-prep-selection__money">
+              <span>
+                <small>{lang === "ar" ? "حق الراسل" : "Sender due"}</small>
+                <strong>{money.format(selectedSenderDue)}</strong>
+              </span>
+              <span>
+                <small>{lang === "ar" ? "مستحق للشركة" : "Due to company"}</small>
+                <strong>{money.format(selectedCompanyDue)}</strong>
+              </span>
+              <span className="is-net">
+                <small>{lang === "ar" ? "صافي المجموعة" : "Selection net"}</small>
+                <strong>
+                  {money.format(selectedSenderDue - selectedCompanyDue)}
+                </strong>
+              </span>
+            </div>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={prepareAccount}
+              disabled={
+                Boolean(openDraft) ? false : !selectedIds.length && previousBalance <= 0
+              }
+            >
+              <ReceiptText size={18} />
+              {openDraft
+                ? lang === "ar"
+                  ? "فتح الحساب الجاري"
+                  : "Open current account"
+                : selectedIds.length
+                  ? lang === "ar"
+                    ? "تجهيز الحساب"
+                    : "Prepare account"
+                  : lang === "ar"
+                    ? "فتح حساب الرصيد"
+                    : "Open balance account"}
+            </button>
+          </section>
+        </main>
+      </div>
+
+      {selectedLine && (
+        <SenderSettlementLineDrawer
+          line={selectedLine}
+          lang={lang}
+          onClose={() => setSelectedLine(null)}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <CircleAlert size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SenderAccountScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  statuses,
+  governorates,
+  priceLists,
+  balances,
+  drafts,
+  receipts,
+  activeDraftId,
+  onShipmentsChange,
+  onBalancesChange,
+  onDraftsChange,
+  onReceiptsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  priceLists: PriceListRecord[];
+  balances: SenderBalance[];
+  drafts: SenderSettlementDraft[];
+  receipts: SenderSettlementReceipt[];
+  activeDraftId: string;
+  onShipmentsChange: (records: Shipment[]) => void;
+  onBalancesChange: (records: SenderBalance[]) => void;
+  onDraftsChange: (records: SenderSettlementDraft[]) => void;
+  onReceiptsChange: (records: SenderSettlementReceipt[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [selectedLine, setSelectedLine] = useState<SenderSettlementLine | null>(
+    null,
+  );
+  const [executeMoney, setExecuteMoney] = useState(true);
+  const [executeReturns, setExecuteReturns] = useState(true);
+  const [balanceMode, setBalanceMode] = useState<"none" | "full" | "partial">(
+    "none",
+  );
+  const [partialBalance, setPartialBalance] = useState("");
+  const [customAmount, setCustomAmount] = useState(false);
+  const [paidNow, setPaidNow] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [paymentSource, setPaymentSource] = useState("main-cash");
+  const [receiverType, setReceiverType] = useState<"sender" | "authorized">(
+    "sender",
+  );
+  const [receiverName, setReceiverName] = useState("");
+  const [receiverPhone, setReceiverPhone] = useState("");
+  const [toast, setToast] = useState("");
+  const money = useMemo(
+    () =>
+      new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
+        style: "currency",
+        currency: "EGP",
+        maximumFractionDigits: 0,
+      }),
+    [lang],
+  );
+  const activeDraft =
+    drafts.find((draft) => draft.id === activeDraftId) ??
+    [...drafts].reverse().find((draft) => draft.state === "open") ??
+    [...drafts].reverse()[0] ??
+    null;
+  const allLines = useMemo(
+    () =>
+      senderSettlementLines(
+        shipmentRecords,
+        statuses,
+        governorates,
+        priceLists,
+      ),
+    [governorates, priceLists, shipmentRecords, statuses],
+  );
+  const draftLines = activeDraft
+    ? activeDraft.shipmentEventIds
+        .map((eventId) => allLines.find((line) => line.eventId === eventId))
+        .filter((line): line is SenderSettlementLine => Boolean(line))
+    : [];
+  const financialLines = draftLines.filter((line) => !line.moneySettled);
+  const pendingReturnLines = draftLines.filter(
+    (line) => line.returnPieces > 0 && !line.returnSettled,
+  );
+  const readyReturnLines = pendingReturnLines.filter((line) => line.returnReady);
+  const newSenderDue = financialLines.reduce(
+    (sum, line) => sum + line.senderDue,
+    0,
+  );
+  const companyDue = financialLines.reduce(
+    (sum, line) => sum + line.companyDue,
+    0,
+  );
+  const newNetDue = Math.max(0, newSenderDue - companyDue);
+  const previousBalance = activeDraft
+    ? balances
+        .filter(
+          (balance) =>
+            balance.sender.en === activeDraft.sender.en &&
+            balance.state === "active",
+        )
+        .reduce((sum, balance) => sum + balance.balance, 0)
+    : 0;
+  const requestedPreviousBalance =
+    balanceMode === "full"
+      ? previousBalance
+      : balanceMode === "partial"
+        ? Math.min(previousBalance, Math.max(0, Number(partialBalance) || 0))
+        : 0;
+  const expectedPayout = executeMoney
+    ? newNetDue + requestedPreviousBalance
+    : 0;
+  const actualPayout = customAmount
+    ? Math.max(0, Number(paidNow) || 0)
+    : expectedPayout;
+  const remainingAfterPayment = Math.max(
+    0,
+    previousBalance + newNetDue - actualPayout,
+  );
+  const lastReceipt = activeDraft
+    ? [...receipts].reverse().find((receipt) => receipt.draftId === activeDraft.id)
+    : null;
+
+  useEffect(() => {
+    if (!customAmount) setPaidNow(String(expectedPayout));
+  }, [customAmount, expectedPayout]);
+
+  function removeLine(line: SenderSettlementLine) {
+    if (!activeDraft || line.moneySettled || (line.returnPieces > 0 && line.returnSettled)) {
+      return;
+    }
+    onShipmentsChange(
+      shipmentRecords.map((shipment) => ({
+        ...shipment,
+        statusHistory: shipment.statusHistory?.map((statusEvent) =>
+          statusEvent.id === line.eventId
+            ? {
+                ...statusEvent,
+                senderSettlementStatus: "eligible" as const,
+                senderSettlementDraftId: undefined,
+              }
+            : statusEvent,
+        ),
+      })),
+    );
+    const remainingIds = activeDraft.shipmentEventIds.filter(
+      (eventId) => eventId !== line.eventId,
+    );
+    onDraftsChange(
+      drafts.map((draft) =>
+        draft.id === activeDraft.id
+          ? { ...draft, shipmentEventIds: remainingIds }
+          : draft,
+      ),
+    );
+    setSelectedLine(null);
+    setToast(
+      lang === "ar"
+        ? "عادت الشحنة إلى التجهيز بدون تغيير قيمتها"
+        : "Shipment returned to preparation with its value unchanged",
+    );
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function submitSettlement() {
+    if (!activeDraft || activeDraft.state !== "open") return;
+    if (!executeMoney && !executeReturns) {
+      setToast(
+        lang === "ar"
+          ? "اختر تنفيذ الدفع أو تسليم المرتجعات"
+          : "Choose money payment or return handover",
+      );
+      window.setTimeout(() => setToast(""), 2800);
+      return;
+    }
+    if (executeMoney && customAmount && actualPayout > expectedPayout) {
+      setToast(
+        lang === "ar"
+          ? "المبلغ المدفوع لا يمكن أن يتجاوز المستحق المحدد"
+          : "Paid amount cannot exceed the selected due",
+      );
+      window.setTimeout(() => setToast(""), 2800);
+      return;
+    }
+    if (
+      executeMoney &&
+      customAmount &&
+      actualPayout !== expectedPayout &&
+      !adjustmentReason.trim()
+    ) {
+      setToast(
+        lang === "ar"
+          ? "اكتب سبب استخدام مبلغ آخر"
+          : "Enter a reason for using another amount",
+      );
+      window.setTimeout(() => setToast(""), 2800);
+      return;
+    }
+    if (
+      (executeMoney || executeReturns) &&
+      receiverType === "authorized" &&
+      (!receiverName.trim() || !receiverPhone.trim())
+    ) {
+      setToast(
+        lang === "ar"
+          ? "أكمل اسم وهاتف الشخص المفوض"
+          : "Enter the authorized receiver name and phone",
+      );
+      window.setTimeout(() => setToast(""), 2800);
+      return;
+    }
+
+    const now = new Date();
+    const receiptId = `SR-${String(now.getTime()).slice(-6)}`;
+    const timestamp = {
+      ar: now.toLocaleString("ar-EG", {
+        day: "numeric",
+        month: "long",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      en: now.toLocaleString("en-GB", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    };
+    const appliedToNew = executeMoney ? Math.min(actualPayout, newNetDue) : 0;
+    const appliedToPrevious = executeMoney
+      ? Math.min(
+          requestedPreviousBalance,
+          Math.max(0, actualPayout - appliedToNew),
+        )
+      : 0;
+    const unpaidNew = executeMoney ? Math.max(0, newNetDue - appliedToNew) : 0;
+    let previousPaymentLeft = appliedToPrevious;
+    const updatedBalances = balances.map((balance) => {
+      if (
+        !activeDraft ||
+        balance.sender.en !== activeDraft.sender.en ||
+        balance.state !== "active" ||
+        previousPaymentLeft <= 0
+      ) {
+        return balance;
+      }
+      const payment = Math.min(balance.balance, previousPaymentLeft);
+      previousPaymentLeft -= payment;
+      const nextBalance = balance.balance - payment;
+      return {
+        ...balance,
+        paidAmount: balance.paidAmount + payment,
+        balance: nextBalance,
+        state: nextBalance === 0 ? ("closed" as const) : balance.state,
+        history: [
+          ...balance.history,
+          {
+            id: `sender-balance-payment-${receiptId}-${balance.id}`,
+            type: "payment" as const,
+            amount: payment,
+            note: `سداد من الإيصال ${receiptId}`,
+            timestamp,
+          },
+        ],
+      };
+    });
+    if (unpaidNew > 0) {
+      updatedBalances.push({
+        id: `sender-balance-${receiptId}`,
+        sender: activeDraft.sender,
+        originalAmount: unpaidNew,
+        paidAmount: 0,
+        balance: unpaidNew,
+        reason: `متبقي من الحساب ${receiptId}`,
+        createdAt: timestamp,
+        state: "active",
+        history: [
+          {
+            id: `sender-balance-created-${receiptId}`,
+            type: "created",
+            amount: unpaidNew,
+            note:
+              lang === "ar"
+                ? `المستحق الجديد ${newNetDue} والمدفوع له ${appliedToNew}`
+                : `New due ${newNetDue}; paid toward it ${appliedToNew}`,
+            timestamp,
+          },
+        ],
+      });
+    }
+
+    const eventOutcomes = new Map<
+      string,
+      { moneyDone: boolean; returnDone: boolean }
+    >();
+    draftLines.forEach((line) => {
+      eventOutcomes.set(line.eventId, {
+        moneyDone: line.moneySettled || executeMoney,
+        returnDone:
+          line.returnSettled ||
+          line.returnPieces === 0 ||
+          (executeReturns && line.returnReady),
+      });
+    });
+    const accountCompleted =
+      draftLines.length === 0
+        ? executeMoney
+        : [...eventOutcomes.values()].every(
+            (outcome) => outcome.moneyDone && outcome.returnDone,
+          );
+    onShipmentsChange(
+      shipmentRecords.map((shipment) => ({
+        ...shipment,
+        statusHistory: shipment.statusHistory?.map((statusEvent) => {
+          const outcome = eventOutcomes.get(statusEvent.id);
+          if (!outcome) return statusEvent;
+          return {
+            ...statusEvent,
+            senderMoneySettled: outcome.moneyDone,
+            senderReturnSettled: outcome.returnDone,
+            senderSettlementStatus:
+              outcome.moneyDone && outcome.returnDone
+                ? ("settled" as const)
+                : ("reserved" as const),
+            senderSettlementDraftId:
+              outcome.moneyDone && outcome.returnDone
+                ? undefined
+                : activeDraft.id,
+          };
+        }),
+      })),
+    );
+    onBalancesChange(updatedBalances);
+    onDraftsChange(
+      drafts.map((draft) =>
+        draft.id === activeDraft.id
+          ? {
+              ...draft,
+              state: accountCompleted ? ("completed" as const) : draft.state,
+              updatedAt: timestamp,
+            }
+          : draft,
+      ),
+    );
+    const remainingBalance = updatedBalances
+      .filter(
+        (balance) =>
+          balance.sender.en === activeDraft.sender.en &&
+          balance.state === "active",
+      )
+      .reduce((sum, balance) => sum + balance.balance, 0);
+    onReceiptsChange([
+      ...receipts,
+      {
+        id: receiptId,
+        draftId: activeDraft.id,
+        sender: activeDraft.sender,
+        shipmentEventIds: activeDraft.shipmentEventIds,
+        newSenderDue,
+        companyDue,
+        previousBalanceRequested: requestedPreviousBalance,
+        paidNow: executeMoney ? actualPayout : 0,
+        remainingBalance,
+        returnedShipmentCount: executeReturns ? readyReturnLines.length : 0,
+        returnedPieces: executeReturns
+          ? readyReturnLines.reduce((sum, line) => sum + line.returnPieces, 0)
+          : 0,
+        paymentSource: executeMoney ? paymentSource : "",
+        receiverName:
+          receiverType === "sender"
+            ? activeDraft.sender[lang]
+            : receiverName.trim(),
+        moneyExecuted: executeMoney,
+        returnsExecuted: executeReturns && readyReturnLines.length > 0,
+        timestamp,
+      },
+    ]);
+    setCustomAmount(false);
+    setAdjustmentReason("");
+    setSelectedLine(null);
+    setToast(
+      accountCompleted
+        ? lang === "ar"
+          ? `تم إتمام الحساب وإصدار الإيصال ${receiptId}`
+          : `Account completed and receipt ${receiptId} issued`
+        : lang === "ar"
+          ? `تم إثبات ما حدث في الإيصال ${receiptId}، والباقي ما زال معلقًا`
+          : `Receipt ${receiptId} recorded; the remaining side is still pending`,
+    );
+    window.setTimeout(() => setToast(""), 3800);
+  }
+
+  if (!activeDraft) {
+    return (
+      <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+        <Sidebar
+          lang={lang}
+          activeScreen="senderAccount"
+          collapsed={collapsed}
+          mobileOpen={mobileOpen}
+          onCollapse={() => setCollapsed((value) => !value)}
+          onMobileClose={() => setMobileOpen(false)}
+          onNavigate={onNavigate}
+          onLogout={onLogout}
+        />
+        <div className="erp-main">
+          <header className="topbar">
+            <div className="topbar__workspace">
+              <button
+                className="mobile-menu square-button"
+                type="button"
+                onClick={() => setMobileOpen(true)}
+              >
+                <Menu size={20} />
+              </button>
+              <span className="workspace-icon">
+                <ReceiptText size={20} />
+              </span>
+              <span>
+                <strong>{lang === "ar" ? "حساب الراسل" : "Sender account"}</strong>
+                <small>{lang === "ar" ? "المراجعة النهائية" : "Final review"}</small>
+              </span>
+            </div>
+            <div className="topbar__actions">
+              <LanguageThemeControls
+                lang={lang}
+                theme={theme}
+                onLang={onLang}
+                onTheme={onTheme}
+                subtle
+              />
+            </div>
+          </header>
+          <main className="page-content sender-account-page">
+            <section className="sender-account-no-draft">
+              <ReceiptText size={34} />
+              <h1>{lang === "ar" ? "لا يوجد حساب مجهز" : "No prepared account"}</h1>
+              <p>
+                {lang === "ar"
+                  ? "ابدأ من صفحة تجهيز حساب الراسل واختر الشحنات المراد محاسبتها."
+                  : "Start from preparation and select the shipments to settle."}
+              </p>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => onNavigate("senderAccountPrep")}
+              >
+                <ClipboardCheck size={18} />
+                {lang === "ar" ? "تجهيز حساب الراسل" : "Prepare sender account"}
+              </button>
+            </section>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="senderAccount"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <ReceiptText size={20} />
+            </span>
+            <span>
+              <strong>{lang === "ar" ? "حساب الراسل" : "Sender account"}</strong>
+              <small>
+                {lang === "ar"
+                  ? "الدفع والمرتجعات"
+                  : "Payment and returns"}
+              </small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content sender-account-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "حساب الراسل" : "Sender account"}</h1>
+                <span
+                  className={`demo-chip ${activeDraft.state === "completed" ? "is-complete" : ""}`}
+                >
+                  {activeDraft.state === "completed"
+                    ? lang === "ar"
+                      ? "مكتمل"
+                      : "Completed"
+                    : lang === "ar"
+                      ? "مسودة محجوزة"
+                      : "Reserved draft"}
+                </span>
+              </div>
+              <p>
+                {activeDraft.sender[lang]} · {activeDraft.id.replace("sender-draft-", "SD-")}
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("senderAccountPrep")}
+            >
+              <ClipboardCheck size={17} />
+              {lang === "ar" ? "العودة للتجهيز" : "Back to preparation"}
+            </button>
+          </div>
+
+          <section className="sender-account-truth">
+            <CircleAlert size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "دفع المال لا يثبت تسليم المرتجعات، وتسليم المرتجعات لا يثبت دفع المال"
+                  : "Paying money does not prove return handover, and handing returns does not prove payment"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "يمكن تنفيذ أحدهما الآن وترك الآخر معلقًا داخل نفس الحساب حتى يحدث فعليًا."
+                  : "Either side can be executed now while the other remains pending in this same account."}
+              </small>
+            </span>
+          </section>
+
+          <section className="sender-account-identity">
+            <span className="mini-avatar">{activeDraft.sender[lang].slice(0, 1)}</span>
+            <span>
+              <small>{lang === "ar" ? "الراسل" : "Sender"}</small>
+              <strong>{activeDraft.sender[lang]}</strong>
+            </span>
+            <span>
+              <small>{lang === "ar" ? "الشحنات المحجوزة" : "Reserved shipments"}</small>
+              <strong>{draftLines.length}</strong>
+            </span>
+            <span>
+              <small>{lang === "ar" ? "رصيد سابق" : "Previous balance"}</small>
+              <strong>{money.format(previousBalance)}</strong>
+            </span>
+            <span>
+              <small>{lang === "ar" ? "آخر تحديث" : "Last update"}</small>
+              <strong>{activeDraft.updatedAt[lang]}</strong>
+            </span>
+          </section>
+
+          <section className="sender-account-metrics">
+            <article>
+              <span className="metric-icon metric-icon--blue">
+                <Boxes size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "إجمالي الشحنات" : "Shipments"}</small>
+                <strong>{draftLines.length}</strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--green">
+                <HandCoins size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "صافي الجديد" : "New net due"}</small>
+                <strong>{money.format(newNetDue)}</strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--orange">
+                <PackageCheck size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "شحنات لها مرتجع" : "Return shipments"}</small>
+                <strong>{pendingReturnLines.length}</strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--red">
+                <Boxes size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "قطع المرتجع" : "Return pieces"}</small>
+                <strong>
+                  {pendingReturnLines.reduce(
+                    (sum, line) => sum + line.returnPieces,
+                    0,
+                  )}
+                </strong>
+              </span>
+            </article>
+          </section>
+
+          {lastReceipt && (
+            <section className="sender-account-last-receipt">
+              <ReceiptText size={18} />
+              <span>
+                <strong>
+                  {lang === "ar" ? "آخر إيصال" : "Latest receipt"} {lastReceipt.id}
+                </strong>
+                <small>
+                  {lastReceipt.timestamp[lang]} ·{" "}
+                  {lastReceipt.moneyExecuted
+                    ? `${lang === "ar" ? "مدفوع" : "paid"} ${money.format(lastReceipt.paidNow)}`
+                    : lang === "ar"
+                      ? "بدون دفع"
+                      : "no payment"}{" "}
+                  · {lastReceipt.returnedPieces}{" "}
+                  {lang === "ar" ? "قطعة مرتجع" : "return pieces"}
+                </small>
+              </span>
+            </section>
+          )}
+
+          <div className="sender-account-workspace">
+            <section className="sender-account-lines-card">
+              <div className="sender-account-lines-card__head">
+                <div>
+                  <h2>{lang === "ar" ? "مراجعة الشحنات" : "Shipment review"}</h2>
+                  <p>
+                    {lang === "ar"
+                      ? "اضغط على أي شحنة لمراجعة طريقة حسابها والمرتجع الخاص بها."
+                      : "Open any shipment to review its calculation and return."}
+                  </p>
+                </div>
+                <span>
+                  {financialLines.length}{" "}
+                  {lang === "ar" ? "مالية معلقة" : "money pending"}
+                </span>
+              </div>
+
+              <div className="sender-account-row sender-account-row--head">
+                <span>{lang === "ar" ? "الشحنة" : "Shipment"}</span>
+                <span>{lang === "ar" ? "المستلم" : "Recipient"}</span>
+                <span>{lang === "ar" ? "الحالة" : "Status"}</span>
+                <span>{lang === "ar" ? "التحصيل" : "Collection"}</span>
+                <span>{lang === "ar" ? "الشحن والرسوم" : "Shipping & fees"}</span>
+                <span>{lang === "ar" ? "صافي الراسل" : "Sender net"}</span>
+                <span>{lang === "ar" ? "المرتجع" : "Return"}</span>
+              </div>
+              <div className="sender-account-lines">
+                {draftLines.map((line) => (
+                  <button
+                    type="button"
+                    className="sender-account-row"
+                    onClick={() => setSelectedLine(line)}
+                    key={line.eventId}
+                  >
+                    <span className="sender-prep-shipment">
+                      <strong>{line.shipment.id}</strong>
+                      <small>{line.shipment.reference}</small>
+                    </span>
+                    <span className="sender-prep-person">
+                      <strong>{line.shipment.recipient[lang]}</strong>
+                      <small>{line.shipment.area[lang]}</small>
+                    </span>
+                    <span>
+                      <b
+                        className="sender-prep-status"
+                        style={{ "--status-color": line.statusEvent.color } as CSSProperties}
+                      >
+                        {line.statusEvent.status[lang]}
+                      </b>
+                      <small>{line.statusEvent.timestamp[lang]}</small>
+                    </span>
+                    <strong className="money">
+                      {line.moneySettled
+                        ? lang === "ar"
+                          ? "تمت تسويته"
+                          : "Settled"
+                        : money.format(line.statusEvent.collectedAmount ?? 0)}
+                    </strong>
+                    <span className="sender-prep-fees">
+                      <strong>
+                        {money.format(line.shippingCharge + line.otherFees)}
+                      </strong>
+                      <small>
+                        {line.priceList?.code ??
+                          (lang === "ar" ? "السعر المحفوظ" : "Saved price")}
+                      </small>
+                    </span>
+                    <span className="sender-prep-net">
+                      <strong>
+                        {line.moneySettled
+                          ? "—"
+                          : money.format(line.senderDue - line.companyDue)}
+                      </strong>
+                      {line.companyDue > 0 && !line.moneySettled && (
+                        <small>
+                          {lang === "ar" ? "منها للشركة" : "company due"}{" "}
+                          {money.format(line.companyDue)}
+                        </small>
+                      )}
+                    </span>
+                    <span className="sender-prep-return">
+                      {line.returnPieces > 0 ? (
+                        <>
+                          <strong>
+                            {line.returnPieces} {lang === "ar" ? "قطعة" : "pcs"}
+                          </strong>
+                          <small
+                            className={
+                              line.returnSettled
+                                ? "is-handed"
+                                : line.returnReady
+                                  ? "is-ready"
+                                  : ""
+                            }
+                          >
+                            {line.returnSettled
+                              ? lang === "ar"
+                                ? "تم التسليم"
+                                : "Handed over"
+                              : line.returnReady
+                                ? lang === "ar"
+                                  ? "جاهز"
+                                  : "Ready"
+                                : lang === "ar"
+                                  ? "لم يصل"
+                                  : "Waiting"}
+                          </small>
+                        </>
+                      ) : (
+                        <small>—</small>
+                      )}
+                    </span>
+                  </button>
+                ))}
+                {!draftLines.length && (
+                  <div className="sender-prep-empty">
+                    <Check size={24} />
+                    <strong>
+                      {lang === "ar"
+                        ? "هذا الحساب خاص برصيد سابق فقط"
+                        : "This account contains previous balance only"}
+                    </strong>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <aside className="sender-account-settlement">
+              <div className="sender-account-settlement__head">
+                <span>
+                  <small>{lang === "ar" ? "المراجعة النهائية" : "Final review"}</small>
+                  <strong>
+                    {lang === "ar" ? "ما الذي يحدث الآن؟" : "What happens now?"}
+                  </strong>
+                </span>
+                <LockKeyhole size={18} />
+              </div>
+
+              <label
+                className={`sender-account-action ${executeMoney ? "is-active" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={executeMoney}
+                  onChange={(event) => setExecuteMoney(event.target.checked)}
+                  disabled={activeDraft.state === "completed"}
+                />
+                <span className="sender-account-action__check">
+                  <Check size={14} />
+                </span>
+                <span>
+                  <strong>{lang === "ar" ? "دفع المال الآن" : "Pay money now"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "ينشئ حركة خروج من مصدر الدفع المختار"
+                      : "Creates an outgoing movement from the chosen source"}
+                  </small>
+                </span>
+                <Banknote size={19} />
+              </label>
+
+              <label
+                className={`sender-account-action ${executeReturns ? "is-active" : ""}`}
+              >
+                <input
+                  type="checkbox"
+                  checked={executeReturns}
+                  onChange={(event) => setExecuteReturns(event.target.checked)}
+                  disabled={
+                    activeDraft.state === "completed" || readyReturnLines.length === 0
+                  }
+                />
+                <span className="sender-account-action__check">
+                  <Check size={14} />
+                </span>
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "تسليم المرتجعات الجاهزة"
+                      : "Hand over ready returns"}
+                  </strong>
+                  <small>
+                    {readyReturnLines.length}{" "}
+                    {lang === "ar"
+                      ? `شحنة · ${readyReturnLines.reduce((sum, line) => sum + line.returnPieces, 0)} قطعة`
+                      : `shipments · ${readyReturnLines.reduce((sum, line) => sum + line.returnPieces, 0)} pieces`}
+                  </small>
+                </span>
+                <PackageCheck size={19} />
+              </label>
+
+              <div className="sender-account-breakdown">
+                <span>
+                  <small>{lang === "ar" ? "حق الراسل من الشحنات" : "Sender shipment due"}</small>
+                  <strong>{money.format(newSenderDue)}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "مستحق الشركة" : "Company due"}</small>
+                  <strong className="is-company">− {money.format(companyDue)}</strong>
+                </span>
+                <span className="is-total">
+                  <small>{lang === "ar" ? "صافي المستحق الجديد" : "New net due"}</small>
+                  <strong>{money.format(newNetDue)}</strong>
+                </span>
+              </div>
+
+              {executeMoney && previousBalance > 0 && (
+                <section className="sender-account-old-balance">
+                  <div>
+                    <span>
+                      <small>{lang === "ar" ? "رصيد سابق مستحق" : "Previous balance due"}</small>
+                      <strong>{money.format(previousBalance)}</strong>
+                    </span>
+                    <ShieldCheck size={17} />
+                  </div>
+                  <div className="sender-account-balance-modes">
+                    <button
+                      type="button"
+                      className={balanceMode === "none" ? "is-active" : ""}
+                      onClick={() => setBalanceMode("none")}
+                    >
+                      {lang === "ar" ? "لا دفع الآن" : "Not now"}
+                    </button>
+                    <button
+                      type="button"
+                      className={balanceMode === "full" ? "is-active" : ""}
+                      onClick={() => setBalanceMode("full")}
+                    >
+                      {lang === "ar" ? "دفع كامل" : "Pay all"}
+                    </button>
+                    <button
+                      type="button"
+                      className={balanceMode === "partial" ? "is-active" : ""}
+                      onClick={() => setBalanceMode("partial")}
+                    >
+                      {lang === "ar" ? "دفع جزئي" : "Partial"}
+                    </button>
+                  </div>
+                  {balanceMode === "partial" && (
+                    <label className="sender-account-partial">
+                      <span>{lang === "ar" ? "المبلغ من الرصيد" : "Amount from balance"}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={previousBalance}
+                        value={partialBalance}
+                        onChange={(event) => setPartialBalance(event.target.value)}
+                        placeholder="0"
+                      />
+                    </label>
+                  )}
+                </section>
+              )}
+
+              {executeMoney && (
+                <>
+                  <section className="sender-account-payout">
+                    <span>
+                      <small>{lang === "ar" ? "الجديد" : "New due"}</small>
+                      <strong>{money.format(newNetDue)}</strong>
+                    </span>
+                    <i>+</i>
+                    <span>
+                      <small>{lang === "ar" ? "من الرصيد" : "Old balance"}</small>
+                      <strong>{money.format(requestedPreviousBalance)}</strong>
+                    </span>
+                    <i>=</i>
+                    <span className="is-total">
+                      <small>{lang === "ar" ? "المطلوب دفعه" : "Payout due"}</small>
+                      <strong>{money.format(expectedPayout)}</strong>
+                    </span>
+                  </section>
+
+                  <div className="sender-account-paid">
+                    <div>
+                      <span>
+                        <small>{lang === "ar" ? "المدفوع الآن" : "Paid now"}</small>
+                        <strong>{money.format(actualPayout)}</strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomAmount((value) => !value);
+                          setPaidNow(String(expectedPayout));
+                        }}
+                      >
+                        {customAmount
+                          ? lang === "ar"
+                            ? "إلغاء"
+                            : "Cancel"
+                          : lang === "ar"
+                            ? "مبلغ آخر"
+                            : "Another amount"}
+                      </button>
+                    </div>
+                    {customAmount && (
+                      <div className="sender-account-custom-amount">
+                        <label>
+                          <span>{lang === "ar" ? "المبلغ الفعلي" : "Actual amount"}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            max={expectedPayout}
+                            value={paidNow}
+                            onChange={(event) => setPaidNow(event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>{lang === "ar" ? "السبب" : "Reason"}</span>
+                          <textarea
+                            value={adjustmentReason}
+                            onChange={(event) =>
+                              setAdjustmentReason(event.target.value)
+                            }
+                            placeholder={
+                              lang === "ar"
+                                ? "مثال: دفع جزء من المستحق باتفاق الراسل"
+                                : "e.g. Partial payment agreed with sender"
+                            }
+                          />
+                        </label>
+                      </div>
+                    )}
+                    <p>
+                      {lang === "ar" ? "سيبقى مستحقًا للراسل" : "Will remain due"}{" "}
+                      <strong>{money.format(remainingAfterPayment)}</strong>
+                    </p>
+                  </div>
+
+                  <label className="sender-account-source">
+                    <span>{lang === "ar" ? "مصدر الدفع" : "Payment source"}</span>
+                    <span className="entry-select">
+                      <Landmark size={16} />
+                      <select
+                        value={paymentSource}
+                        onChange={(event) => setPaymentSource(event.target.value)}
+                      >
+                        <option value="main-cash">
+                          {lang === "ar" ? "الخزنة الرئيسية — نقدي" : "Main cash treasury"}
+                        </option>
+                        <option value="bank">
+                          {lang === "ar" ? "الحساب البنكي" : "Bank account"}
+                        </option>
+                        <option value="wallet">
+                          {lang === "ar" ? "المحفظة الإلكترونية" : "E-wallet"}
+                        </option>
+                      </select>
+                      <ChevronDown size={15} />
+                    </span>
+                  </label>
+                </>
+              )}
+
+              <section className="sender-account-receiver">
+                <span>{lang === "ar" ? "من سيستلم؟" : "Who will receive?"}</span>
+                <div>
+                  <button
+                    type="button"
+                    className={receiverType === "sender" ? "is-active" : ""}
+                    onClick={() => setReceiverType("sender")}
+                  >
+                    {lang === "ar" ? "الراسل نفسه" : "The sender"}
+                  </button>
+                  <button
+                    type="button"
+                    className={receiverType === "authorized" ? "is-active" : ""}
+                    onClick={() => setReceiverType("authorized")}
+                  >
+                    {lang === "ar" ? "شخص مفوض" : "Authorized person"}
+                  </button>
+                </div>
+                {receiverType === "authorized" && (
+                  <div className="sender-account-authorized">
+                    <input
+                      value={receiverName}
+                      onChange={(event) => setReceiverName(event.target.value)}
+                      placeholder={lang === "ar" ? "اسم المستلم" : "Receiver name"}
+                    />
+                    <input
+                      value={receiverPhone}
+                      onChange={(event) => setReceiverPhone(event.target.value)}
+                      placeholder={lang === "ar" ? "رقم الهاتف" : "Phone number"}
+                      dir="ltr"
+                    />
+                  </div>
+                )}
+              </section>
+
+              <button
+                className="sender-account-submit"
+                type="button"
+                onClick={submitSettlement}
+                disabled={
+                  activeDraft.state === "completed" ||
+                  (!executeMoney && !executeReturns)
+                }
+              >
+                <ShieldCheck size={18} />
+                {activeDraft.state === "completed"
+                  ? lang === "ar"
+                    ? "الحساب مكتمل"
+                    : "Account completed"
+                  : executeMoney && executeReturns
+                    ? lang === "ar"
+                      ? "تأكيد الدفع وتسليم المرتجعات"
+                      : "Confirm payment and returns"
+                    : executeMoney
+                      ? lang === "ar"
+                        ? "تأكيد الدفع"
+                        : "Confirm payment"
+                      : lang === "ar"
+                        ? "تأكيد تسليم المرتجعات"
+                        : "Confirm return handover"}
+              </button>
+              <p className="sender-account-submit-note">
+                <LockKeyhole size={14} />
+                {lang === "ar"
+                  ? "التأكيد يسجل إيصالًا وحركة فعلية ولا يعدل الإيصالات السابقة."
+                  : "Confirmation records a real receipt and movement; prior receipts stay unchanged."}
+              </p>
+            </aside>
+          </div>
+        </main>
+      </div>
+
+      {selectedLine && (
+        <SenderSettlementLineDrawer
+          line={selectedLine}
+          lang={lang}
+          onClose={() => setSelectedLine(null)}
+          onRemove={
+            activeDraft.state === "open" &&
+            !selectedLine.moneySettled &&
+            (selectedLine.returnPieces === 0 || !selectedLine.returnSettled)
+              ? () => removeLine(selectedLine)
+              : undefined
+          }
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CourierAccountScreen({
   lang,
   theme,
@@ -13196,6 +15494,15 @@ export default function Home() {
   const [sharedCourierSettlements, setSharedCourierSettlements] = useState(
     courierSettlementsData,
   );
+  const [sharedSenderBalances, setSharedSenderBalances] =
+    useState(senderBalancesData);
+  const [sharedSenderDrafts, setSharedSenderDrafts] = useState(
+    senderSettlementDraftsData,
+  );
+  const [sharedSenderReceipts, setSharedSenderReceipts] = useState(
+    senderSettlementReceiptsData,
+  );
+  const [activeSenderDraftId, setActiveSenderDraftId] = useState("");
   const [controlCenterReady, setControlCenterReady] = useState(false);
 
   useEffect(() => {
@@ -13217,6 +15524,9 @@ export default function Home() {
           shipments?: Shipment[];
           courierDebts?: CourierDebt[];
           courierSettlements?: CourierSettlement[];
+          senderBalances?: SenderBalance[];
+          senderDrafts?: SenderSettlementDraft[];
+          senderReceipts?: SenderSettlementReceipt[];
         };
         if (Array.isArray(parsed.statuses)) {
           setSharedStatuses(
@@ -13247,9 +15557,21 @@ export default function Home() {
         if (Array.isArray(parsed.courierSettlements)) {
           setSharedCourierSettlements(parsed.courierSettlements);
         }
+        if (Array.isArray(parsed.senderBalances)) {
+          setSharedSenderBalances(parsed.senderBalances);
+        }
+        if (Array.isArray(parsed.senderDrafts)) {
+          setSharedSenderDrafts(parsed.senderDrafts);
+          const latestOpenDraft = [...parsed.senderDrafts]
+            .reverse()
+            .find((draft) => draft.state === "open");
+          if (latestOpenDraft) setActiveSenderDraftId(latestOpenDraft.id);
+        }
+        if (Array.isArray(parsed.senderReceipts)) {
+          setSharedSenderReceipts(parsed.senderReceipts);
+        }
         if (Array.isArray(parsed.shipments)) {
-          setSharedShipments(
-            parsed.shipments.map((shipment) => {
+          const migratedShipments = parsed.shipments.map((shipment) => {
               const deliveredDemo =
                 shipment.id === "TS-12857" &&
                 shipment.status.en === "Delivered" &&
@@ -13272,8 +15594,13 @@ export default function Home() {
                     }
                   : {}),
               };
-            }),
+            });
+          const missingDemoShipments = shipments.filter(
+            (shipment) =>
+              ["TS-12846", "TS-12839", "TS-12831"].includes(shipment.id) &&
+              !migratedShipments.some((savedShipment) => savedShipment.id === shipment.id),
           );
+          setSharedShipments([...migratedShipments, ...missingDemoShipments]);
         }
       }
     } catch {
@@ -13396,6 +15723,9 @@ export default function Home() {
         shipments: sharedShipments,
         courierDebts: sharedCourierDebts,
         courierSettlements: sharedCourierSettlements,
+        senderBalances: sharedSenderBalances,
+        senderDrafts: sharedSenderDrafts,
+        senderReceipts: sharedSenderReceipts,
       }),
     );
   }, [
@@ -13405,6 +15735,9 @@ export default function Home() {
     sharedCourierPlans,
     sharedCourierSettlements,
     sharedPriceLists,
+    sharedSenderBalances,
+    sharedSenderDrafts,
+    sharedSenderReceipts,
     sharedShipmentFields,
     sharedShipmentSettings,
     sharedShipments,
@@ -13447,6 +15780,49 @@ export default function Home() {
           onShipmentsChange={setSharedShipments}
           onDebtsChange={setSharedCourierDebts}
           onSettlementsChange={setSharedCourierSettlements}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+           onNavigate={setScreen}
+           onLogout={() => setScreen("login")}
+         />
+      ) : screen === "senderAccountPrep" ? (
+        <SenderAccountPreparationScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          priceLists={sharedPriceLists}
+          balances={sharedSenderBalances}
+          drafts={sharedSenderDrafts}
+          onShipmentsChange={setSharedShipments}
+          onDraftsChange={setSharedSenderDrafts}
+          onOpenDraft={setActiveSenderDraftId}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "senderAccount" ? (
+        <SenderAccountScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          priceLists={sharedPriceLists}
+          balances={sharedSenderBalances}
+          drafts={sharedSenderDrafts}
+          receipts={sharedSenderReceipts}
+          activeDraftId={activeSenderDraftId}
+          onShipmentsChange={setSharedShipments}
+          onBalancesChange={setSharedSenderBalances}
+          onDraftsChange={setSharedSenderDrafts}
+          onReceiptsChange={setSharedSenderReceipts}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
