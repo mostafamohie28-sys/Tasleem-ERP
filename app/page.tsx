@@ -5,6 +5,7 @@ import {
   FormEvent,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import {
@@ -146,10 +147,47 @@ type Shipment = {
     senderOtherFeesLabel?: Localized;
   }[];
   pieces: number;
+  /** Company revenue for shipping, resolved from the sender price list. */
   shippingFee: number;
+  /** Shipping amount shown to and collected from the recipient. */
+  recipientShippingCharge?: number;
   shippingPayer: "recipient" | "sender";
+  customValues?: Record<string, string>;
+  customFinancialSnapshot?: {
+    recipientAdditions: number;
+    senderDeductions: number;
+    companyCosts: number;
+  };
   address: Localized;
 };
+
+function shipmentCompanyShippingFee(shipment: Shipment) {
+  return shipment.shippingFee;
+}
+
+function shipmentRecipientShippingCharge(shipment: Shipment) {
+  return (
+    shipment.recipientShippingCharge ??
+    (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0)
+  );
+}
+
+function shipmentTotalToCollect(shipment: Shipment) {
+  return (
+    shipment.amount +
+    shipmentRecipientShippingCharge(shipment) +
+    (shipment.customFinancialSnapshot?.recipientAdditions ?? 0)
+  );
+}
+
+function shipmentSenderBaseDue(shipment: Shipment) {
+  return (
+    shipment.amount +
+    shipmentRecipientShippingCharge(shipment) -
+    shipmentCompanyShippingFee(shipment) -
+    (shipment.customFinancialSnapshot?.senderDeductions ?? 0)
+  );
+}
 
 type CourierDebt = {
   id: string;
@@ -1737,6 +1775,8 @@ type SenderSettlementLine = {
   shipment: Shipment;
   statusEvent: NonNullable<Shipment["statusHistory"]>[number];
   priceList: PriceListRecord | null;
+  recipientShippingCharge: number;
+  shippingDifference: number;
   shippingCharge: number;
   otherFees: number;
   senderDue: number;
@@ -1784,9 +1824,15 @@ function senderSettlementLines(
       const configuredPrice = priceList?.prices[areaId]?.[statusEvent.statusPolicyId];
       const shippingCharge =
         typeof configuredPrice === "number" ? configuredPrice : shipment.shippingFee;
+      const recipientShippingCharge =
+        shipmentRecipientShippingCharge(shipment);
       const otherFees = statusEvent.senderOtherFees ?? 0;
       const collectedAmount = statusEvent.collectedAmount ?? 0;
-      const totalCompanyCharge = shippingCharge + otherFees;
+      const customCompanyIncome =
+        (shipment.customFinancialSnapshot?.recipientAdditions ?? 0) +
+        (shipment.customFinancialSnapshot?.senderDeductions ?? 0);
+      const totalCompanyCharge =
+        shippingCharge + otherFees + customCompanyIncome;
       const senderDue = Math.max(0, collectedAmount - totalCompanyCharge);
       const companyDue = Math.max(0, totalCompanyCharge - collectedAmount);
       const returnPieces = Math.max(0, statusEvent.returnedPieces ?? 0);
@@ -1797,6 +1843,8 @@ function senderSettlementLines(
           shipment,
           statusEvent,
           priceList,
+          recipientShippingCharge,
+          shippingDifference: recipientShippingCharge - shippingCharge,
           shippingCharge,
           otherFees,
           senderDue,
@@ -2385,6 +2433,33 @@ type ShipmentFieldGroup =
   | "financial"
   | "sender";
 
+type ShipmentFieldDataType =
+  | "short_text"
+  | "long_text"
+  | "number"
+  | "money"
+  | "phone"
+  | "date"
+  | "single_choice"
+  | "multi_choice"
+  | "boolean";
+
+type ShipmentFieldPlacement =
+  | "entry"
+  | "details"
+  | "courier"
+  | "sender"
+  | "waybill"
+  | "reports";
+
+type ShipmentFieldRole = "information" | "operational" | "financial";
+
+type ShipmentFieldFinancialEffect =
+  | "none"
+  | "add_recipient"
+  | "deduct_sender"
+  | "company_cost";
+
 type ShipmentFieldPolicy = {
   id: string;
   name: Localized;
@@ -2395,7 +2470,18 @@ type ShipmentFieldPolicy = {
   custom: boolean;
   inExcel: boolean;
   order: number;
+  dataType?: ShipmentFieldDataType;
+  placements?: ShipmentFieldPlacement[];
+  searchable?: boolean;
+  role?: ShipmentFieldRole;
+  financialEffect?: ShipmentFieldFinancialEffect;
 };
+
+type ShippingChargeMode =
+  | "company_price"
+  | "company_plus"
+  | "fixed"
+  | "manual";
 
 type ShipmentDataSettings = {
   confirmationMode: "off" | "optional" | "required_before_assignment";
@@ -2403,7 +2489,51 @@ type ShipmentDataSettings = {
   trustsEnabled: boolean;
   shippingPayerOverride: boolean;
   phoneLookupEnabled: boolean;
+  defaultShippingPayer: "recipient" | "sender";
+  shippingChargeMode: ShippingChargeMode;
+  shippingChargeValue: number;
 };
+
+type SenderShipmentPolicy = {
+  sender: Localized;
+  fields: ShipmentFieldPolicy[];
+  settings: ShipmentDataSettings;
+};
+
+function normalizeShipmentField(field: ShipmentFieldPolicy): ShipmentFieldPolicy {
+  return {
+    ...field,
+    dataType:
+      field.dataType ??
+      (field.code.includes("PHONE")
+        ? "phone"
+        : field.code === "DELIVERY_DATE"
+          ? "date"
+          : field.group === "financial" || field.code === "PIECE_COUNT"
+            ? "number"
+            : field.code === "NOTES" || field.code === "DELIVERY_ADDRESS"
+              ? "long_text"
+              : "short_text"),
+    placements: field.placements ?? [
+      "entry",
+      "details",
+      ...(field.group === "financial" ? (["sender"] as ShipmentFieldPlacement[]) : []),
+    ],
+    searchable:
+      field.searchable ??
+      ["RECIPIENT_PHONE", "RECIPIENT_NAME", "SENDER_REFERENCE"].includes(
+        field.code,
+      ),
+    role:
+      field.role ??
+      (field.group === "financial"
+        ? "financial"
+        : field.group === "shipment"
+          ? "operational"
+          : "information"),
+    financialEffect: field.financialEffect ?? "none",
+  };
+}
 
 const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
   {
@@ -2562,17 +2692,31 @@ const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
   },
   {
     id: "field-shipping-fee",
-    name: { ar: "مصاريف الشحن", en: "Shipping fee" },
+    name: { ar: "سعر شحن الشركة", en: "Company shipping fee" },
     code: "SHIPPING_FEE",
     group: "financial",
     description: {
-      ar: "تُستدعى من قائمة أسعار الراسل مع السماح بالتعديل حسب الصلاحية.",
-      en: "Loaded from the sender price list with permission-based override.",
+      ar: "مستحق الشركة الذي يُستدعى من قائمة أسعار الراسل حسب المنطقة والحالة.",
+      en: "Company revenue loaded from the sender price list by area and status.",
     },
     mode: "required_on_create",
     custom: false,
     inExcel: false,
     order: 12,
+  },
+  {
+    id: "field-recipient-shipping-charge",
+    name: { ar: "الشحن المحصل من المستلم", en: "Recipient shipping charge" },
+    code: "RECIPIENT_SHIPPING_CHARGE",
+    group: "financial",
+    description: {
+      ar: "المبلغ الظاهر للمستلم مقابل الشحن، وقد يساوي سعر الشركة أو يزيد عنه حسب سياسة الراسل.",
+      en: "Shipping shown to the recipient; it may equal or exceed the company fee according to sender policy.",
+    },
+    mode: "required_on_create",
+    custom: false,
+    inExcel: false,
+    order: 13,
   },
   {
     id: "field-shipping-payer",
@@ -2586,7 +2730,7 @@ const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
     mode: "optional",
     custom: false,
     inExcel: true,
-    order: 13,
+    order: 14,
   },
   {
     id: "field-delivery-date",
@@ -2600,7 +2744,7 @@ const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
     mode: "optional",
     custom: false,
     inExcel: true,
-    order: 14,
+    order: 15,
   },
   {
     id: "field-notes",
@@ -2614,9 +2758,9 @@ const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
     mode: "optional",
     custom: false,
     inExcel: true,
-    order: 15,
+    order: 16,
   },
-];
+].map((field) => normalizeShipmentField(field as ShipmentFieldPolicy));
 
 const shipmentDataSettingsDefault: ShipmentDataSettings = {
   confirmationMode: "optional",
@@ -2624,7 +2768,59 @@ const shipmentDataSettingsDefault: ShipmentDataSettings = {
   trustsEnabled: false,
   shippingPayerOverride: true,
   phoneLookupEnabled: true,
+  defaultShippingPayer: "recipient",
+  shippingChargeMode: "company_price",
+  shippingChargeValue: 0,
 };
+
+function normalizeShipmentDataSettings(
+  settings?: Partial<ShipmentDataSettings>,
+): ShipmentDataSettings {
+  return {
+    ...shipmentDataSettingsDefault,
+    ...settings,
+  };
+}
+
+function findSenderShipmentPolicy(
+  sender: Localized,
+  senderPolicies: SenderShipmentPolicy[],
+) {
+  return senderPolicies.find(
+    (policy) =>
+      policy.sender.en === sender.en || policy.sender.ar === sender.ar,
+  );
+}
+
+function resolveShipmentDataSettings(
+  shipment: Shipment,
+  companySettings: ShipmentDataSettings,
+  senderPolicies: SenderShipmentPolicy[],
+) {
+  return normalizeShipmentDataSettings(
+    findSenderShipmentPolicy(shipment.sender, senderPolicies)?.settings ??
+      companySettings,
+  );
+}
+
+function calculateRecipientShippingCharge(
+  companyFee: number,
+  payer: "recipient" | "sender",
+  settings: ShipmentDataSettings,
+  manualValue: string,
+) {
+  if (payer === "sender") return 0;
+  if (settings.shippingChargeMode === "company_plus") {
+    return Math.max(0, companyFee + settings.shippingChargeValue);
+  }
+  if (settings.shippingChargeMode === "fixed") {
+    return Math.max(0, settings.shippingChargeValue);
+  }
+  if (settings.shippingChargeMode === "manual") {
+    return Math.max(0, Number(manualValue) || 0);
+  }
+  return Math.max(0, companyFee);
+}
 
 const shipmentPolicyCopy = {
   ar: {
@@ -3033,6 +3229,8 @@ function LoginScreen({
   );
 }
 
+let sidebarNavigationScrollTop = 0;
+
 function Sidebar({
   lang,
   activeScreen,
@@ -3053,6 +3251,7 @@ function Sidebar({
   onLogout: () => void;
 }) {
   const t = copy[lang];
+  const navRef = useRef<HTMLElement | null>(null);
   const sections = [
     {
       label: "",
@@ -3156,6 +3355,22 @@ function Sidebar({
     },
   ];
 
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    window.requestAnimationFrame(() => {
+      nav.scrollTop = sidebarNavigationScrollTop;
+      const activeItem = nav.querySelector<HTMLElement>(".nav-item--active");
+      if (!activeItem) return;
+      const navBox = nav.getBoundingClientRect();
+      const itemBox = activeItem.getBoundingClientRect();
+      if (itemBox.top < navBox.top || itemBox.bottom > navBox.bottom) {
+        activeItem.scrollIntoView({ block: "nearest" });
+        sidebarNavigationScrollTop = nav.scrollTop;
+      }
+    });
+  }, [activeScreen]);
+
   return (
     <>
       {mobileOpen && (
@@ -3183,7 +3398,14 @@ function Sidebar({
           </button>
         </div>
 
-        <nav className="sidebar__nav" aria-label={t.operations}>
+        <nav
+          ref={navRef}
+          className="sidebar__nav"
+          aria-label={t.operations}
+          onScroll={(event) => {
+            sidebarNavigationScrollTop = event.currentTarget.scrollTop;
+          }}
+        >
           {sections.map((section, sectionIndex) => (
             <div className="nav-section" key={`${section.label}-${sectionIndex}`}>
               {section.label && <p>{section.label}</p>}
@@ -3396,25 +3618,23 @@ function ShipmentDrawer({
                 <strong>{money.format(shipment.amount)}</strong>
               </div>
               <div>
-                <small>{t.shippingFee}</small>
-                <strong>{money.format(shipment.shippingFee)}</strong>
+                <small>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</small>
+                <strong>{money.format(shipmentCompanyShippingFee(shipment))}</strong>
+              </div>
+              <div>
+                <small>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</small>
+                <strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong>
               </div>
               <div>
                 <small>{t.totalDue}</small>
                 <strong>
-                  {money.format(
-                    shipment.amount +
-                      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
-                  )}
+                  {money.format(shipmentTotalToCollect(shipment))}
                 </strong>
               </div>
               <div>
                 <small>{t.senderDue}</small>
                 <strong>
-                  {money.format(
-                    shipment.amount -
-                      (shipment.shippingPayer === "sender" ? shipment.shippingFee : 0),
-                  )}
+                  {money.format(shipmentSenderBaseDue(shipment))}
                 </strong>
               </div>
               <div>
@@ -7072,6 +7292,7 @@ function ShipmentFieldEditor({
                   <span className="select-wrap">
                     <select
                       value={draft.group}
+                      disabled={!draft.custom}
                       onChange={(event) =>
                         setDraft((current) => ({
                           ...current,
@@ -7145,6 +7366,80 @@ function ShipmentFieldEditor({
                     <ChevronDown size={16} />
                   </span>
                 </label>
+                <label className="select-field">
+                  <span>{lang === "ar" ? "نوع البيانات" : "Data type"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.dataType ?? "short_text"}
+                      disabled={!draft.custom}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          dataType: event.target.value as ShipmentFieldDataType,
+                        }))
+                      }
+                    >
+                      <option value="short_text">{lang === "ar" ? "نص قصير" : "Short text"}</option>
+                      <option value="long_text">{lang === "ar" ? "نص طويل" : "Long text"}</option>
+                      <option value="number">{lang === "ar" ? "رقم" : "Number"}</option>
+                      <option value="money">{lang === "ar" ? "مبلغ مالي" : "Money"}</option>
+                      <option value="phone">{lang === "ar" ? "رقم هاتف" : "Phone"}</option>
+                      <option value="date">{lang === "ar" ? "تاريخ" : "Date"}</option>
+                      <option value="single_choice">{lang === "ar" ? "اختيار واحد" : "Single choice"}</option>
+                      <option value="multi_choice">{lang === "ar" ? "اختيارات متعددة" : "Multiple choice"}</option>
+                      <option value="boolean">{lang === "ar" ? "نعم / لا" : "Yes / no"}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{lang === "ar" ? "دور الحقل" : "Field role"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.role ?? "information"}
+                      disabled={!draft.custom}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          role: event.target.value as ShipmentFieldRole,
+                          financialEffect:
+                            event.target.value === "financial"
+                              ? current.financialEffect ?? "none"
+                              : "none",
+                        }))
+                      }
+                    >
+                      <option value="information">{lang === "ar" ? "معلوماتي" : "Information"}</option>
+                      <option value="operational">{lang === "ar" ? "تشغيلي" : "Operational"}</option>
+                      <option value="financial">{lang === "ar" ? "مالي" : "Financial"}</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </span>
+                </label>
+                {(draft.role ?? "information") === "financial" && (
+                  <label className="select-field">
+                    <span>{lang === "ar" ? "الأثر المالي" : "Financial effect"}</span>
+                    <span className="select-wrap">
+                      <select
+                        value={draft.financialEffect ?? "none"}
+                        disabled={!draft.custom}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            financialEffect:
+                              event.target.value as ShipmentFieldFinancialEffect,
+                          }))
+                        }
+                      >
+                        <option value="none">{lang === "ar" ? "بدون أثر آلي" : "No automatic effect"}</option>
+                        <option value="add_recipient">{lang === "ar" ? "يُضاف على المستلم" : "Add to recipient"}</option>
+                        <option value="deduct_sender">{lang === "ar" ? "يُخصم من الراسل" : "Deduct from sender"}</option>
+                        <option value="company_cost">{lang === "ar" ? "تكلفة على الشركة" : "Company cost"}</option>
+                      </select>
+                      <ChevronDown size={16} />
+                    </span>
+                  </label>
+                )}
               </div>
 
               <button
@@ -7167,6 +7462,67 @@ function ShipmentFieldEditor({
                   <b />
                 </i>
               </button>
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.searchable ?? false}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    searchable: !current.searchable,
+                  }))
+                }
+              >
+                <span>
+                  <strong>{lang === "ar" ? "إتاحة البحث بهذا الحقل" : "Make field searchable"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "يدخل الحقل في البحث السريع وفلاتر الشحنات."
+                      : "Includes this field in shipment quick search and filters."}
+                  </small>
+                </span>
+                <i className={draft.searchable ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+              <div className="shipment-field-placements">
+                <strong>{lang === "ar" ? "أماكن ظهور الحقل" : "Field placements"}</strong>
+                <div>
+                  {(
+                    [
+                      ["entry", "الإضافة", "Entry"],
+                      ["details", "تفاصيل الشحنة", "Shipment details"],
+                      ["courier", "واجهة المندوب", "Courier"],
+                      ["sender", "واجهة الراسل", "Sender"],
+                      ["waybill", "البوليصة", "Waybill"],
+                      ["reports", "التقارير", "Reports"],
+                    ] as const
+                  ).map(([placement, ar, en]) => {
+                    const active = (draft.placements ?? []).includes(placement);
+                    return (
+                      <button
+                        type="button"
+                        key={placement}
+                        className={active ? "active" : ""}
+                        onClick={() =>
+                          setDraft((current) => ({
+                            ...current,
+                            placements: active
+                              ? (current.placements ?? []).filter(
+                                  (item) => item !== placement,
+                                )
+                              : [...(current.placements ?? []), placement],
+                          }))
+                        }
+                      >
+                        {active && <Check size={13} />}
+                        {lang === "ar" ? ar : en}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </section>
 
             <div className="policy-demo-note">
@@ -7195,6 +7551,7 @@ function ShipmentPoliciesScreen({
   theme,
   fields,
   settings,
+  senderPolicies,
   onLang,
   onTheme,
   onSave,
@@ -7205,11 +7562,13 @@ function ShipmentPoliciesScreen({
   theme: Theme;
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
   onLang: () => void;
   onTheme: () => void;
   onSave: (
     fields: ShipmentFieldPolicy[],
     settings: ShipmentDataSettings,
+    senderPolicies: SenderShipmentPolicy[],
   ) => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
   onLogout: () => void;
@@ -7218,14 +7577,97 @@ function ShipmentPoliciesScreen({
   const s = shipmentPolicyCopy[lang];
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [draftFields, setDraftFields] = useState(fields);
-  const [draftSettings, setDraftSettings] = useState(settings);
+  const [scopeKey, setScopeKey] = useState("company");
+  const [companyFieldsDraft, setCompanyFieldsDraft] = useState(
+    fields.map(normalizeShipmentField),
+  );
+  const [companySettingsDraft, setCompanySettingsDraft] = useState(
+    normalizeShipmentDataSettings(settings),
+  );
+  const [draftSenderPolicies, setDraftSenderPolicies] =
+    useState<SenderShipmentPolicy[]>(senderPolicies);
   const [search, setSearch] = useState("");
   const [groupFilter, setGroupFilter] = useState("all");
   const [editing, setEditing] = useState<ShipmentFieldPolicy | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState("");
+
+  const scopedSender =
+    scopeKey === "company"
+      ? null
+      : availableSenders.find((sender) => sender.en === scopeKey) ?? null;
+  const scopedPolicy = scopedSender
+    ? findSenderShipmentPolicy(scopedSender, draftSenderPolicies)
+    : undefined;
+  const draftFields =
+    scopedPolicy?.fields.map(normalizeShipmentField) ?? companyFieldsDraft;
+  const draftSettings = normalizeShipmentDataSettings(
+    scopedPolicy?.settings ?? companySettingsDraft,
+  );
+  const inheritedSenderScope = Boolean(scopedSender && !scopedPolicy);
+  const scopeControlsDisabled = inheritedSenderScope;
+
+  function updateDraftFields(
+    updater: (current: ShipmentFieldPolicy[]) => ShipmentFieldPolicy[],
+  ) {
+    if (!scopedSender) {
+      setCompanyFieldsDraft(updater);
+      return;
+    }
+    if (!scopedPolicy) return;
+    setDraftSenderPolicies((current) =>
+      current.map((policy) =>
+        policy.sender.en === scopedSender.en
+          ? { ...policy, fields: updater(policy.fields) }
+          : policy,
+      ),
+    );
+  }
+
+  function updateDraftSettingsState(
+    updater: (current: ShipmentDataSettings) => ShipmentDataSettings,
+  ) {
+    if (!scopedSender) {
+      setCompanySettingsDraft(updater);
+      return;
+    }
+    if (!scopedPolicy) return;
+    setDraftSenderPolicies((current) =>
+      current.map((policy) =>
+        policy.sender.en === scopedSender.en
+          ? { ...policy, settings: updater(policy.settings) }
+          : policy,
+      ),
+    );
+  }
+
+  function customizeSenderScope() {
+    if (!scopedSender || scopedPolicy) return;
+    setDraftSenderPolicies((current) => [
+      ...current,
+      {
+        sender: scopedSender,
+        fields: companyFieldsDraft.map((field) => ({
+          ...field,
+          name: { ...field.name },
+          description: { ...field.description },
+          placements: [...(field.placements ?? [])],
+        })),
+        settings: { ...companySettingsDraft },
+      },
+    ]);
+    setDirty(true);
+  }
+
+  function resetSenderScope() {
+    if (!scopedSender) return;
+    setDraftSenderPolicies((current) =>
+      current.filter((policy) => policy.sender.en !== scopedSender.en),
+    );
+    setEditing(null);
+    setDirty(true);
+  }
 
   const modeOptions: Array<{
     value: ShipmentFieldMode;
@@ -7271,19 +7713,19 @@ function ShipmentPoliciesScreen({
     key: K,
     value: ShipmentDataSettings[K],
   ) {
-    setDraftSettings((current) => ({ ...current, [key]: value }));
+    updateDraftSettingsState((current) => ({ ...current, [key]: value }));
     setDirty(true);
   }
 
   function setFieldMode(id: string, mode: ShipmentFieldMode) {
-    setDraftFields((current) =>
+    updateDraftFields((current) =>
       current.map((field) => (field.id === id ? { ...field, mode } : field)),
     );
     setDirty(true);
   }
 
   function toggleExcel(id: string) {
-    setDraftFields((current) =>
+    updateDraftFields((current) =>
       current.map((field) =>
         field.id === id ? { ...field, inExcel: !field.inExcel } : field,
       ),
@@ -7303,11 +7745,16 @@ function ShipmentPoliciesScreen({
       custom: true,
       inExcel: true,
       order: draftFields.length + 1,
+      dataType: "short_text",
+      placements: ["entry", "details"],
+      searchable: false,
+      role: "information",
+      financialEffect: "none",
     });
   }
 
   function saveField(field: ShipmentFieldPolicy) {
-    setDraftFields((current) =>
+    updateDraftFields((current) =>
       current.some((item) => item.id === field.id)
         ? current.map((item) => (item.id === field.id ? field : item))
         : [...current, field],
@@ -7318,7 +7765,7 @@ function ShipmentPoliciesScreen({
   }
 
   function savePolicies() {
-    onSave(draftFields, draftSettings);
+    onSave(companyFieldsDraft, companySettingsDraft, draftSenderPolicies);
     setDirty(false);
     setToast(s.saved);
     window.setTimeout(() => setToast(""), 2600);
@@ -7410,6 +7857,7 @@ function ShipmentPoliciesScreen({
               <button
                 className="secondary-button"
                 type="button"
+                disabled={scopeControlsDisabled}
                 onClick={openNew}
               >
                 <Plus size={17} />
@@ -7427,7 +7875,98 @@ function ShipmentPoliciesScreen({
             </div>
           </div>
 
-          <section className="status-summary-grid">
+          <section className="shipment-policy-scope">
+            <div>
+              <span className="workflow-policy-icon workflow-policy-icon--blue">
+                <UsersRound size={18} />
+              </span>
+              <span>
+                <strong>
+                  {lang === "ar" ? "نطاق تطبيق السياسة" : "Policy scope"}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "سياسة الشركة هي الأساس، ويمكن تخصيص أي راسل دون التأثير على الآخرين."
+                    : "Company policy is the default; customize any sender without affecting others."}
+                </small>
+              </span>
+            </div>
+            <label className="select-wrap">
+              <select
+                value={scopeKey}
+                onChange={(event) => {
+                  setScopeKey(event.target.value);
+                  setEditing(null);
+                  setSearch("");
+                  setGroupFilter("all");
+                }}
+              >
+                <option value="company">
+                  {lang === "ar" ? "الافتراضي العام للشركة" : "Company default"}
+                </option>
+                {availableSenders.map((sender) => (
+                  <option key={sender.en} value={sender.en}>
+                    {sender[lang]}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown size={16} />
+            </label>
+            {scopedSender && (
+              <div className="shipment-policy-scope__state">
+                <span
+                  className={
+                    inheritedSenderScope
+                      ? "policy-scope-chip"
+                      : "policy-scope-chip policy-scope-chip--custom"
+                  }
+                >
+                  {inheritedSenderScope
+                    ? lang === "ar"
+                      ? "يستخدم سياسة الشركة"
+                      : "Uses company policy"
+                    : lang === "ar"
+                      ? "سياسة مخصصة"
+                      : "Custom policy"}
+                </span>
+                {inheritedSenderScope ? (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={customizeSenderScope}
+                  >
+                    <SlidersHorizontal size={16} />
+                    {lang === "ar"
+                      ? "تخصيص لهذا الراسل"
+                      : "Customize this sender"}
+                  </button>
+                ) : (
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={resetSenderScope}
+                  >
+                    {lang === "ar"
+                      ? "الرجوع لسياسة الشركة"
+                      : "Return to company policy"}
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+
+          <div className="shipment-summary-heading">
+            <strong>{lang === "ar" ? "ملخص الحقول" : "Field summary"}</strong>
+            <small>
+              {lang === "ar"
+                ? "هذه أرقام للمتابعة وليست اختيارات لإضافة حقل."
+                : "These are summary metrics, not field choices."}
+            </small>
+          </div>
+          <section
+            className="status-summary-grid shipment-field-summary"
+            aria-label={lang === "ar" ? "ملخص الحقول" : "Field summary"}
+          >
             <article>
               <span className="status-summary-icon status-summary-icon--green">
                 <ClipboardCheck size={18} />
@@ -7459,7 +7998,11 @@ function ShipmentPoliciesScreen({
             <span>{s.controlNote}</span>
           </div>
 
-          <section className="shipment-workflow-panel">
+          <section
+            className={`shipment-workflow-panel ${
+              scopeControlsDisabled ? "shipment-workflow-panel--inherited" : ""
+            }`}
+          >
             <div className="shipment-workflow-panel__heading">
               <span>
                 <strong>{s.workflowTitle}</strong>
@@ -7478,6 +8021,7 @@ function ShipmentPoliciesScreen({
                 <label className="select-wrap">
                   <select
                     value={draftSettings.confirmationMode}
+                    disabled={scopeControlsDisabled}
                     onChange={(event) =>
                       updateSetting(
                         "confirmationMode",
@@ -7505,6 +8049,7 @@ function ShipmentPoliciesScreen({
                 <label className="select-wrap">
                   <select
                     value={draftSettings.incompleteRoute}
+                    disabled={scopeControlsDisabled}
                     onChange={(event) =>
                       updateSetting(
                         "incompleteRoute",
@@ -7523,6 +8068,7 @@ function ShipmentPoliciesScreen({
               <button
                 className="workflow-toggle-card"
                 type="button"
+                disabled={scopeControlsDisabled}
                 role="switch"
                 aria-checked={draftSettings.phoneLookupEnabled}
                 onClick={() =>
@@ -7543,9 +8089,114 @@ function ShipmentPoliciesScreen({
                   <b />
                 </i>
               </button>
+              <article className="workflow-financial-card">
+                <span className="workflow-policy-icon workflow-policy-icon--blue">
+                  <UserRound size={17} />
+                </span>
+                <div>
+                  <strong>
+                    {lang === "ar"
+                      ? "متحمّل الشحن الافتراضي"
+                      : "Default shipping payer"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "يظهر تلقائيًا عند إضافة شحنة لهذا الراسل."
+                      : "Preselected when adding a shipment for this sender."}
+                  </small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    value={draftSettings.defaultShippingPayer}
+                    disabled={scopeControlsDisabled}
+                    onChange={(event) =>
+                      updateSetting(
+                        "defaultShippingPayer",
+                        event.target
+                          .value as ShipmentDataSettings["defaultShippingPayer"],
+                      )
+                    }
+                  >
+                    <option value="recipient">
+                      {lang === "ar" ? "المستلم" : "Recipient"}
+                    </option>
+                    <option value="sender">
+                      {lang === "ar" ? "الراسل" : "Sender"}
+                    </option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <article className="workflow-financial-card workflow-financial-card--wide">
+                <span className="workflow-policy-icon workflow-policy-icon--green">
+                  <Banknote size={17} />
+                </span>
+                <div>
+                  <strong>
+                    {lang === "ar"
+                      ? "الشحن المحصل من المستلم"
+                      : "Recipient shipping charge"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "مستقل عن سعر شحن الشركة الموجود في قائمة الأسعار."
+                      : "Independent from the company fee in the price list."}
+                  </small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    value={draftSettings.shippingChargeMode}
+                    disabled={scopeControlsDisabled}
+                    onChange={(event) =>
+                      updateSetting(
+                        "shippingChargeMode",
+                        event.target
+                          .value as ShipmentDataSettings["shippingChargeMode"],
+                      )
+                    }
+                  >
+                    <option value="company_price">
+                      {lang === "ar"
+                        ? "يساوي سعر شحن الشركة"
+                        : "Same as company fee"}
+                    </option>
+                    <option value="company_plus">
+                      {lang === "ar"
+                        ? "سعر الشركة + زيادة ثابتة"
+                        : "Company fee + fixed markup"}
+                    </option>
+                    <option value="fixed">
+                      {lang === "ar" ? "مبلغ ثابت" : "Fixed amount"}
+                    </option>
+                    <option value="manual">
+                      {lang === "ar" ? "يدوي لكل شحنة" : "Manual per shipment"}
+                    </option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+                {(draftSettings.shippingChargeMode === "company_plus" ||
+                  draftSettings.shippingChargeMode === "fixed") && (
+                  <label className="policy-money-input">
+                    <input
+                      type="number"
+                      min="0"
+                      disabled={scopeControlsDisabled}
+                      value={draftSettings.shippingChargeValue}
+                      onChange={(event) =>
+                        updateSetting(
+                          "shippingChargeValue",
+                          Math.max(0, Number(event.target.value) || 0),
+                        )
+                      }
+                    />
+                    <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                  </label>
+                )}
+              </article>
               <button
                 className="workflow-toggle-card"
                 type="button"
+                disabled={scopeControlsDisabled}
                 role="switch"
                 aria-checked={draftSettings.shippingPayerOverride}
                 onClick={() =>
@@ -7569,10 +8220,14 @@ function ShipmentPoliciesScreen({
               <button
                 className="workflow-toggle-card"
                 type="button"
+                disabled={Boolean(scopedSender)}
                 role="switch"
-                aria-checked={draftSettings.trustsEnabled}
+                aria-checked={companySettingsDraft.trustsEnabled}
                 onClick={() =>
-                  updateSetting("trustsEnabled", !draftSettings.trustsEnabled)
+                  updateSetting(
+                    "trustsEnabled",
+                    !companySettingsDraft.trustsEnabled,
+                  )
                 }
               >
                 <span className="workflow-policy-icon workflow-policy-icon--orange">
@@ -7582,7 +8237,7 @@ function ShipmentPoliciesScreen({
                   <strong>{s.trustsTitle}</strong>
                   <small>{s.trustsHint}</small>
                 </span>
-                <i className={draftSettings.trustsEnabled ? "switch switch--on" : "switch"}>
+                <i className={companySettingsDraft.trustsEnabled ? "switch switch--on" : "switch"}>
                   <b />
                 </i>
               </button>
@@ -7662,7 +8317,24 @@ function ShipmentPoliciesScreen({
                       <span>
                         <strong>{field.name[lang]}</strong>
                         <small>{field.description[lang]}</small>
-                        <em>{field.custom ? s.custom : s.system}</em>
+                        <em>
+                          {field.custom ? s.custom : s.system}
+                          {" · "}
+                          {field.role === "financial"
+                            ? lang === "ar"
+                              ? "مالي"
+                              : "Financial"
+                            : field.role === "operational"
+                              ? lang === "ar"
+                                ? "تشغيلي"
+                                : "Operational"
+                              : lang === "ar"
+                                ? "معلوماتي"
+                                : "Information"}
+                          {" · "}
+                          {(field.placements ?? []).length}{" "}
+                          {lang === "ar" ? "موضع" : "placements"}
+                        </em>
                       </span>
                     </div>
                     <div className="shipment-field-group">
@@ -7678,6 +8350,7 @@ function ShipmentPoliciesScreen({
                               : "field-mode-button"
                           }
                           type="button"
+                          disabled={scopeControlsDisabled}
                           key={mode.value}
                           onClick={() => setFieldMode(field.id, mode.value)}
                         >
@@ -7688,6 +8361,7 @@ function ShipmentPoliciesScreen({
                     <button
                       className="field-excel-toggle"
                       type="button"
+                      disabled={scopeControlsDisabled}
                       role="switch"
                       aria-checked={field.inExcel}
                       onClick={() => toggleExcel(field.id)}
@@ -7700,6 +8374,7 @@ function ShipmentPoliciesScreen({
                     <button
                       className="status-edit-button"
                       type="button"
+                      disabled={scopeControlsDisabled}
                       aria-label={s.editorTitle}
                       title={s.editorTitle}
                       onClick={() => {
@@ -7757,6 +8432,7 @@ type ShipmentEntryDraft = {
   pieces: string;
   contents: string;
   shipmentPrice: string;
+  recipientShippingChargeInput: string;
   shippingPayer: "recipient" | "sender";
   deliveryDate: string;
   notes: string;
@@ -7767,6 +8443,12 @@ type ShipmentEntryDraft = {
 type PreparedShipment = ShipmentEntryDraft & {
   localId: string;
   shippingFee: number;
+  recipientShippingCharge: number;
+  customFinancialSnapshot: {
+    recipientAdditions: number;
+    senderDeductions: number;
+    companyCosts: number;
+  };
   incompleteFields: string[];
 };
 
@@ -7784,6 +8466,7 @@ function makeShipmentEntryDraft(
     pieces: "1",
     contents: "",
     shipmentPrice: "",
+    recipientShippingChargeInput: "",
     shippingPayer,
     deliveryDate: "",
     notes: "",
@@ -7910,10 +8593,7 @@ function CourierShipmentsScreen({
     maximumFractionDigits: 0,
   });
   const totalCollection = courierShipments.reduce(
-    (sum, shipment) =>
-      sum +
-      shipment.amount +
-      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
+    (sum, shipment) => sum + shipmentTotalToCollect(shipment),
     0,
   );
   const totalPieces = courierShipments.reduce(
@@ -7959,11 +8639,7 @@ function CourierShipmentsScreen({
 
   function chooseStatus(status: StatusPolicy) {
     if (!selectedShipment) return;
-    const total =
-      selectedShipment.amount +
-      (selectedShipment.shippingPayer === "recipient"
-        ? selectedShipment.shippingFee
-        : 0);
+    const total = shipmentTotalToCollect(selectedShipment);
     setSelectedStatusId(status.id);
     setCollectedAmount(
       status.requiredFields.some((field) => field.en === "Collected amount")
@@ -8067,7 +8743,7 @@ function CourierShipmentsScreen({
     const remaining = courierShipments.filter(
       (shipment) => shipment.id !== selectedShipment.id,
     );
-    const nextRecords = shipmentRecords.map((shipment) => {
+    const nextRecords: Shipment[] = shipmentRecords.map((shipment) => {
       if (shipment.id !== selectedShipment.id) return shipment;
       return {
         ...shipment,
@@ -8103,7 +8779,7 @@ function CourierShipmentsScreen({
             note,
             nextDate,
             timestamp,
-            settlementStatus: "pending",
+            settlementStatus: "pending" as const,
           },
           ...(shipment.statusHistory ?? []),
         ],
@@ -8356,11 +9032,7 @@ function CourierShipmentsScreen({
               </label>
               <div className="custody-shipment-list">
                 {visibleShipments.map((shipment) => {
-                  const total =
-                    shipment.amount +
-                    (shipment.shippingPayer === "recipient"
-                      ? shipment.shippingFee
-                      : 0);
+                  const total = shipmentTotalToCollect(shipment);
                   return (
                     <button
                       type="button"
@@ -8473,12 +9145,7 @@ function CourierShipmentsScreen({
                     <span>
                       <HandCoins size={15} />
                       <b>
-                        {money.format(
-                          selectedShipment.amount +
-                            (selectedShipment.shippingPayer === "recipient"
-                              ? selectedShipment.shippingFee
-                              : 0),
-                        )}
+                        {money.format(shipmentTotalToCollect(selectedShipment))}
                       </b>
                     </span>
                   </div>
@@ -8795,14 +9462,11 @@ function CourierPrintScreen({
     0,
   );
   const totalShippingFee = visibleShipments.reduce(
-    (sum, shipment) => sum + shipment.shippingFee,
+    (sum, shipment) => sum + shipmentCompanyShippingFee(shipment),
     0,
   );
   const totalCollection = visibleShipments.reduce(
-    (sum, shipment) =>
-      sum +
-      shipment.amount +
-      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
+    (sum, shipment) => sum + shipmentTotalToCollect(shipment),
     0,
   );
 
@@ -9162,17 +9826,13 @@ function CourierPrintScreen({
                 <span>{lang === "ar" ? "العنوان" : "Address"}</span>
                 <span>{lang === "ar" ? "القطع" : "Pieces"}</span>
                 <span>{lang === "ar" ? "سعر الشحنة" : "Shipment price"}</span>
-                <span>{lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}</span>
+                <span>{lang === "ar" ? "الشحن (شركة / مستلم)" : "Shipping (company / recipient)"}</span>
                 <span>{lang === "ar" ? "التحصيل" : "Collection"}</span>
                 <span>{lang === "ar" ? "تاريخ الإسناد" : "Assigned"}</span>
               </div>
               <div className="courier-print-table__body">
                 {visibleShipments.map((shipment, index) => {
-                  const requiredCollection =
-                    shipment.amount +
-                    (shipment.shippingPayer === "recipient"
-                      ? shipment.shippingFee
-                      : 0);
+                  const requiredCollection = shipmentTotalToCollect(shipment);
                   return (
                     <article className="courier-print-row" key={shipment.id}>
                       <span className="courier-print-index">{index + 1}</span>
@@ -9212,9 +9872,9 @@ function CourierPrintScreen({
                       </span>
                       <span className="courier-print-money">
                         <small className="courier-print-mobile-label">
-                          {lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}
+                          {lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}
                         </small>
-                        <strong>{money.format(shipment.shippingFee)}</strong>
+                        <strong>{money.format(shipmentCompanyShippingFee(shipment))}</strong>
                         <small>
                           {shipment.shippingPayer === "recipient"
                             ? lang === "ar"
@@ -9223,6 +9883,10 @@ function CourierPrintScreen({
                             : lang === "ar"
                               ? "على الراسل"
                               : "Sender"}
+                        </small>
+                        <small>
+                          {lang === "ar" ? "محصل من المستلم" : "Recipient charge"}:{" "}
+                          {money.format(shipmentRecipientShippingCharge(shipment))}
                         </small>
                       </span>
                       <span className="courier-print-money courier-print-money--total">
@@ -10927,13 +11591,36 @@ function SenderSettlementLineDrawer({
             <strong>{money.format(line.statusEvent.collectedAmount ?? 0)}</strong>
           </article>
           <article>
-            <small>{lang === "ar" ? "رسوم الشحن" : "Shipping charge"}</small>
+            <small>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</small>
             <strong>{money.format(line.shippingCharge)}</strong>
+          </article>
+          <article>
+            <small>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</small>
+            <strong>{money.format(line.recipientShippingCharge)}</strong>
+          </article>
+          <article>
+            <small>{lang === "ar" ? "فرق الشحن للراسل" : "Sender shipping difference"}</small>
+            <strong>{money.format(line.shippingDifference)}</strong>
           </article>
           <article>
             <small>{lang === "ar" ? "رسوم أخرى" : "Other fees"}</small>
             <strong>{money.format(line.otherFees)}</strong>
           </article>
+          {((line.shipment.customFinancialSnapshot?.recipientAdditions ?? 0) +
+            (line.shipment.customFinancialSnapshot?.senderDeductions ?? 0) >
+            0) && (
+            <article>
+              <small>{lang === "ar" ? "آثار حقول مخصصة" : "Custom field effects"}</small>
+              <strong>
+                {money.format(
+                  (line.shipment.customFinancialSnapshot?.recipientAdditions ??
+                    0) +
+                    (line.shipment.customFinancialSnapshot?.senderDeductions ??
+                      0),
+                )}
+              </strong>
+            </article>
+          )}
           <article className="sender-account-drawer__net">
             <small>{lang === "ar" ? "صافي حق الراسل" : "Net sender due"}</small>
             <strong>{money.format(line.senderDue)}</strong>
@@ -10946,6 +11633,21 @@ function SenderSettlementLineDrawer({
           <span>{money.format(line.shippingCharge)}</span>
           <i>−</i>
           <span>{money.format(line.otherFees)}</span>
+          {((line.shipment.customFinancialSnapshot?.recipientAdditions ?? 0) +
+            (line.shipment.customFinancialSnapshot?.senderDeductions ?? 0) >
+            0) && (
+            <>
+              <i>−</i>
+              <span>
+                {money.format(
+                  (line.shipment.customFinancialSnapshot?.recipientAdditions ??
+                    0) +
+                    (line.shipment.customFinancialSnapshot?.senderDeductions ??
+                      0),
+                )}
+              </span>
+            </>
+          )}
           <i>=</i>
           <strong>{money.format(line.netDue)}</strong>
         </section>
@@ -11579,8 +12281,8 @@ function SenderAccountPreparationScreen({
                         </strong>
                         <small>
                           {lang === "ar"
-                            ? `${money.format(line.shippingCharge)} شحن`
-                            : `${money.format(line.shippingCharge)} shipping`}
+                            ? `${money.format(line.shippingCharge)} للشركة · فرق ${money.format(line.shippingDifference)}`
+                            : `${money.format(line.shippingCharge)} company · ${money.format(line.shippingDifference)} difference`}
                         </small>
                       </span>
                       <span className="sender-prep-net">
@@ -13360,29 +14062,6 @@ function CourierAccountScreen({
                 </small>
               </span>
             </div>
-            <div className="courier-account-plan">
-              <span>
-                <small>{lang === "ar" ? "خطة الأجر" : "Compensation plan"}</small>
-                <strong>
-                  {activePlan?.name[lang] ??
-                    (lang === "ar" ? "غير محددة" : "Not configured")}
-                </strong>
-              </span>
-              <span>
-                <small>{lang === "ar" ? "دورة الصرف" : "Payout cycle"}</small>
-                <strong>
-                  {activePlan
-                    ? cycleLabel(activePlan.settlementCycle)
-                    : "—"}
-                </strong>
-              </span>
-              <button
-                type="button"
-                onClick={() => onNavigate("courierRates")}
-              >
-                {lang === "ar" ? "فتح الخطة" : "Open plan"}
-              </button>
-            </div>
           </section>
 
           <section className="courier-account-metrics">
@@ -13882,8 +14561,8 @@ function CourierAccountScreen({
                     <strong>{money.format(selectedItem.shipment.amount)}</strong>
                   </span>
                   <span>
-                    <small>{lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}</small>
-                    <strong>{money.format(selectedItem.shipment.shippingFee)}</strong>
+                    <small>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</small>
+                    <strong>{money.format(shipmentCompanyShippingFee(selectedItem.shipment))}</strong>
                     <em>
                       {selectedItem.shipment.shippingPayer === "recipient"
                         ? lang === "ar"
@@ -13893,6 +14572,10 @@ function CourierAccountScreen({
                           ? "على الراسل"
                           : "Sender"}
                     </em>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</small>
+                    <strong>{money.format(shipmentRecipientShippingCharge(selectedItem.shipment))}</strong>
                   </span>
                   <span>
                     <small>{lang === "ar" ? "المبلغ المحصل" : "Collected amount"}</small>
@@ -14076,6 +14759,7 @@ function AssignmentScreen({
   statuses,
   governorates,
   settings,
+  senderPolicies,
   onShipmentsChange,
   onLang,
   onTheme,
@@ -14088,6 +14772,7 @@ function AssignmentScreen({
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
   settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
   onShipmentsChange: (records: Shipment[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -14136,15 +14821,20 @@ function AssignmentScreen({
               status.name.en === shipment.status.en),
         );
         if (matchingPolicy && !matchingPolicy.appearsInAssignment) return false;
+        const shipmentSettings = resolveShipmentDataSettings(
+          shipment,
+          settings,
+          senderPolicies,
+        );
         if (
-          settings.confirmationMode === "required_before_assignment" &&
+          shipmentSettings.confirmationMode === "required_before_assignment" &&
           getShipmentConfirmationCode(shipment) !== "confirmed"
         ) {
           return false;
         }
         return true;
       }),
-    [allAreas, settings.confirmationMode, shipmentRecords, statuses],
+    [allAreas, senderPolicies, settings, shipmentRecords, statuses],
   );
   const normalized = search.trim().toLowerCase();
   const visibleShipments = eligibleShipments.filter((shipment) => {
@@ -14180,10 +14870,7 @@ function AssignmentScreen({
     0,
   );
   const totalCollection = selectedShipments.reduce(
-    (sum, shipment) =>
-      sum +
-      shipment.amount +
-      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
+    (sum, shipment) => sum + shipmentTotalToCollect(shipment),
     0,
   );
   const senderOptions = Array.from(
@@ -14536,11 +15223,7 @@ function AssignmentScreen({
               <div className="assignment-shipment-list">
                 {visibleShipments.map((shipment) => {
                   const checked = selectedIds.includes(shipment.id);
-                  const total =
-                    shipment.amount +
-                    (shipment.shippingPayer === "recipient"
-                      ? shipment.shippingFee
-                      : 0);
+                  const total = shipmentTotalToCollect(shipment);
                   return (
                     <label
                       className={
@@ -14715,6 +15398,7 @@ function ConfirmationScreen({
   theme,
   shipmentRecords,
   settings,
+  senderPolicies,
   onShipmentsChange,
   onLang,
   onTheme,
@@ -14725,6 +15409,7 @@ function ConfirmationScreen({
   theme: Theme;
   shipmentRecords: Shipment[];
   settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
   onShipmentsChange: (records: Shipment[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -14735,10 +15420,15 @@ function ConfirmationScreen({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ConfirmationFilter>("pending");
+  const confirmationRecords = shipmentRecords.filter(
+    (shipment) =>
+      resolveShipmentDataSettings(shipment, settings, senderPolicies)
+        .confirmationMode !== "off",
+  );
   const initialShipment =
-    shipmentRecords.find(
+    confirmationRecords.find(
       (shipment) => getShipmentConfirmationCode(shipment) !== "confirmed",
-    ) ?? shipmentRecords[0];
+    ) ?? confirmationRecords[0];
   const [selectedId, setSelectedId] = useState(initialShipment?.id ?? "");
   const [result, setResult] = useState<
     "confirmed" | "no_answer" | "later" | ""
@@ -14748,10 +15438,13 @@ function ConfirmationScreen({
   const [toast, setToast] = useState("");
 
   const selectedShipment =
-    shipmentRecords.find((shipment) => shipment.id === selectedId) ??
-    shipmentRecords[0];
+    confirmationRecords.find((shipment) => shipment.id === selectedId) ??
+    confirmationRecords[0];
+  const selectedShipmentSettings = selectedShipment
+    ? resolveShipmentDataSettings(selectedShipment, settings, senderPolicies)
+    : normalizeShipmentDataSettings(settings);
   const normalized = search.trim().toLowerCase();
-  const filteredRecords = shipmentRecords.filter((shipment) => {
+  const filteredRecords = confirmationRecords.filter((shipment) => {
     const code = getShipmentConfirmationCode(shipment);
     const matchesFilter =
       filter === "all" ||
@@ -14770,7 +15463,7 @@ function ConfirmationScreen({
       ].some((value) => value.toLowerCase().includes(normalized));
     return matchesFilter && matchesSearch;
   });
-  const counts = shipmentRecords.reduce(
+  const counts = confirmationRecords.reduce(
     (totals, shipment) => {
       const code = getShipmentConfirmationCode(shipment);
       totals[code] += 1;
@@ -14811,7 +15504,7 @@ function ConfirmationScreen({
     {
       id: "all",
       label: { ar: "كل الشحنات", en: "All shipments" },
-      count: shipmentRecords.length,
+      count: confirmationRecords.length,
     },
   ];
 
@@ -14871,7 +15564,8 @@ function ConfirmationScreen({
         shipment.required.ar.includes("تأكيد") ||
         shipment.required.en.toLowerCase().includes("confirm");
       const needsRequiredConfirmation =
-        settings.confirmationMode === "required_before_assignment" && !confirmed;
+        selectedShipmentSettings.confirmationMode ===
+          "required_before_assignment" && !confirmed;
       return {
         ...shipment,
         confirmation,
@@ -14997,7 +15691,11 @@ function ConfirmationScreen({
                   {lang === "ar" ? "التأكيد والمتابعة" : "Confirmation & follow-up"}
                 </h1>
                 <span className="demo-chip">
-                  {settings.confirmationMode === "required_before_assignment"
+                  {senderPolicies.length
+                    ? lang === "ar"
+                      ? "حسب سياسة كل راسل"
+                      : "Per-sender policy"
+                    : settings.confirmationMode === "required_before_assignment"
                     ? lang === "ar"
                       ? "مطلوب قبل الإسناد"
                       : "Required before assignment"
@@ -15026,7 +15724,7 @@ function ConfirmationScreen({
             </button>
           </div>
 
-          {settings.confirmationMode === "off" ? (
+          {confirmationRecords.length === 0 ? (
             <section className="confirmation-disabled">
               <span>
                 <ClipboardCheck size={29} />
@@ -15144,11 +15842,7 @@ function ConfirmationScreen({
                   <div className="confirmation-records">
                     {filteredRecords.map((shipment) => {
                       const code = getShipmentConfirmationCode(shipment);
-                      const total =
-                        shipment.amount +
-                        (shipment.shippingPayer === "recipient"
-                          ? shipment.shippingFee
-                          : 0);
+                      const total = shipmentTotalToCollect(shipment);
                       return (
                         <button
                           className={`confirmation-record ${
@@ -15429,6 +16123,7 @@ function AddShipmentScreen({
   theme,
   fields,
   settings,
+  senderPolicies,
   governorates,
   statuses,
   priceLists,
@@ -15442,6 +16137,7 @@ function AddShipmentScreen({
   theme: Theme;
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
   priceLists: PriceListRecord[];
@@ -15455,9 +16151,16 @@ function AddShipmentScreen({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [entryMode, setEntryMode] = useState<"manual" | "excel">("manual");
   const [senderKey, setSenderKey] = useState(availableSenders[0].en);
+  const initialSenderPolicy = findSenderShipmentPolicy(
+    availableSenders[0],
+    senderPolicies,
+  );
   const initialPayer =
+    initialSenderPolicy?.settings.defaultShippingPayer ??
+    settings.defaultShippingPayer ??
     senderEntryProfiles.find((profile) => profile.sender.en === senderKey)
-      ?.shippingPayer ?? "recipient";
+      ?.shippingPayer ??
+    "recipient";
   const [draft, setDraft] = useState<ShipmentEntryDraft>(() =>
     makeShipmentEntryDraft(initialPayer),
   );
@@ -15475,9 +16178,11 @@ function AddShipmentScreen({
   const selectedSender =
     availableSenders.find((sender) => sender.en === senderKey) ??
     availableSenders[0];
-  const senderProfile =
-    senderEntryProfiles.find((profile) => profile.sender.en === senderKey) ??
-    senderEntryProfiles[0];
+  const senderPolicy = findSenderShipmentPolicy(selectedSender, senderPolicies);
+  const policySettings = normalizeShipmentDataSettings(
+    senderPolicy?.settings ?? settings,
+  );
+  const policyFields = (senderPolicy?.fields ?? fields).map(normalizeShipmentField);
   const senderPriceList =
     priceLists.find(
       (priceList) =>
@@ -15495,6 +16200,12 @@ function AddShipmentScreen({
     draft.areaId && senderPriceList && pricingStatus
       ? senderPriceList.prices[draft.areaId]?.[pricingStatus.id] ?? 0
       : 0;
+  const recipientShippingCharge = calculateRecipientShippingCharge(
+    shippingFee,
+    draft.shippingPayer,
+    policySettings,
+    draft.recipientShippingChargeInput,
+  );
   const activeGovernorates = governorates.filter(
     (governorate) => governorate.state === "active",
   );
@@ -15505,19 +16216,39 @@ function AddShipmentScreen({
     (area) => area.state === "active",
   );
   const matchedRecipient =
-    settings.phoneLookupEnabled && draft.phone.length >= 6
+    policySettings.phoneLookupEnabled && draft.phone.length >= 6
       ? savedRecipients.find((recipient) => recipient.phone === draft.phone)
       : undefined;
-  const activeFields = fields
+  const activeFields = policyFields
     .filter((field) => field.mode !== "hidden")
     .sort((a, b) => a.order - b.order);
   const fieldMap = new Map(activeFields.map((field) => [field.code, field]));
   const customFields = activeFields.filter((field) => field.custom);
+  const customFinancialSnapshot = customFields.reduce(
+    (totals, field) => {
+      const value = Math.max(0, Number(draft.customValues[field.id]) || 0);
+      if (field.financialEffect === "add_recipient") {
+        totals.recipientAdditions += value;
+      } else if (field.financialEffect === "deduct_sender") {
+        totals.senderDeductions += value;
+      } else if (field.financialEffect === "company_cost") {
+        totals.companyCosts += value;
+      }
+      return totals;
+    },
+    { recipientAdditions: 0, senderDeductions: 0, companyCosts: 0 },
+  );
   const shipmentPrice = Number(draft.shipmentPrice) || 0;
   const totalDue =
-    shipmentPrice + (draft.shippingPayer === "recipient" ? shippingFee : 0);
+    shipmentPrice +
+    recipientShippingCharge +
+    customFinancialSnapshot.recipientAdditions;
   const senderDue =
-    shipmentPrice - (draft.shippingPayer === "sender" ? shippingFee : 0);
+    shipmentPrice +
+    recipientShippingCharge -
+    shippingFee -
+    customFinancialSnapshot.senderDeductions;
+  const senderShippingDifference = recipientShippingCharge - shippingFee;
 
   function fieldVisible(code: string) {
     return fieldMap.has(code);
@@ -15541,13 +16272,18 @@ function AddShipmentScreen({
   }
 
   function chooseSender(nextKey: string) {
-    const nextProfile =
-      senderEntryProfiles.find((profile) => profile.sender.en === nextKey) ??
-      senderEntryProfiles[0];
+    const nextSender =
+      availableSenders.find((sender) => sender.en === nextKey) ??
+      availableSenders[0];
+    const nextPolicy = findSenderShipmentPolicy(nextSender, senderPolicies);
+    const nextSettings = normalizeShipmentDataSettings(
+      nextPolicy?.settings ?? settings,
+    );
     setSenderKey(nextKey);
     setDraft((current) => ({
       ...current,
-      shippingPayer: nextProfile.shippingPayer,
+      shippingPayer: nextSettings.defaultShippingPayer,
+      recipientShippingChargeInput: "",
     }));
     setError("");
     setSavedCount(0);
@@ -15590,6 +16326,7 @@ function AddShipmentScreen({
     CONTENTS: draft.contents,
     SHIPMENT_PRICE: draft.shipmentPrice,
     SHIPPING_FEE: String(shippingFee || ""),
+    RECIPIENT_SHIPPING_CHARGE: String(recipientShippingCharge || ""),
     SHIPPING_PAYER: draft.shippingPayer,
     DELIVERY_DATE: draft.deliveryDate,
     NOTES: draft.notes,
@@ -15629,7 +16366,7 @@ function AddShipmentScreen({
       })
       .map((field) => field.name[lang]);
     if (
-      settings.confirmationMode === "required_before_assignment" &&
+      policySettings.confirmationMode === "required_before_assignment" &&
       draft.confirmation !== "confirmed"
     ) {
       incompleteFields.push(
@@ -15640,12 +16377,14 @@ function AddShipmentScreen({
       ...draft,
       localId: `prepared-${Date.now()}-${prepared.length}`,
       shippingFee,
+      recipientShippingCharge,
+      customFinancialSnapshot,
       incompleteFields,
     };
   }
 
   function resetCurrent() {
-    setDraft(makeShipmentEntryDraft(senderProfile.shippingPayer));
+    setDraft(makeShipmentEntryDraft(policySettings.defaultShippingPayer));
     setError("");
   }
 
@@ -15684,7 +16423,8 @@ function AddShipmentScreen({
       const area = governorate?.areas.find((record) => record.id === item.areaId);
       const incomplete = item.incompleteFields.length > 0;
       const beforeWarehouse =
-        incomplete && settings.incompleteRoute === "complete_before_warehouse";
+        incomplete &&
+        policySettings.incompleteRoute === "complete_before_warehouse";
       const confirmationText: Localized =
         item.confirmation === "confirmed"
           ? { ar: "تم التأكيد", en: "Confirmed" }
@@ -15739,7 +16479,10 @@ function AddShipmentScreen({
         confirmationHistory: [],
         pieces: Math.max(1, Number(item.pieces) || 1),
         shippingFee: item.shippingFee,
+        recipientShippingCharge: item.recipientShippingCharge,
         shippingPayer: item.shippingPayer,
+        customValues: item.customValues,
+        customFinancialSnapshot: item.customFinancialSnapshot,
         address: {
           ar: item.address || "غير مكتمل",
           en: item.address || "Incomplete",
@@ -15898,7 +16641,7 @@ function AddShipmentScreen({
             <div className="entry-payer-source">
               <small>{lang === "ar" ? "الافتراضي" : "Default payer"}</small>
               <strong>
-                {senderProfile.shippingPayer === "recipient"
+                {policySettings.defaultShippingPayer === "recipient"
                   ? lang === "ar"
                     ? "الشحن على المستلم"
                     : "Recipient pays shipping"
@@ -15956,7 +16699,7 @@ function AddShipmentScreen({
                             placeholder="0100 000 0000"
                           />
                         </span>
-                        {settings.phoneLookupEnabled && (
+                        {policySettings.phoneLookupEnabled && (
                           <small>
                             {lang === "ar"
                               ? "ابحث بالهاتف لاستدعاء بيانات المستلم"
@@ -16262,7 +17005,7 @@ function AddShipmentScreen({
                     )}
                     <div className="entry-shipping-fee">
                       <span>
-                        <small>{lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}</small>
+                        <small>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</small>
                         <strong>{money.format(shippingFee)}</strong>
                       </span>
                       <small>
@@ -16275,6 +17018,56 @@ function AddShipmentScreen({
                             : "Shown after area selection"}
                       </small>
                     </div>
+                    {fieldVisible("RECIPIENT_SHIPPING_CHARGE") && (
+                      <label className="entry-field entry-price-input">
+                        <span>
+                          {fieldLabel("RECIPIENT_SHIPPING_CHARGE", {
+                            ar: "الشحن المحصل من المستلم",
+                            en: "Recipient shipping charge",
+                          })}
+                        </span>
+                        <span className="entry-input">
+                          <input
+                            type="number"
+                            min="0"
+                            value={
+                              policySettings.shippingChargeMode === "manual"
+                                ? draft.recipientShippingChargeInput
+                                : String(recipientShippingCharge)
+                            }
+                            disabled={
+                              policySettings.shippingChargeMode !== "manual" ||
+                              draft.shippingPayer === "sender"
+                            }
+                            onChange={(event) =>
+                              updateDraft(
+                                "recipientShippingChargeInput",
+                                event.target.value,
+                              )
+                            }
+                            placeholder="0"
+                          />
+                          <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                        </span>
+                        <small>
+                          {policySettings.shippingChargeMode === "company_price"
+                            ? lang === "ar"
+                              ? "يساوي سعر شحن الشركة"
+                              : "Matches the company shipping fee"
+                            : policySettings.shippingChargeMode === "company_plus"
+                              ? lang === "ar"
+                                ? `سعر الشركة + ${money.format(policySettings.shippingChargeValue)}`
+                                : `Company fee + ${money.format(policySettings.shippingChargeValue)}`
+                              : policySettings.shippingChargeMode === "fixed"
+                                ? lang === "ar"
+                                  ? "مبلغ ثابت من سياسة الراسل"
+                                  : "Fixed by sender policy"
+                                : lang === "ar"
+                                  ? "يُكتب لهذه الشحنة"
+                                  : "Entered for this shipment"}
+                        </small>
+                      </label>
+                    )}
                     <div className="entry-payer-control">
                       <span>
                         {fieldLabel("SHIPPING_PAYER", {
@@ -16282,7 +17075,7 @@ function AddShipmentScreen({
                           en: "Shipping payer",
                         })}
                       </span>
-                      {settings.shippingPayerOverride ? (
+                      {policySettings.shippingPayerOverride ? (
                         <div>
                           <button
                             type="button"
@@ -16321,12 +17114,8 @@ function AddShipmentScreen({
                     </span>
                     <i>+</i>
                     <span>
-                      <small>{lang === "ar" ? "شحن على المستلم" : "Recipient shipping"}</small>
-                      <strong>
-                        {money.format(
-                          draft.shippingPayer === "recipient" ? shippingFee : 0,
-                        )}
-                      </strong>
+                      <small>{lang === "ar" ? "الشحن المحصل" : "Recipient shipping"}</small>
+                      <strong>{money.format(recipientShippingCharge)}</strong>
                     </span>
                     <i>=</i>
                     <span className="entry-money-summary__total">
@@ -16334,13 +17123,33 @@ function AddShipmentScreen({
                       <strong>{money.format(totalDue)}</strong>
                     </span>
                     <span>
+                      <small>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</small>
+                      <strong>{money.format(shippingFee)}</strong>
+                    </span>
+                    <span>
+                      <small>{lang === "ar" ? "فرق الشحن للراسل" : "Sender shipping difference"}</small>
+                      <strong>{money.format(senderShippingDifference)}</strong>
+                    </span>
+                    {customFinancialSnapshot.recipientAdditions > 0 && (
+                      <span>
+                        <small>{lang === "ar" ? "إضافات على المستلم" : "Recipient additions"}</small>
+                        <strong>{money.format(customFinancialSnapshot.recipientAdditions)}</strong>
+                      </span>
+                    )}
+                    {customFinancialSnapshot.senderDeductions > 0 && (
+                      <span>
+                        <small>{lang === "ar" ? "خصومات من الراسل" : "Sender deductions"}</small>
+                        <strong>{money.format(customFinancialSnapshot.senderDeductions)}</strong>
+                      </span>
+                    )}
+                    <span>
                       <small>{lang === "ar" ? "مستحق الراسل" : "Sender due"}</small>
                       <strong>{money.format(senderDue)}</strong>
                     </span>
                   </div>
                 </div>
 
-                {settings.confirmationMode !== "off" && (
+                {policySettings.confirmationMode !== "off" && (
                   <div className="entry-section entry-confirmation">
                     <div className="entry-section-title">
                       <ClipboardCheck size={18} />
@@ -16349,7 +17158,7 @@ function AddShipmentScreen({
                           {lang === "ar" ? "تأكيد الطلب" : "Order confirmation"}
                         </strong>
                         <small>
-                          {settings.confirmationMode === "required_before_assignment"
+                          {policySettings.confirmationMode === "required_before_assignment"
                             ? lang === "ar"
                               ? "مطلوب قبل الإسناد"
                               : "Required before assignment"
@@ -16397,18 +17206,63 @@ function AddShipmentScreen({
                               <em className="entry-required">*</em>
                             )}
                           </span>
-                          <input
-                            value={draft.customValues[field.id] ?? ""}
-                            onChange={(event) =>
-                              setDraft((current) => ({
-                                ...current,
-                                customValues: {
-                                  ...current.customValues,
-                                  [field.id]: event.target.value,
-                                },
-                              }))
-                            }
-                          />
+                          {field.dataType === "long_text" ? (
+                            <textarea
+                              value={draft.customValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  customValues: {
+                                    ...current.customValues,
+                                    [field.id]: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                          ) : field.dataType === "boolean" ? (
+                            <input
+                              type="checkbox"
+                              checked={draft.customValues[field.id] === "true"}
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  customValues: {
+                                    ...current.customValues,
+                                    [field.id]: event.target.checked ? "true" : "",
+                                  },
+                                }))
+                              }
+                            />
+                          ) : (
+                            <input
+                              type={
+                                field.dataType === "date"
+                                  ? "date"
+                                  : field.dataType === "number" ||
+                                      field.dataType === "money"
+                                    ? "number"
+                                    : field.dataType === "phone"
+                                      ? "tel"
+                                      : "text"
+                              }
+                              min={
+                                field.dataType === "number" ||
+                                field.dataType === "money"
+                                  ? "0"
+                                  : undefined
+                              }
+                              value={draft.customValues[field.id] ?? ""}
+                              onChange={(event) =>
+                                setDraft((current) => ({
+                                  ...current,
+                                  customValues: {
+                                    ...current.customValues,
+                                    [field.id]: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                          )}
                         </label>
                       ))}
                     </div>
@@ -16500,9 +17354,8 @@ function AddShipmentScreen({
                             <strong>
                               {money.format(
                                 Number(item.shipmentPrice) +
-                                  (item.shippingPayer === "recipient"
-                                    ? item.shippingFee
-                                    : 0),
+                                  item.recipientShippingCharge +
+                                  item.customFinancialSnapshot.recipientAdditions,
                               )}
                             </strong>
                             {item.incompleteFields.length > 0 && (
@@ -16550,9 +17403,8 @@ function AddShipmentScreen({
                           (sum, item) =>
                             sum +
                             Number(item.shipmentPrice) +
-                            (item.shippingPayer === "recipient"
-                              ? item.shippingFee
-                              : 0),
+                            item.recipientShippingCharge +
+                            item.customFinancialSnapshot.recipientAdditions,
                           0,
                         ),
                       )}
@@ -17108,24 +17960,25 @@ function ShipmentsScreen({
                                   </span>
                                   <span className="financial-cell__line">
                                     <small>
-                                      {t.shippingPrice}
+                                      {lang === "ar" ? "سعر شحن الشركة" : "Company shipping"}
                                       <em>
                                         {shipment.shippingPayer === "recipient"
                                           ? t.payerRecipient
                                           : t.payerSender}
                                       </em>
                                     </small>
-                                    <strong>{money.format(shipment.shippingFee)}</strong>
+                                    <strong>{money.format(shipmentCompanyShippingFee(shipment))}</strong>
+                                  </span>
+                                  <span className="financial-cell__line">
+                                    <small>
+                                      {lang === "ar" ? "الشحن المحصل" : "Recipient shipping"}
+                                    </small>
+                                    <strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong>
                                   </span>
                                   <span className="financial-cell__line financial-cell__line--total">
                                     <small>{t.totalDue}</small>
                                     <strong>
-                                      {money.format(
-                                        shipment.amount +
-                                          (shipment.shippingPayer === "recipient"
-                                            ? shipment.shippingFee
-                                            : 0),
-                                      )}
+                                      {money.format(shipmentTotalToCollect(shipment))}
                                     </strong>
                                   </span>
                                 </span>
@@ -17176,12 +18029,7 @@ function ShipmentsScreen({
                               <small dir="ltr">{shipment.phone}</small>
                             </span>
                             <strong className="money">
-                              {money.format(
-                                shipment.amount +
-                                  (shipment.shippingPayer === "recipient"
-                                    ? shipment.shippingFee
-                                    : 0),
-                              )}
+                              {money.format(shipmentTotalToCollect(shipment))}
                             </strong>
                           </div>
                           <div className="shipment-mobile-card__facts">
@@ -17266,6 +18114,9 @@ export default function Home() {
   const [sharedShipmentSettings, setSharedShipmentSettings] = useState(
     shipmentDataSettingsDefault,
   );
+  const [sharedSenderPolicies, setSharedSenderPolicies] = useState<
+    SenderShipmentPolicy[]
+  >([]);
   const [sharedShipments, setSharedShipments] = useState(shipments);
   const [sharedCourierDebts, setSharedCourierDebts] =
     useState(courierDebtsData);
@@ -17302,6 +18153,7 @@ export default function Home() {
           courierPlans?: CourierRatePlan[];
           shipmentFields?: ShipmentFieldPolicy[];
           shipmentSettings?: ShipmentDataSettings;
+          senderShipmentPolicies?: SenderShipmentPolicy[];
           shipments?: Shipment[];
           courierDebts?: CourierDebt[];
           courierSettlements?: CourierSettlement[];
@@ -17328,10 +18180,34 @@ export default function Home() {
           setSharedCourierPlans(parsed.courierPlans);
         }
         if (Array.isArray(parsed.shipmentFields)) {
-          setSharedShipmentFields(parsed.shipmentFields);
+          const normalizedSavedFields =
+            parsed.shipmentFields.map(normalizeShipmentField);
+          const missingCoreFields = shipmentFieldPoliciesData.filter(
+            (field) =>
+              !normalizedSavedFields.some(
+                (savedField) => savedField.code === field.code,
+              ),
+          );
+          setSharedShipmentFields([
+            ...normalizedSavedFields,
+            ...missingCoreFields,
+          ]);
         }
         if (parsed.shipmentSettings) {
-          setSharedShipmentSettings(parsed.shipmentSettings);
+          setSharedShipmentSettings(
+            normalizeShipmentDataSettings(parsed.shipmentSettings),
+          );
+        }
+        if (Array.isArray(parsed.senderShipmentPolicies)) {
+          setSharedSenderPolicies(
+            parsed.senderShipmentPolicies.map((policy) => ({
+              ...policy,
+              fields: (policy.fields ?? shipmentFieldPoliciesData).map(
+                normalizeShipmentField,
+              ),
+              settings: normalizeShipmentDataSettings(policy.settings),
+            })),
+          );
         }
         if (Array.isArray(parsed.courierDebts)) {
           setSharedCourierDebts(parsed.courierDebts);
@@ -17369,6 +18245,11 @@ export default function Home() {
                 !(shipment.statusHistory?.length);
               return {
                 ...shipment,
+                recipientShippingCharge:
+                  shipment.recipientShippingCharge ??
+                  (shipment.shippingPayer === "recipient"
+                    ? shipment.shippingFee
+                    : 0),
                 ...(shipment.custodyType === "courier" &&
                 shipment.custody.en === "Delivered to recipient"
                   ? {
@@ -17582,6 +18463,7 @@ export default function Home() {
         courierPlans: sharedCourierPlans,
         shipmentFields: sharedShipmentFields,
         shipmentSettings: sharedShipmentSettings,
+        senderShipmentPolicies: sharedSenderPolicies,
         shipments: sharedShipments,
         courierDebts: sharedCourierDebts,
         courierSettlements: sharedCourierSettlements,
@@ -17604,6 +18486,7 @@ export default function Home() {
     sharedTreasuryMovements,
     sharedShipmentFields,
     sharedShipmentSettings,
+    sharedSenderPolicies,
     sharedShipments,
     sharedStatuses,
   ]);
@@ -17756,6 +18639,7 @@ export default function Home() {
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
           settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
@@ -17770,6 +18654,7 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
@@ -17784,6 +18669,7 @@ export default function Home() {
           theme={theme}
           fields={sharedShipmentFields}
           settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           governorates={sharedGovernorates}
           statuses={sharedStatuses}
           priceLists={sharedPriceLists}
@@ -17861,13 +18747,15 @@ export default function Home() {
           theme={theme}
           fields={sharedShipmentFields}
           settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
-          onSave={(nextFields, nextSettings) => {
+          onSave={(nextFields, nextSettings, nextSenderPolicies) => {
             setSharedShipmentFields(nextFields);
             setSharedShipmentSettings(nextSettings);
+            setSharedSenderPolicies(nextSenderPolicies);
           }}
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
