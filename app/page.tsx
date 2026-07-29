@@ -12,6 +12,7 @@ import {
   Banknote,
   Bell,
   Boxes,
+  Calculator,
   CalendarDays,
   Check,
   ChevronDown,
@@ -2670,6 +2671,8 @@ type ShippingChargeMode =
 
 type ShipmentDataSettings = {
   confirmationMode: "off" | "optional" | "required_before_assignment";
+  confirmationAttempts: number;
+  allowAssignmentWithoutConfirmation: boolean;
   incompleteRoute: "warehouse_and_queue" | "complete_before_warehouse";
   trustsEnabled: boolean;
   shippingPayerOverride: boolean;
@@ -2677,6 +2680,17 @@ type ShipmentDataSettings = {
   defaultShippingPayer: "recipient" | "sender";
   shippingChargeMode: ShippingChargeMode;
   shippingChargeValue: number;
+  recipientPriceDisplay: "total_only" | "separate_shipping";
+  manualEntryEnabled: boolean;
+  batchEntryEnabled: boolean;
+  excelImportEnabled: boolean;
+  duplicateCheckMode: "block" | "warn" | "off";
+  senderReferenceMode: "required_unique" | "optional_unique" | "optional";
+  packageInspection: "not_allowed" | "allowed" | "sender_approval";
+  partialDeliveryEnabled: boolean;
+  deliveryProof: "recipient_name" | "signature" | "photo" | "otp";
+  labelDetailMode: "full" | "masked" | "minimal";
+  collectionWarningLimit: number;
 };
 
 type SenderShipmentPolicy = {
@@ -2688,6 +2702,8 @@ type SenderShipmentPolicy = {
   updatedAt?: Localized;
   updatedBy?: Localized;
   history?: SenderPolicyHistoryEntry[];
+  overrideKeys?: (keyof ShipmentDataSettings)[];
+  fieldOverrideCodes?: string[];
 };
 
 type SenderPolicyHistoryEntry = {
@@ -2697,6 +2713,8 @@ type SenderPolicyHistoryEntry = {
   updatedBy: Localized;
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
+  overrideKeys?: (keyof ShipmentDataSettings)[];
+  fieldOverrideCodes?: string[];
 };
 
 function normalizeShipmentField(field: ShipmentFieldPolicy): ShipmentFieldPolicy {
@@ -2963,6 +2981,8 @@ const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
 
 const shipmentDataSettingsDefault: ShipmentDataSettings = {
   confirmationMode: "optional",
+  confirmationAttempts: 2,
+  allowAssignmentWithoutConfirmation: true,
   incompleteRoute: "warehouse_and_queue",
   trustsEnabled: false,
   shippingPayerOverride: true,
@@ -2970,7 +2990,141 @@ const shipmentDataSettingsDefault: ShipmentDataSettings = {
   defaultShippingPayer: "recipient",
   shippingChargeMode: "company_price",
   shippingChargeValue: 0,
+  recipientPriceDisplay: "separate_shipping",
+  manualEntryEnabled: true,
+  batchEntryEnabled: true,
+  excelImportEnabled: true,
+  duplicateCheckMode: "warn",
+  senderReferenceMode: "optional_unique",
+  packageInspection: "not_allowed",
+  partialDeliveryEnabled: true,
+  deliveryProof: "recipient_name",
+  labelDetailMode: "masked",
+  collectionWarningLimit: 10000,
 };
+
+function demoSenderPolicyFields(
+  changes: Record<string, Partial<ShipmentFieldPolicy>>,
+) {
+  return shipmentFieldPoliciesData.map((field) =>
+    changes[field.code]
+      ? normalizeShipmentField({ ...field, ...changes[field.code] })
+      : normalizeShipmentField(field),
+  );
+}
+
+const senderShipmentPoliciesDemoData: SenderShipmentPolicy[] = [
+  {
+    sender: availableSenders[0],
+    state: "published",
+    version: 4,
+    updatedAt: { ar: "اليوم، 11:20 ص", en: "Today, 11:20 AM" },
+    updatedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    overrideKeys: [
+      "confirmationMode",
+      "confirmationAttempts",
+      "allowAssignmentWithoutConfirmation",
+      "shippingChargeMode",
+      "shippingChargeValue",
+      "recipientPriceDisplay",
+      "deliveryProof",
+    ],
+    fieldOverrideCodes: ["SENDER_REFERENCE", "DELIVERY_ADDRESS"],
+    fields: demoSenderPolicyFields({
+      SENDER_REFERENCE: { mode: "required_on_create" },
+      DELIVERY_ADDRESS: { mode: "required_on_create" },
+    }),
+    settings: normalizeShipmentDataSettings({
+      confirmationMode: "required_before_assignment",
+      confirmationAttempts: 3,
+      allowAssignmentWithoutConfirmation: false,
+      shippingChargeMode: "company_plus",
+      shippingChargeValue: 30,
+      recipientPriceDisplay: "separate_shipping",
+      deliveryProof: "signature",
+    }),
+    history: [],
+  },
+  {
+    sender: availableSenders[2],
+    state: "published",
+    version: 2,
+    updatedAt: { ar: "أمس، 4:45 م", en: "Yesterday, 4:45 PM" },
+    updatedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    overrideKeys: [
+      "defaultShippingPayer",
+      "shippingPayerOverride",
+      "recipientPriceDisplay",
+      "packageInspection",
+      "partialDeliveryEnabled",
+      "labelDetailMode",
+    ],
+    fieldOverrideCodes: ["SENDER_REFERENCE"],
+    fields: demoSenderPolicyFields({
+      SENDER_REFERENCE: { mode: "optional" },
+    }),
+    settings: normalizeShipmentDataSettings({
+      defaultShippingPayer: "sender",
+      shippingPayerOverride: false,
+      recipientPriceDisplay: "total_only",
+      packageInspection: "allowed",
+      partialDeliveryEnabled: false,
+      labelDetailMode: "minimal",
+    }),
+    history: [],
+  },
+  {
+    sender: availableSenders[3],
+    state: "draft",
+    version: 1,
+    updatedAt: { ar: "اليوم، 9:10 ص", en: "Today, 9:10 AM" },
+    updatedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    overrideKeys: [
+      "confirmationMode",
+      "confirmationAttempts",
+      "excelImportEnabled",
+      "duplicateCheckMode",
+      "senderReferenceMode",
+      "deliveryProof",
+      "collectionWarningLimit",
+    ],
+    fieldOverrideCodes: ["SENDER_REFERENCE", "RECIPIENT_PHONE"],
+    fields: demoSenderPolicyFields({
+      SENDER_REFERENCE: { mode: "required_on_create" },
+      RECIPIENT_PHONE: { mode: "required_on_create" },
+    }),
+    settings: normalizeShipmentDataSettings({
+      confirmationMode: "required_before_assignment",
+      confirmationAttempts: 3,
+      excelImportEnabled: false,
+      duplicateCheckMode: "block",
+      senderReferenceMode: "required_unique",
+      deliveryProof: "photo",
+      collectionWarningLimit: 7000,
+    }),
+    history: [],
+  },
+  {
+    sender: availableSenders[4],
+    state: "published",
+    version: 3,
+    updatedAt: { ar: "28 يوليو، 6:30 م", en: "28 Jul, 6:30 PM" },
+    updatedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    overrideKeys: [
+      "recipientPriceDisplay",
+      "packageInspection",
+      "collectionWarningLimit",
+    ],
+    fieldOverrideCodes: [],
+    fields: demoSenderPolicyFields({}),
+    settings: normalizeShipmentDataSettings({
+      recipientPriceDisplay: "total_only",
+      packageInspection: "sender_approval",
+      collectionWarningLimit: 5000,
+    }),
+    history: [],
+  },
+];
 
 function normalizeShipmentDataSettings(
   settings?: Partial<ShipmentDataSettings>,
@@ -3001,14 +3155,62 @@ function findEffectiveSenderShipmentPolicy(
     : undefined;
 }
 
+function resolveSenderPolicySettings(
+  sender: Localized,
+  companySettings: ShipmentDataSettings,
+  senderPolicies: SenderShipmentPolicy[],
+) {
+  const base = normalizeShipmentDataSettings(companySettings);
+  const policy = findEffectiveSenderShipmentPolicy(sender, senderPolicies);
+  if (!policy) return base;
+  const policySettings = normalizeShipmentDataSettings(policy.settings);
+  if (!policy.overrideKeys) return policySettings;
+  const resolved = { ...base };
+  policy.overrideKeys.forEach((key) => {
+    if (key === "trustsEnabled") return;
+    (resolved[key] as ShipmentDataSettings[typeof key]) =
+      policySettings[key];
+  });
+  return resolved;
+}
+
+function resolveSenderPolicyFields(
+  sender: Localized,
+  companyFields: ShipmentFieldPolicy[],
+  senderPolicies: SenderShipmentPolicy[],
+) {
+  const base = companyFields.map(normalizeShipmentField);
+  const policy = findEffectiveSenderShipmentPolicy(sender, senderPolicies);
+  if (!policy) return base;
+  const policyFields = policy.fields.map(normalizeShipmentField);
+  if (!policy.fieldOverrideCodes) return policyFields;
+  const policyByCode = new Map(
+    policyFields.map((field) => [field.code, field]),
+  );
+  const merged = base.map((field) =>
+    policy.fieldOverrideCodes?.includes(field.code)
+      ? policyByCode.get(field.code) ?? field
+      : field,
+  );
+  policyFields
+    .filter(
+      (field) =>
+        field.custom &&
+        !merged.some((mergedField) => mergedField.code === field.code),
+    )
+    .forEach((field) => merged.push(field));
+  return merged;
+}
+
 function resolveShipmentDataSettings(
   shipment: Shipment,
   companySettings: ShipmentDataSettings,
   senderPolicies: SenderShipmentPolicy[],
 ) {
-  return normalizeShipmentDataSettings(
-    findEffectiveSenderShipmentPolicy(shipment.sender, senderPolicies)?.settings ??
-      companySettings,
+  return resolveSenderPolicySettings(
+    shipment.sender,
+    companySettings,
+    senderPolicies,
   );
 }
 
@@ -5711,6 +5913,22 @@ function SenderEditor({
   const [policySettings, setPolicySettings] = useState(
     normalizeShipmentDataSettings(senderPolicy?.settings ?? companySettings),
   );
+  const allSenderSettingKeys = (
+    Object.keys(shipmentDataSettingsDefault) as (keyof ShipmentDataSettings)[]
+  ).filter((key) => key !== "trustsEnabled");
+  const [overrideKeys, setOverrideKeys] = useState<
+    (keyof ShipmentDataSettings)[]
+  >(
+    senderPolicy
+      ? senderPolicy.overrideKeys ?? allSenderSettingKeys
+      : [],
+  );
+  const [fieldOverrideCodes, setFieldOverrideCodes] = useState<string[]>(
+    senderPolicy
+      ? senderPolicy.fieldOverrideCodes ??
+          senderPolicy.fields.map((field) => field.code)
+      : [],
+  );
   const [policySearch, setPolicySearch] = useState("");
   const [editingPolicyField, setEditingPolicyField] =
     useState<ShipmentFieldPolicy | null>(null);
@@ -5730,6 +5948,8 @@ function SenderEditor({
             updatedAt: senderPolicy?.updatedAt,
             updatedBy: senderPolicy?.updatedBy,
             history: senderPolicy?.history ?? [],
+            overrideKeys,
+            fieldOverrideCodes,
           }
         : null,
     );
@@ -5758,6 +5978,8 @@ function SenderEditor({
         })),
       );
       setPolicySettings(normalizeShipmentDataSettings(companySettings));
+      setOverrideKeys([]);
+      setFieldOverrideCodes([]);
     }
     setPolicyMode(mode);
   }
@@ -5767,12 +5989,34 @@ function SenderEditor({
     value: ShipmentDataSettings[K],
   ) {
     setPolicySettings((current) => ({ ...current, [key]: value }));
+    setOverrideKeys((current) =>
+      current.includes(key) ? current : [...current, key],
+    );
+  }
+
+  function toggleSenderSettingSource(key: keyof ShipmentDataSettings) {
+    setOverrideKeys((current) => {
+      if (current.includes(key)) {
+        setPolicySettings((settingsCurrent) => ({
+          ...settingsCurrent,
+          [key]: companySettings[key],
+        }));
+        return current.filter((item) => item !== key);
+      }
+      return [...current, key];
+    });
   }
 
   function setSenderFieldMode(id: string, mode: ShipmentFieldMode) {
     setPolicyFields((current) =>
       current.map((field) => (field.id === id ? { ...field, mode } : field)),
     );
+    const code = policyFields.find((field) => field.id === id)?.code;
+    if (code) {
+      setFieldOverrideCodes((current) =>
+        current.includes(code) ? current : [...current, code],
+      );
+    }
   }
 
   function toggleSenderFieldExcel(id: string) {
@@ -5781,6 +6025,36 @@ function SenderEditor({
         field.id === id ? { ...field, inExcel: !field.inExcel } : field,
       ),
     );
+    const code = policyFields.find((field) => field.id === id)?.code;
+    if (code) {
+      setFieldOverrideCodes((current) =>
+        current.includes(code) ? current : [...current, code],
+      );
+    }
+  }
+
+  function toggleSenderFieldSource(code: string) {
+    const field = policyFields.find((item) => item.code === code);
+    if (field?.custom) return;
+    setFieldOverrideCodes((current) => {
+      if (!current.includes(code)) return [...current, code];
+      const companyField = companyFields.find((item) => item.code === code);
+      if (companyField) {
+        setPolicyFields((fieldsCurrent) =>
+          fieldsCurrent.map((item) =>
+            item.code === code
+              ? {
+                  ...normalizeShipmentField(companyField),
+                  name: { ...companyField.name },
+                  description: { ...companyField.description },
+                  placements: [...(companyField.placements ?? [])],
+                }
+              : item,
+          ),
+        );
+      }
+      return current.filter((item) => item !== code);
+    });
   }
 
   function saveSenderPolicyField(field: ShipmentFieldPolicy) {
@@ -5788,6 +6062,9 @@ function SenderEditor({
       current.some((item) => item.id === field.id)
         ? current.map((item) => (item.id === field.id ? field : item))
         : [...current, field],
+    );
+    setFieldOverrideCodes((current) =>
+      current.includes(field.code) ? current : [...current, field.code],
     );
     setEditingPolicyField(null);
     setIsNewPolicyField(false);
@@ -5808,6 +6085,12 @@ function SenderEditor({
       })),
     );
     setPolicySettings(normalizeShipmentDataSettings(source.settings));
+    setOverrideKeys(
+      source.overrideKeys ?? allSenderSettingKeys,
+    );
+    setFieldOverrideCodes(
+      source.fieldOverrideCodes ?? source.fields.map((field) => field.code),
+    );
     setPolicyState("draft");
     setPolicyMode("custom");
   }
@@ -5822,8 +6105,35 @@ function SenderEditor({
       })),
     );
     setPolicySettings(normalizeShipmentDataSettings(entry.settings));
+    setOverrideKeys(entry.overrideKeys ?? allSenderSettingKeys);
+    setFieldOverrideCodes(
+      entry.fieldOverrideCodes ?? entry.fields.map((field) => field.code),
+    );
     setPolicyState("draft");
     setPolicyMode("custom");
+  }
+
+  function settingSourceButton(key: keyof ShipmentDataSettings) {
+    const overridden = overrideKeys.includes(key);
+    return (
+      <button
+        className={
+          overridden
+            ? "policy-setting-source policy-setting-source--custom"
+            : "policy-setting-source"
+        }
+        type="button"
+        onClick={() => toggleSenderSettingSource(key)}
+      >
+        {overridden
+          ? lang === "ar"
+            ? "مخصص"
+            : "Custom"
+          : lang === "ar"
+            ? "من الشركة"
+            : "Company"}
+      </button>
+    );
   }
 
   return (
@@ -6445,7 +6755,10 @@ function SenderEditor({
                       </div>
                       <div className="sender-policy-settings-grid">
                         <label className="select-field">
-                          <span>{lang === "ar" ? "تأكيد الطلب مع المستلم" : "Recipient confirmation"}</span>
+                          <span className="policy-setting-label">
+                            {lang === "ar" ? "تأكيد الطلب مع المستلم" : "Recipient confirmation"}
+                            {settingSourceButton("confirmationMode")}
+                          </span>
                           <span className="select-wrap">
                             <select
                               value={policySettings.confirmationMode}
@@ -6466,7 +6779,10 @@ function SenderEditor({
                           </span>
                         </label>
                         <label className="select-field">
-                          <span>{lang === "ar" ? "مسار البيانات الناقصة" : "Incomplete-data route"}</span>
+                          <span className="policy-setting-label">
+                            {lang === "ar" ? "مسار البيانات الناقصة" : "Incomplete-data route"}
+                            {settingSourceButton("incompleteRoute")}
+                          </span>
                           <span className="select-wrap">
                             <select
                               value={policySettings.incompleteRoute}
@@ -6488,7 +6804,10 @@ function SenderEditor({
                           </span>
                         </label>
                         <label className="select-field">
-                          <span>{lang === "ar" ? "متحمل الشحن الافتراضي" : "Default shipping payer"}</span>
+                          <span className="policy-setting-label">
+                            {lang === "ar" ? "متحمل الشحن الافتراضي" : "Default shipping payer"}
+                            {settingSourceButton("defaultShippingPayer")}
+                          </span>
                           <span className="select-wrap">
                             <select
                               value={policySettings.defaultShippingPayer}
@@ -6506,7 +6825,10 @@ function SenderEditor({
                           </span>
                         </label>
                         <label className="select-field">
-                          <span>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</span>
+                          <span className="policy-setting-label">
+                            {lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}
+                            {settingSourceButton("shippingChargeMode")}
+                          </span>
                           <span className="select-wrap">
                             <select
                               value={policySettings.shippingChargeMode}
@@ -6528,7 +6850,10 @@ function SenderEditor({
                         {(policySettings.shippingChargeMode === "company_plus" ||
                           policySettings.shippingChargeMode === "fixed") && (
                           <label className="field">
-                            <span>{lang === "ar" ? "قيمة الشحن أو الزيادة" : "Charge or markup value"}</span>
+                            <span className="policy-setting-label">
+                              {lang === "ar" ? "قيمة الشحن أو الزيادة" : "Charge or markup value"}
+                              {settingSourceButton("shippingChargeValue")}
+                            </span>
                             <span className="field__control">
                               <input
                                 type="number"
@@ -6580,6 +6905,318 @@ function SenderEditor({
                           </span>
                           <i className={policySettings.shippingPayerOverride ? "switch switch--on" : "switch"}><b /></i>
                         </button>
+                      </div>
+                    </section>
+
+                    <section className="policy-form-section sender-advanced-policy">
+                      <div className="policy-form-section__title">
+                        <span><SlidersHorizontal size={16} /></span>
+                        <div>
+                          <strong>
+                            {lang === "ar"
+                              ? "السياسات المتقدمة لهذا الراسل"
+                              : "Advanced sender policies"}
+                          </strong>
+                          <small>
+                            {lang === "ar"
+                              ? "كل بند يوضح هل مصدره الشركة أم تخصيص الراسل."
+                              : "Every item shows whether it comes from the company or this sender."}
+                          </small>
+                        </div>
+                      </div>
+                      <div className="sender-advanced-policy__grid">
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "قنوات إضافة الشحنات" : "Shipment entry channels"}</strong>
+                            <span>
+                              {settingSourceButton("manualEntryEnabled")}
+                              {settingSourceButton("batchEntryEnabled")}
+                              {settingSourceButton("excelImportEnabled")}
+                            </span>
+                          </div>
+                          <div className="policy-channel-toggles">
+                            {[
+                              ["manualEntryEnabled", lang === "ar" ? "يدوي" : "Manual"],
+                              ["batchEntryEnabled", lang === "ar" ? "جماعي" : "Batch"],
+                              ["excelImportEnabled", "Excel"],
+                            ].map(([key, label]) => (
+                              <button
+                                className={
+                                  policySettings[
+                                    key as keyof ShipmentDataSettings
+                                  ]
+                                    ? "active"
+                                    : ""
+                                }
+                                type="button"
+                                key={key}
+                                onClick={() =>
+                                  updateSenderPolicySetting(
+                                    key as
+                                      | "manualEntryEnabled"
+                                      | "batchEntryEnabled"
+                                      | "excelImportEnabled",
+                                    !policySettings[
+                                      key as
+                                        | "manualEntryEnabled"
+                                        | "batchEntryEnabled"
+                                        | "excelImportEnabled"
+                                    ],
+                                  )
+                                }
+                              >
+                                {policySettings[
+                                  key as
+                                    | "manualEntryEnabled"
+                                    | "batchEntryEnabled"
+                                    | "excelImportEnabled"
+                                ] && <Check size={13} />}
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "كشف التكرار" : "Duplicate detection"}</strong>
+                            {settingSourceButton("duplicateCheckMode")}
+                          </div>
+                          <label className="select-wrap">
+                            <select
+                              value={policySettings.duplicateCheckMode}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "duplicateCheckMode",
+                                  event.target.value as ShipmentDataSettings["duplicateCheckMode"],
+                                )
+                              }
+                            >
+                              <option value="block">{lang === "ar" ? "منع قطعي" : "Block"}</option>
+                              <option value="warn">{lang === "ar" ? "تحذير ومراجعة" : "Warn"}</option>
+                              <option value="off">{lang === "ar" ? "غير مستخدم" : "Off"}</option>
+                            </select>
+                            <ChevronDown size={14} />
+                          </label>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "مرجع الراسل" : "Sender reference"}</strong>
+                            {settingSourceButton("senderReferenceMode")}
+                          </div>
+                          <label className="select-wrap">
+                            <select
+                              value={policySettings.senderReferenceMode}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "senderReferenceMode",
+                                  event.target.value as ShipmentDataSettings["senderReferenceMode"],
+                                )
+                              }
+                            >
+                              <option value="required_unique">{lang === "ar" ? "مطلوب وفريد" : "Required & unique"}</option>
+                              <option value="optional_unique">{lang === "ar" ? "اختياري وإن وُجد يكون فريدًا" : "Optional & unique"}</option>
+                              <option value="optional">{lang === "ar" ? "اختياري" : "Optional"}</option>
+                            </select>
+                            <ChevronDown size={14} />
+                          </label>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "محاولات التأكيد" : "Confirmation attempts"}</strong>
+                            {settingSourceButton("confirmationAttempts")}
+                          </div>
+                          <label className="policy-number-control">
+                            <input
+                              type="number"
+                              min="1"
+                              max="10"
+                              value={policySettings.confirmationAttempts}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "confirmationAttempts",
+                                  Math.max(1, Math.min(10, Number(event.target.value) || 1)),
+                                )
+                              }
+                            />
+                            <span>{lang === "ar" ? "محاولة" : "attempts"}</span>
+                          </label>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "الإسناد دون تأكيد" : "Assignment without confirmation"}</strong>
+                            {settingSourceButton("allowAssignmentWithoutConfirmation")}
+                          </div>
+                          <button
+                            className="policy-inline-toggle"
+                            type="button"
+                            role="switch"
+                            aria-checked={policySettings.allowAssignmentWithoutConfirmation}
+                            onClick={() =>
+                              updateSenderPolicySetting(
+                                "allowAssignmentWithoutConfirmation",
+                                !policySettings.allowAssignmentWithoutConfirmation,
+                              )
+                            }
+                          >
+                            <span>
+                              {policySettings.allowAssignmentWithoutConfirmation
+                                ? lang === "ar"
+                                  ? "مسموح"
+                                  : "Allowed"
+                                : lang === "ar"
+                                  ? "غير مسموح"
+                                  : "Not allowed"}
+                            </span>
+                            <i className={policySettings.allowAssignmentWithoutConfirmation ? "switch switch--on" : "switch"}><b /></i>
+                          </button>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "عرض السعر للمستلم" : "Recipient price display"}</strong>
+                            {settingSourceButton("recipientPriceDisplay")}
+                          </div>
+                          <label className="select-wrap">
+                            <select
+                              value={policySettings.recipientPriceDisplay}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "recipientPriceDisplay",
+                                  event.target.value as ShipmentDataSettings["recipientPriceDisplay"],
+                                )
+                              }
+                            >
+                              <option value="separate_shipping">{lang === "ar" ? "قيمة الطلب والشحن منفصلان" : "Order and shipping separately"}</option>
+                              <option value="total_only">{lang === "ar" ? "الإجمالي فقط" : "Total only"}</option>
+                            </select>
+                            <ChevronDown size={14} />
+                          </label>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "فتح ومعاينة الطرد" : "Package inspection"}</strong>
+                            {settingSourceButton("packageInspection")}
+                          </div>
+                          <label className="select-wrap">
+                            <select
+                              value={policySettings.packageInspection}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "packageInspection",
+                                  event.target.value as ShipmentDataSettings["packageInspection"],
+                                )
+                              }
+                            >
+                              <option value="not_allowed">{lang === "ar" ? "غير مسموح" : "Not allowed"}</option>
+                              <option value="allowed">{lang === "ar" ? "مسموح" : "Allowed"}</option>
+                              <option value="sender_approval">{lang === "ar" ? "بموافقة الراسل" : "Sender approval"}</option>
+                            </select>
+                            <ChevronDown size={14} />
+                          </label>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "التسليم الجزئي" : "Partial delivery"}</strong>
+                            {settingSourceButton("partialDeliveryEnabled")}
+                          </div>
+                          <button
+                            className="policy-inline-toggle"
+                            type="button"
+                            role="switch"
+                            aria-checked={policySettings.partialDeliveryEnabled}
+                            onClick={() =>
+                              updateSenderPolicySetting(
+                                "partialDeliveryEnabled",
+                                !policySettings.partialDeliveryEnabled,
+                              )
+                            }
+                          >
+                            <span>
+                              {policySettings.partialDeliveryEnabled
+                                ? lang === "ar"
+                                  ? "مسموح"
+                                  : "Allowed"
+                                : lang === "ar"
+                                  ? "غير مسموح"
+                                  : "Not allowed"}
+                            </span>
+                            <i className={policySettings.partialDeliveryEnabled ? "switch switch--on" : "switch"}><b /></i>
+                          </button>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "إثبات التسليم" : "Proof of delivery"}</strong>
+                            {settingSourceButton("deliveryProof")}
+                          </div>
+                          <label className="select-wrap">
+                            <select
+                              value={policySettings.deliveryProof}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "deliveryProof",
+                                  event.target.value as ShipmentDataSettings["deliveryProof"],
+                                )
+                              }
+                            >
+                              <option value="recipient_name">{lang === "ar" ? "اسم المستلم" : "Recipient name"}</option>
+                              <option value="signature">{lang === "ar" ? "توقيع" : "Signature"}</option>
+                              <option value="photo">{lang === "ar" ? "صورة" : "Photo"}</option>
+                              <option value="otp">{lang === "ar" ? "رمز OTP" : "OTP code"}</option>
+                            </select>
+                            <ChevronDown size={14} />
+                          </label>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "تفاصيل البوليصة" : "Label detail level"}</strong>
+                            {settingSourceButton("labelDetailMode")}
+                          </div>
+                          <label className="select-wrap">
+                            <select
+                              value={policySettings.labelDetailMode}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "labelDetailMode",
+                                  event.target.value as ShipmentDataSettings["labelDetailMode"],
+                                )
+                              }
+                            >
+                              <option value="full">{lang === "ar" ? "تفاصيل كاملة" : "Full details"}</option>
+                              <option value="masked">{lang === "ar" ? "بيانات حساسة محجوبة" : "Sensitive data masked"}</option>
+                              <option value="minimal">{lang === "ar" ? "الحد الأدنى" : "Minimal"}</option>
+                            </select>
+                            <ChevronDown size={14} />
+                          </label>
+                        </article>
+
+                        <article>
+                          <div className="policy-setting-label">
+                            <strong>{lang === "ar" ? "تنبيه التحصيل المرتفع" : "High collection warning"}</strong>
+                            {settingSourceButton("collectionWarningLimit")}
+                          </div>
+                          <label className="policy-number-control">
+                            <input
+                              type="number"
+                              min="0"
+                              value={policySettings.collectionWarningLimit}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "collectionWarningLimit",
+                                  Math.max(0, Number(event.target.value) || 0),
+                                )
+                              }
+                            />
+                            <span>{lang === "ar" ? "ج.م" : "EGP"}</span>
+                          </label>
+                        </article>
                       </div>
                     </section>
 
@@ -6643,6 +7280,30 @@ function SenderEditor({
                                 <strong>{field.name[lang]}</strong>
                                 <small dir="ltr">{field.code}</small>
                               </div>
+                              <button
+                                className={
+                                  fieldOverrideCodes.includes(field.code)
+                                    ? "policy-field-source policy-field-source--custom"
+                                    : "policy-field-source"
+                                }
+                                type="button"
+                                disabled={field.custom}
+                                onClick={() =>
+                                  toggleSenderFieldSource(field.code)
+                                }
+                              >
+                                {field.custom
+                                  ? lang === "ar"
+                                    ? "حقل مخصص"
+                                    : "Custom field"
+                                  : fieldOverrideCodes.includes(field.code)
+                                    ? lang === "ar"
+                                      ? "مخصص"
+                                      : "Custom"
+                                    : lang === "ar"
+                                      ? "من الشركة"
+                                      : "Company"}
+                              </button>
                               <label className="select-wrap">
                                 <select
                                   value={field.mode}
@@ -6987,6 +7648,8 @@ function SendersScreen({
             },
           fields: previousPolicy.fields.map(normalizeShipmentField),
           settings: normalizeShipmentDataSettings(previousPolicy.settings),
+          overrideKeys: previousPolicy.overrideKeys,
+          fieldOverrideCodes: previousPolicy.fieldOverrideCodes,
         });
       }
       return [
@@ -9123,6 +9786,16 @@ function CourierRatesScreen({
   const [isNew, setIsNew] = useState(false);
   const [dirtyPlans, setDirtyPlans] = useState<string[]>([]);
   const [toast, setToast] = useState("");
+  const [previewShippingFee, setPreviewShippingFee] = useState(70);
+  const [previewAreaId, setPreviewAreaId] = useState(
+    governorates[0]?.areas[0]?.id ?? "",
+  );
+  const [previewStatusId, setPreviewStatusId] = useState(
+    statuses.find(
+      (status) =>
+        status.state === "published" && status.appearsInCourierRates,
+    )?.id ?? "",
+  );
 
   const courierStatuses = statuses.filter(
     (status) =>
@@ -9299,6 +9972,24 @@ function CourierRatesScreen({
     ? planCompletion(selected)
     : { filled: 0, total: 0, percent: 0 };
   const selectedDirty = selected ? dirtyPlans.includes(selected.id) : false;
+  const previewCommission =
+    selected?.compensationType === "salary"
+      ? 0
+      : selected?.rates[previewAreaId]?.[previewStatusId] ?? null;
+  const previewCompanyShare =
+    previewCommission == null
+      ? null
+      : previewShippingFee - previewCommission;
+  const selectedCourierRecords = selected
+    ? selected.couriers
+        .map((courier) =>
+          couriers.find(
+            (record) =>
+              record.name.en === courier.en || record.name.ar === courier.ar,
+          ),
+        )
+        .filter((record): record is CourierRecord => Boolean(record))
+    : [];
 
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
@@ -9561,6 +10252,237 @@ function CourierRatesScreen({
                       </span>
                     )}
                   </div>
+
+                  <section className="courier-agreement">
+                    <div className="courier-agreement__heading">
+                      <span>
+                        <strong>
+                          {lang === "ar"
+                            ? "ملخص اتفاق المندوب"
+                            : "Courier agreement summary"}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "الخطة تحدد الاستحقاق ودورية صرفه فقط؛ استلام الشركة للتحصيل يتم في حساب المندوب."
+                            : "This plan defines entitlement and payout timing only; company collection is recorded in the courier account."}
+                        </small>
+                      </span>
+                      <em>
+                        <ShieldCheck size={13} />
+                        {lang === "ar"
+                          ? `إصدار ${selected.version}`
+                          : `Version ${selected.version}`}
+                      </em>
+                    </div>
+                    <div className="courier-agreement__facts">
+                      <article>
+                        <small>
+                          {lang === "ar" ? "مصدر الاستحقاق" : "Entitlement source"}
+                        </small>
+                        <strong>
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "مصروف راتب على الشركة"
+                              : "Company salary expense"
+                            : selected.compensationType === "mixed"
+                              ? lang === "ar"
+                                ? "راتب الشركة + عمولة من إيراد الشحن"
+                                : "Company salary + commission from shipping revenue"
+                              : lang === "ar"
+                                ? "عمولة من إيراد مصاريف الشحن"
+                                : "Commission from shipping revenue"}
+                        </strong>
+                      </article>
+                      <article>
+                        <small>
+                          {lang === "ar" ? "يثبت الاستحقاق عند" : "Due is locked when"}
+                        </small>
+                        <strong>
+                          {lang === "ar"
+                            ? "تسجيل حالة مالية للمندوب"
+                            : "A courier-financial status is recorded"}
+                        </strong>
+                      </article>
+                      <article>
+                        <small>
+                          {lang === "ar" ? "موعد الصرف" : "Payout timing"}
+                        </small>
+                        <strong>{cycleLabel(selected.settlementCycle)}</strong>
+                      </article>
+                      <article>
+                        <small>
+                          {lang === "ar" ? "سلامة التغطية" : "Rate coverage"}
+                        </small>
+                        <strong
+                          className={
+                            selectedCompletion.percent === 100 ? "is-ready" : "needs-attention"
+                          }
+                        >
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "لا تحتاج أسعار حالات"
+                              : "No status rates required"
+                            : `${selectedCompletion.percent}% · ${selectedCompletion.filled}/${selectedCompletion.total}`}
+                        </strong>
+                      </article>
+                    </div>
+
+                    {selected.compensationType !== "salary" && (
+                      <div className="courier-agreement__simulator">
+                        <div className="courier-agreement__simulator-heading">
+                          <span>
+                            <strong>
+                              {lang === "ar"
+                                ? "معاينة الاستحقاق قبل الحفظ"
+                                : "Preview entitlement before saving"}
+                            </strong>
+                            <small>
+                              {lang === "ar"
+                                ? "مثال توضيحي لا يغيّر أي حساب حقيقي."
+                                : "A preview only; it does not change real accounts."}
+                            </small>
+                          </span>
+                          <Calculator size={18} />
+                        </div>
+                        <div className="courier-agreement__controls">
+                          <label>
+                            <span>
+                              {lang === "ar"
+                                ? "مصاريف شحن الشركة"
+                                : "Company shipping fee"}
+                            </span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={previewShippingFee}
+                              onChange={(event) =>
+                                setPreviewShippingFee(
+                                  Math.max(0, Number(event.target.value) || 0),
+                                )
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>{lang === "ar" ? "المنطقة" : "Area"}</span>
+                            <span className="select-wrap">
+                              <select
+                                value={previewAreaId}
+                                onChange={(event) =>
+                                  setPreviewAreaId(event.target.value)
+                                }
+                              >
+                                {areasWithGovernorates.map(
+                                  ({ area, governorate }) => (
+                                    <option key={area.id} value={area.id}>
+                                      {area.name[lang]} · {governorate.name[lang]}
+                                    </option>
+                                  ),
+                                )}
+                              </select>
+                              <ChevronDown size={14} />
+                            </span>
+                          </label>
+                          <label>
+                            <span>{lang === "ar" ? "الحالة" : "Status"}</span>
+                            <span className="select-wrap">
+                              <select
+                                value={previewStatusId}
+                                onChange={(event) =>
+                                  setPreviewStatusId(event.target.value)
+                                }
+                              >
+                                {courierStatuses.map((status) => (
+                                  <option key={status.id} value={status.id}>
+                                    {status.name[lang]}
+                                  </option>
+                                ))}
+                              </select>
+                              <ChevronDown size={14} />
+                            </span>
+                          </label>
+                          <article>
+                            <small>
+                              {lang === "ar" ? "مستحق المندوب" : "Courier due"}
+                            </small>
+                            <strong>
+                              {previewCommission == null
+                                ? lang === "ar"
+                                  ? "غير محدد"
+                                  : "Not set"
+                                : `${previewCommission.toLocaleString(
+                                    lang === "ar" ? "ar-EG" : "en-EG",
+                                  )} ${c.priceCurrency}`}
+                            </strong>
+                          </article>
+                          <article
+                            className={
+                              previewCompanyShare != null &&
+                              previewCompanyShare < 0
+                                ? "danger"
+                                : ""
+                            }
+                          >
+                            <small>
+                              {lang === "ar"
+                                ? "المتبقي للشركة من الشحن"
+                                : "Company shipping remainder"}
+                            </small>
+                            <strong>
+                              {previewCompanyShare == null
+                                ? "—"
+                                : `${previewCompanyShare.toLocaleString(
+                                    lang === "ar" ? "ar-EG" : "en-EG",
+                                  )} ${c.priceCurrency}`}
+                            </strong>
+                          </article>
+                        </div>
+                        {previewCompanyShare != null &&
+                          previewCompanyShare < 0 && (
+                            <p className="courier-agreement__warning">
+                              <CircleAlert size={14} />
+                              {lang === "ar"
+                                ? "عمولة المندوب أكبر من مصاريف الشحن في هذا المثال؛ راجع السعر قبل نشر الخطة."
+                                : "Courier commission exceeds the shipping fee in this example; review it before publishing."}
+                            </p>
+                          )}
+                      </div>
+                    )}
+
+                    <div className="courier-agreement__couriers">
+                      <div>
+                        <strong>
+                          {lang === "ar"
+                            ? "المناديب المطبق عليهم الاتفاق"
+                            : "Couriers using this agreement"}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "كل مندوب يرتبط بخطة واحدة فقط."
+                            : "Each courier can use one plan only."}
+                        </small>
+                      </div>
+                      <div className="courier-agreement__courier-list">
+                        {selectedCourierRecords.map((courier) => (
+                          <span key={courier.id}>
+                            <i>{courier.name[lang].slice(0, 1)}</i>
+                            <b>
+                              <strong>{courier.name[lang]}</strong>
+                              <small dir="ltr">
+                                {courier.code} · {courier.phone}
+                              </small>
+                            </b>
+                          </span>
+                        ))}
+                        {selectedCourierRecords.length === 0 && (
+                          <em>
+                            {lang === "ar"
+                              ? "لا يوجد مندوب مرتبط بهذه الخطة"
+                              : "No courier is linked to this plan"}
+                          </em>
+                        )}
+                      </div>
+                    </div>
+                  </section>
 
                   {selected.compensationType === "salary" ? (
                     <div className="courier-salary-panel">
@@ -11088,6 +12010,659 @@ type SenderPolicyCenterRow = {
   differences: Localized[];
 };
 
+type SenderPolicy360Tab =
+  | "summary"
+  | "entry"
+  | "operation"
+  | "financial"
+  | "fields"
+  | "documents"
+  | "versions";
+
+function SenderPolicy360Drawer({
+  row,
+  lang,
+  onClose,
+  onEdit,
+}: {
+  row: SenderPolicyCenterRow;
+  lang: Lang;
+  onClose: () => void;
+  onEdit: () => void;
+}) {
+  const [tab, setTab] = useState<SenderPolicy360Tab>("summary");
+  const [companyFee, setCompanyFee] = useState(70);
+  const [orderValue, setOrderValue] = useState(1000);
+  const [confirmed, setConfirmed] = useState(true);
+  const [completeData, setCompleteData] = useState(true);
+  const [fieldSearch, setFieldSearch] = useState("");
+  const policy = row.policy;
+  const draft = policy && (policy.state ?? "published") === "draft";
+  const overrideKeys = policy?.overrideKeys ?? [];
+  const fieldOverrideCodes = policy?.fieldOverrideCodes ?? [];
+  const settings = row.effectiveSettings;
+  const recipientCharge = calculateRecipientShippingCharge(
+    companyFee,
+    settings.defaultShippingPayer,
+    settings,
+    String(settings.shippingChargeValue),
+  );
+  const assignmentAllowed =
+    completeData &&
+    (settings.confirmationMode !== "required_before_assignment" ||
+      confirmed ||
+      settings.allowAssignmentWithoutConfirmation);
+  const recipientTotal =
+    orderValue +
+    (settings.defaultShippingPayer === "recipient" ? recipientCharge : 0);
+
+  function sourceFor(key: keyof ShipmentDataSettings) {
+    const custom =
+      row.source === "custom" &&
+      (policy?.overrideKeys
+        ? overrideKeys.includes(key)
+        : Boolean(policy));
+    return (
+      <em
+        className={
+          custom
+            ? "policy360-source policy360-source--custom"
+            : "policy360-source"
+        }
+      >
+        {custom
+          ? lang === "ar"
+            ? "من سياسة الراسل"
+            : "Sender policy"
+          : lang === "ar"
+            ? "من الشركة"
+            : "Company"}
+      </em>
+    );
+  }
+
+  function yesNo(value: boolean) {
+    return value
+      ? lang === "ar"
+        ? "مسموح"
+        : "Allowed"
+      : lang === "ar"
+        ? "غير مسموح"
+        : "Not allowed";
+  }
+
+  const tabs: { id: SenderPolicy360Tab; label: Localized }[] = [
+    { id: "summary", label: { ar: "الملخص", en: "Summary" } },
+    { id: "entry", label: { ar: "الإدخال والبيانات", en: "Entry & data" } },
+    { id: "operation", label: { ar: "التأكيد والتشغيل", en: "Operation" } },
+    { id: "financial", label: { ar: "الشحن والتحصيل", en: "Shipping & collection" } },
+    { id: "fields", label: { ar: "الحقول", en: "Fields" } },
+    { id: "documents", label: { ar: "المستندات والإثبات", en: "Documents" } },
+    { id: "versions", label: { ar: "الإصدارات", en: "Versions" } },
+  ];
+
+  const policyFact = (
+    label: Localized,
+    value: string | number,
+    key?: keyof ShipmentDataSettings,
+    tone?: "green" | "orange" | "red",
+  ) => (
+    <article className={tone ? `policy360-fact policy360-fact--${tone}` : "policy360-fact"}>
+      <span>
+        <small>{label[lang]}</small>
+        <strong>{value}</strong>
+      </span>
+      {key && sourceFor(key)}
+    </article>
+  );
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={lang === "ar" ? "إغلاق" : "Close"}
+        onClick={onClose}
+      />
+      <aside className="policy360-drawer" aria-label={lang === "ar" ? "سياسة الراسل" : "Sender policy"}>
+        <div className="policy360-header">
+          <div className="policy360-identity">
+            <span className="mini-avatar">{row.sender.name[lang].slice(0, 1)}</span>
+            <span>
+              <small>{lang === "ar" ? "سياسة الراسل 360°" : "Sender policy 360°"}</small>
+              <strong>{row.sender.name[lang]}</strong>
+              <em dir="ltr">{row.sender.code}</em>
+            </span>
+          </div>
+          <div className="policy360-header__actions">
+            <button className="primary-button" type="button" onClick={onEdit}>
+              <Pencil size={16} />
+              {lang === "ar" ? "تعديل السياسة" : "Edit policy"}
+            </button>
+            <button className="square-button square-button--soft" type="button" onClick={onClose}>
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        <div className="policy360-statusbar">
+          <span
+            className={
+              row.source === "custom"
+                ? "policy-source-badge policy-source-badge--custom"
+                : row.source === "draft"
+                  ? "policy-source-badge policy-source-badge--draft"
+                  : "policy-source-badge"
+            }
+          >
+            {row.source === "custom"
+              ? lang === "ar"
+                ? `${overrideKeys.length} تخصيص منشور`
+                : `${overrideKeys.length} published overrides`
+              : row.source === "draft"
+                ? lang === "ar"
+                  ? "مسودة موجودة · قالب الشركة مطبق"
+                  : "Draft exists · company template active"
+                : lang === "ar"
+                  ? "يتبع قالب الشركة بالكامل"
+                  : "Fully follows company template"}
+          </span>
+          <span className={row.issues.length ? "policy-readiness-badge policy-readiness-badge--attention" : "policy-readiness-badge"}>
+            {row.issues.length ? <CircleAlert size={13} /> : <Check size={13} />}
+            {row.issues.length
+              ? `${row.issues.length} ${lang === "ar" ? "تنبيه" : "alerts"}`
+              : lang === "ar"
+                ? "جاهزة للتشغيل"
+                : "Ready for operation"}
+          </span>
+          <span>
+            <Clock3 size={13} />
+            {policy
+              ? `${lang === "ar" ? "الإصدار" : "Version"} ${policy.version ?? 1} · ${
+                  policy.updatedAt?.[lang] ?? (lang === "ar" ? "غير محدد" : "Not recorded")
+                }`
+              : lang === "ar"
+                ? "يتبع آخر إصدار للشركة"
+                : "Follows latest company version"}
+          </span>
+        </div>
+
+        <nav className="policy360-tabs" aria-label={lang === "ar" ? "أقسام السياسة" : "Policy sections"}>
+          {tabs.map((item) => (
+            <button
+              className={tab === item.id ? "active" : ""}
+              type="button"
+              key={item.id}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label[lang]}
+            </button>
+          ))}
+        </nav>
+
+        <div className="policy360-body">
+          {tab === "summary" && (
+            <div className="policy360-tab-panel">
+              <section className="policy360-summary-grid">
+                {policyFact(
+                  { ar: "مصدر السياسة", en: "Policy source" },
+                  row.source === "custom"
+                    ? lang === "ar"
+                      ? "سياسة مخصصة"
+                      : "Custom policy"
+                    : row.source === "draft"
+                      ? lang === "ar"
+                        ? "قالب الشركة + مسودة"
+                        : "Company + draft"
+                      : lang === "ar"
+                        ? "قالب الشركة"
+                        : "Company template",
+                )}
+                {policyFact(
+                  { ar: "قائمة الأسعار", en: "Price list" },
+                  row.priceList?.name[lang] ?? "—",
+                )}
+                {policyFact(
+                  { ar: "التأكيد", en: "Confirmation" },
+                  settings.confirmationMode === "required_before_assignment"
+                    ? lang === "ar"
+                      ? "إلزامي قبل الإسناد"
+                      : "Required before assignment"
+                    : settings.confirmationMode === "optional"
+                      ? lang === "ar"
+                        ? "اختياري"
+                        : "Optional"
+                      : lang === "ar"
+                        ? "غير مستخدم"
+                        : "Off",
+                  "confirmationMode",
+                )}
+                {policyFact(
+                  { ar: "متحمل الشحن", en: "Shipping payer" },
+                  settings.defaultShippingPayer === "recipient"
+                    ? lang === "ar"
+                      ? "المستلم"
+                      : "Recipient"
+                    : lang === "ar"
+                      ? "الراسل"
+                      : "Sender",
+                  "defaultShippingPayer",
+                )}
+                {policyFact(
+                  { ar: "حقول مطلوبة عند التسجيل", en: "Required on entry" },
+                  row.effectiveFields.filter((field) => field.mode === "required_on_create").length,
+                )}
+                {policyFact(
+                  { ar: "حقول مطلوبة قبل الإسناد", en: "Required before assignment" },
+                  row.effectiveFields.filter((field) => field.mode === "required_before_assignment").length,
+                )}
+              </section>
+
+              <section className="policy360-section">
+                <div className="policy360-section__heading">
+                  <span>
+                    <strong>{lang === "ar" ? "محاكي السياسة" : "Policy simulator"}</strong>
+                    <small>
+                      {lang === "ar"
+                        ? "جرّب شحنة افتراضية واعرف النتيجة قبل تعديل أو نشر السياسة."
+                        : "Test a sample shipment before editing or publishing the policy."}
+                    </small>
+                  </span>
+                  <ShieldCheck size={19} />
+                </div>
+                <div className="policy360-simulator">
+                  <label>
+                    <span>{lang === "ar" ? "قيمة الطلب" : "Order value"}</span>
+                    <input type="number" min="0" value={orderValue} onChange={(event) => setOrderValue(Math.max(0, Number(event.target.value) || 0))} />
+                  </label>
+                  <label>
+                    <span>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</span>
+                    <input type="number" min="0" value={companyFee} onChange={(event) => setCompanyFee(Math.max(0, Number(event.target.value) || 0))} />
+                  </label>
+                  <button className={completeData ? "policy360-sim-toggle active" : "policy360-sim-toggle"} type="button" onClick={() => setCompleteData((value) => !value)}>
+                    {completeData && <Check size={14} />}
+                    {lang === "ar" ? "البيانات مكتملة" : "Data complete"}
+                  </button>
+                  <button className={confirmed ? "policy360-sim-toggle active" : "policy360-sim-toggle"} type="button" onClick={() => setConfirmed((value) => !value)}>
+                    {confirmed && <Check size={14} />}
+                    {lang === "ar" ? "تم التأكيد" : "Confirmed"}
+                  </button>
+                </div>
+                <div className="policy360-simulator__result">
+                  <article className={assignmentAllowed ? "success" : "danger"}>
+                    <small>{lang === "ar" ? "الإسناد" : "Assignment"}</small>
+                    <strong>
+                      {assignmentAllowed
+                        ? lang === "ar"
+                          ? "مسموح"
+                          : "Allowed"
+                        : lang === "ar"
+                          ? "غير مسموح الآن"
+                          : "Not allowed yet"}
+                    </strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "يدفع المستلم" : "Recipient pays"}</small>
+                    <strong>{recipientTotal.toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} {lang === "ar" ? "ج.م" : "EGP"}</strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "الشحن المحصل" : "Collected shipping"}</small>
+                    <strong>{recipientCharge.toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} {lang === "ar" ? "ج.م" : "EGP"}</strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "طريقة العرض" : "Price display"}</small>
+                    <strong>
+                      {settings.recipientPriceDisplay === "total_only"
+                        ? lang === "ar"
+                          ? "الإجمالي فقط"
+                          : "Total only"
+                        : lang === "ar"
+                          ? "الطلب والشحن منفصلان"
+                          : "Order and shipping separate"}
+                    </strong>
+                  </article>
+                </div>
+              </section>
+
+              <section className="policy360-section">
+                <div className="policy360-section__heading">
+                  <span>
+                    <strong>{lang === "ar" ? "الاختلاف عن قالب الشركة" : "Difference from company template"}</strong>
+                    <small>{lang === "ar" ? "التخصيصات الفعلية فقط." : "Only effective overrides."}</small>
+                  </span>
+                </div>
+                <ul className="policy360-difference-list">
+                  {row.differences.map((difference, index) => (
+                    <li key={`${difference.en}-${index}`}>{difference[lang]}</li>
+                  ))}
+                </ul>
+              </section>
+            </div>
+          )}
+
+          {tab === "entry" && (
+            <div className="policy360-tab-panel">
+              <section className="policy360-facts-grid">
+                {policyFact({ ar: "الإضافة اليدوية", en: "Manual entry" }, yesNo(settings.manualEntryEnabled), "manualEntryEnabled")}
+                {policyFact({ ar: "الإضافة الجماعية", en: "Batch entry" }, yesNo(settings.batchEntryEnabled), "batchEntryEnabled")}
+                {policyFact({ ar: "استيراد Excel", en: "Excel import" }, yesNo(settings.excelImportEnabled), "excelImportEnabled")}
+                {policyFact(
+                  { ar: "كشف التكرار", en: "Duplicate detection" },
+                  settings.duplicateCheckMode === "block"
+                    ? lang === "ar"
+                      ? "منع قطعي"
+                      : "Block"
+                    : settings.duplicateCheckMode === "warn"
+                      ? lang === "ar"
+                        ? "تحذير ومراجعة"
+                        : "Warn"
+                      : lang === "ar"
+                        ? "غير مستخدم"
+                        : "Off",
+                  "duplicateCheckMode",
+                )}
+                {policyFact(
+                  { ar: "مرجع الراسل", en: "Sender reference" },
+                  settings.senderReferenceMode === "required_unique"
+                    ? lang === "ar"
+                      ? "مطلوب وفريد"
+                      : "Required & unique"
+                    : settings.senderReferenceMode === "optional_unique"
+                      ? lang === "ar"
+                        ? "اختياري وفريد"
+                        : "Optional & unique"
+                      : lang === "ar"
+                        ? "اختياري"
+                        : "Optional",
+                  "senderReferenceMode",
+                )}
+                {policyFact(
+                  { ar: "البيانات الناقصة", en: "Incomplete data" },
+                  settings.incompleteRoute === "warehouse_and_queue"
+                    ? lang === "ar"
+                      ? "المخزن + قائمة الاستكمال"
+                      : "Warehouse + completion queue"
+                    : lang === "ar"
+                      ? "الاستكمال قبل المخزن"
+                      : "Completion before warehouse",
+                  "incompleteRoute",
+                )}
+                {policyFact({ ar: "استدعاء المستلم بالهاتف", en: "Recipient phone lookup" }, yesNo(settings.phoneLookupEnabled), "phoneLookupEnabled")}
+              </section>
+            </div>
+          )}
+
+          {tab === "operation" && (
+            <div className="policy360-tab-panel">
+              <section className="policy360-facts-grid">
+                {policyFact(
+                  { ar: "سياسة التأكيد", en: "Confirmation policy" },
+                  settings.confirmationMode === "required_before_assignment"
+                    ? lang === "ar"
+                      ? "إلزامي قبل الإسناد"
+                      : "Required before assignment"
+                    : settings.confirmationMode === "optional"
+                      ? lang === "ar"
+                        ? "اختياري"
+                        : "Optional"
+                      : lang === "ar"
+                        ? "غير مستخدم"
+                        : "Off",
+                  "confirmationMode",
+                )}
+                {policyFact({ ar: "عدد المحاولات", en: "Attempt count" }, settings.confirmationAttempts, "confirmationAttempts")}
+                {policyFact({ ar: "الإسناد دون تأكيد", en: "Assign without confirmation" }, yesNo(settings.allowAssignmentWithoutConfirmation), "allowAssignmentWithoutConfirmation")}
+                {policyFact(
+                  { ar: "فتح ومعاينة الطرد", en: "Package inspection" },
+                  settings.packageInspection === "allowed"
+                    ? lang === "ar"
+                      ? "مسموح"
+                      : "Allowed"
+                    : settings.packageInspection === "sender_approval"
+                      ? lang === "ar"
+                        ? "بموافقة الراسل"
+                        : "Sender approval"
+                      : lang === "ar"
+                        ? "غير مسموح"
+                        : "Not allowed",
+                  "packageInspection",
+                )}
+                {policyFact({ ar: "التسليم الجزئي", en: "Partial delivery" }, yesNo(settings.partialDeliveryEnabled), "partialDeliveryEnabled")}
+                {policyFact(
+                  { ar: "الحالات المتاحة", en: "Available statuses" },
+                  settings.partialDeliveryEnabled
+                    ? lang === "ar"
+                      ? "كل حالات الشركة المنشورة"
+                      : "All published company statuses"
+                    : lang === "ar"
+                      ? "تُستبعد حالات التسليم الجزئي"
+                      : "Partial-delivery statuses excluded",
+                )}
+              </section>
+            </div>
+          )}
+
+          {tab === "financial" && (
+            <div className="policy360-tab-panel">
+              <section className="policy360-facts-grid">
+                {policyFact(
+                  { ar: "متحمل مصاريف الشحن", en: "Shipping payer" },
+                  settings.defaultShippingPayer === "recipient"
+                    ? lang === "ar"
+                      ? "المستلم"
+                      : "Recipient"
+                    : lang === "ar"
+                      ? "الراسل"
+                      : "Sender",
+                  "defaultShippingPayer",
+                )}
+                {policyFact({ ar: "تغيير المتحمل عند التسجيل", en: "Payer override on entry" }, yesNo(settings.shippingPayerOverride), "shippingPayerOverride")}
+                {policyFact(
+                  { ar: "الشحن المحصل من المستلم", en: "Recipient shipping charge" },
+                  settings.shippingChargeMode === "company_price"
+                    ? lang === "ar"
+                      ? "يساوي سعر الشركة"
+                      : "Same as company fee"
+                    : settings.shippingChargeMode === "company_plus"
+                      ? `${lang === "ar" ? "سعر الشركة +" : "Company fee +"} ${settings.shippingChargeValue}`
+                      : settings.shippingChargeMode === "fixed"
+                        ? `${settings.shippingChargeValue} ${lang === "ar" ? "ج.م" : "EGP"}`
+                        : lang === "ar"
+                          ? "يدوي لكل شحنة"
+                          : "Manual per shipment",
+                  "shippingChargeMode",
+                )}
+                {policyFact(
+                  { ar: "عرض السعر للمستلم", en: "Recipient price display" },
+                  settings.recipientPriceDisplay === "total_only"
+                    ? lang === "ar"
+                      ? "الإجمالي فقط"
+                      : "Total only"
+                    : lang === "ar"
+                      ? "الطلب والشحن منفصلان"
+                      : "Order and shipping separately",
+                  "recipientPriceDisplay",
+                )}
+                {policyFact({ ar: "حد تنبيه التحصيل", en: "Collection warning limit" }, `${settings.collectionWarningLimit.toLocaleString()} ${lang === "ar" ? "ج.م" : "EGP"}`, "collectionWarningLimit")}
+                {policyFact({ ar: "الاتفاق المالي", en: "Financial agreement" }, lang === "ar" ? "يُدار من حساب الراسل — غير مخلوط هنا" : "Managed in sender account — kept separate")}
+              </section>
+            </div>
+          )}
+
+          {tab === "fields" && (
+            <div className="policy360-tab-panel">
+              <label className="shipment-search policy360-field-search">
+                <Search size={16} />
+                <input
+                  value={fieldSearch}
+                  onChange={(event) => setFieldSearch(event.target.value)}
+                  placeholder={lang === "ar" ? "ابحث عن حقل..." : "Search fields..."}
+                />
+              </label>
+              <section className="policy360-fields">
+                {row.effectiveFields
+                  .filter((field) => {
+                    const query = fieldSearch.trim().toLowerCase();
+                    return (
+                      !query ||
+                      [field.name.ar, field.name.en, field.code].some((value) =>
+                        value.toLowerCase().includes(query),
+                      )
+                    );
+                  })
+                  .sort((a, b) => a.order - b.order)
+                  .map((field) => {
+                    const customSource =
+                      row.source === "custom" &&
+                      (policy?.fieldOverrideCodes
+                        ? fieldOverrideCodes.includes(field.code) || field.custom
+                        : Boolean(policy));
+                    return (
+                      <article key={field.id}>
+                        <span>
+                          <strong>{field.name[lang]}</strong>
+                          <small dir="ltr">{field.code}</small>
+                        </span>
+                        <em className={customSource ? "policy360-source policy360-source--custom" : "policy360-source"}>
+                          {customSource
+                            ? lang === "ar"
+                              ? "من الراسل"
+                              : "Sender"
+                            : lang === "ar"
+                              ? "من الشركة"
+                              : "Company"}
+                        </em>
+                        <strong>
+                          {field.mode === "required_on_create"
+                            ? lang === "ar"
+                              ? "مطلوب عند التسجيل"
+                              : "Required on entry"
+                            : field.mode === "required_before_assignment"
+                              ? lang === "ar"
+                                ? "مطلوب قبل الإسناد"
+                                : "Required before assignment"
+                              : field.mode === "hidden"
+                                ? lang === "ar"
+                                  ? "مخفي"
+                                  : "Hidden"
+                                : lang === "ar"
+                                  ? "اختياري"
+                                  : "Optional"}
+                        </strong>
+                        <span className={field.inExcel ? "policy360-excel active" : "policy360-excel"}>
+                          Excel
+                        </span>
+                      </article>
+                    );
+                  })}
+              </section>
+            </div>
+          )}
+
+          {tab === "documents" && (
+            <div className="policy360-tab-panel">
+              <section className="policy360-facts-grid">
+                {policyFact(
+                  { ar: "تفاصيل البوليصة", en: "Label detail level" },
+                  settings.labelDetailMode === "full"
+                    ? lang === "ar"
+                      ? "تفاصيل كاملة"
+                      : "Full details"
+                    : settings.labelDetailMode === "masked"
+                      ? lang === "ar"
+                        ? "بيانات حساسة محجوبة"
+                        : "Sensitive data masked"
+                      : lang === "ar"
+                        ? "الحد الأدنى"
+                        : "Minimal",
+                  "labelDetailMode",
+                )}
+                {policyFact(
+                  { ar: "إثبات التسليم", en: "Proof of delivery" },
+                  settings.deliveryProof === "signature"
+                    ? lang === "ar"
+                      ? "توقيع المستلم"
+                      : "Recipient signature"
+                    : settings.deliveryProof === "photo"
+                      ? lang === "ar"
+                        ? "صورة"
+                        : "Photo"
+                      : settings.deliveryProof === "otp"
+                        ? "OTP"
+                        : lang === "ar"
+                          ? "اسم المستلم"
+                          : "Recipient name",
+                  "deliveryProof",
+                )}
+                {policyFact(
+                  { ar: "عرض قيمة الشحن", en: "Shipping amount display" },
+                  settings.recipientPriceDisplay === "total_only"
+                    ? lang === "ar"
+                      ? "الإجمالي فقط"
+                      : "Total only"
+                    : lang === "ar"
+                      ? "ظاهرة منفصلة"
+                      : "Shown separately",
+                  "recipientPriceDisplay",
+                )}
+              </section>
+            </div>
+          )}
+
+          {tab === "versions" && (
+            <div className="policy360-tab-panel">
+              <section className="policy360-version-current">
+                <span>
+                  <strong>
+                    {policy
+                      ? `${lang === "ar" ? "الإصدار الحالي" : "Current version"} ${policy.version ?? 1}`
+                      : lang === "ar"
+                        ? "قالب الشركة الحالي"
+                        : "Current company template"}
+                  </strong>
+                  <small>
+                    {policy?.updatedAt?.[lang] ?? (lang === "ar" ? "يتبع تحديثات الشركة" : "Follows company updates")}
+                    {policy?.updatedBy ? ` · ${policy.updatedBy[lang]}` : ""}
+                  </small>
+                </span>
+                <em className={draft ? "policy-source-badge policy-source-badge--draft" : "policy-source-badge policy-source-badge--custom"}>
+                  {draft
+                    ? lang === "ar"
+                      ? "مسودة غير مطبقة"
+                      : "Unpublished draft"
+                    : lang === "ar"
+                      ? "منشور"
+                      : "Published"}
+                </em>
+              </section>
+              <section className="policy360-version-list">
+                {[...(policy?.history ?? [])]
+                  .reverse()
+                  .map((entry) => (
+                    <article key={`${entry.version}-${entry.updatedAt.en}`}>
+                      <Clock3 size={16} />
+                      <span>
+                        <strong>{lang === "ar" ? `الإصدار ${entry.version}` : `Version ${entry.version}`}</strong>
+                        <small>{entry.updatedAt[lang]} · {entry.updatedBy[lang]}</small>
+                      </span>
+                      <em>{entry.state === "published" ? (lang === "ar" ? "منشور" : "Published") : (lang === "ar" ? "مسودة" : "Draft")}</em>
+                    </article>
+                  ))}
+                {!policy?.history?.length && (
+                  <div className="status-empty">
+                    <Clock3 size={20} />
+                    <span>{lang === "ar" ? "لا توجد إصدارات أقدم مسجلة" : "No older versions recorded"}</span>
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </div>
+      </aside>
+    </>
+  );
+}
+
 function ShipmentPoliciesScreen({
   lang,
   theme,
@@ -11131,7 +12706,7 @@ function ShipmentPoliciesScreen({
   const [readinessFilter, setReadinessFilter] = useState<
     "all" | "ready" | "issues"
   >("all");
-  const [expandedSenderId, setExpandedSenderId] = useState("");
+  const [inspectedSenderId, setInspectedSenderId] = useState("");
   const [showCompanyTemplate, setShowCompanyTemplate] = useState(false);
 
   const normalizedCompanyFields = fields.map(normalizeShipmentField);
@@ -11237,18 +12812,17 @@ function ShipmentPoliciesScreen({
         ];
   }
 
-  const rows = useMemo<SenderPolicyCenterRow[]>(() => {
-    return senders.map((sender) => {
+  const rows: SenderPolicyCenterRow[] = senders.map((sender) => {
       const policy =
         findSenderShipmentPolicy(sender.name, senderPolicies) ?? null;
       const policyState = policy?.state ?? "published";
       const isPublished = Boolean(policy && policyState === "published");
-      const effectiveFields = (
-        isPublished ? policy?.fields ?? fields : fields
-      ).map(normalizeShipmentField);
-      const effectiveSettings = normalizeShipmentDataSettings(
-        isPublished ? policy?.settings ?? settings : settings,
-      );
+      const effectiveFields = isPublished
+        ? resolveSenderPolicyFields(sender.name, fields, senderPolicies)
+        : fields.map(normalizeShipmentField);
+      const effectiveSettings = isPublished
+        ? resolveSenderPolicySettings(sender.name, settings, senderPolicies)
+        : normalizeShipmentDataSettings(settings);
       const source: SenderPolicyCenterRow["source"] = !policy
         ? "company"
         : policyState === "draft"
@@ -11308,15 +12882,6 @@ function ShipmentPoliciesScreen({
         differences: policyDifferences(policy),
       };
     });
-  }, [
-    fields,
-    normalizedCompanyFields,
-    normalizedCompanySettings,
-    priceLists,
-    senderPolicies,
-    senders,
-    settings,
-  ]);
 
   const filteredRows = rows.filter((row) => {
     const query = search.trim().toLowerCase();
@@ -11686,7 +13251,7 @@ function ShipmentPoliciesScreen({
                 const hidden = row.effectiveFields.filter(
                   (field) => field.mode === "hidden",
                 ).length;
-                const expanded = expandedSenderId === row.sender.id;
+                const expanded = inspectedSenderId === row.sender.id;
                 return (
                   <article
                     className={`policy-center-record ${
@@ -11810,18 +13375,10 @@ function ShipmentPoliciesScreen({
                         <button
                           className="secondary-button"
                           type="button"
-                          onClick={() =>
-                            setExpandedSenderId(expanded ? "" : row.sender.id)
-                          }
+                          onClick={() => setInspectedSenderId(row.sender.id)}
                         >
                           <Eye size={15} />
-                          {expanded
-                            ? lang === "ar"
-                              ? "إخفاء"
-                              : "Hide"
-                            : lang === "ar"
-                              ? "مقارنة"
-                              : "Compare"}
+                          {lang === "ar" ? "عرض السياسة" : "View policy"}
                         </button>
                         <button
                           className="primary-button"
@@ -11896,6 +13453,18 @@ function ShipmentPoliciesScreen({
           </section>
         </main>
       </div>
+      {rows.find((row) => row.sender.id === inspectedSenderId) && (
+        <SenderPolicy360Drawer
+          row={rows.find((row) => row.sender.id === inspectedSenderId)!}
+          lang={lang}
+          onClose={() => setInspectedSenderId("")}
+          onEdit={() => {
+            const senderId = inspectedSenderId;
+            setInspectedSenderId("");
+            onOpenSenderPolicy(senderId);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -19631,12 +21200,13 @@ function AddShipmentScreen({
   );
   const firstSender = activeSenderRecords[0] ?? senderRecordsData[0];
   const [senderKey, setSenderKey] = useState(firstSender.id);
-  const initialSenderPolicy = findEffectiveSenderShipmentPolicy(
+  const initialPolicySettings = resolveSenderPolicySettings(
     firstSender.name,
+    settings,
     senderPolicies,
   );
   const initialPayer =
-    initialSenderPolicy?.settings.defaultShippingPayer ??
+    initialPolicySettings.defaultShippingPayer ??
     settings.defaultShippingPayer ??
     senderEntryProfiles.find(
       (profile) => profile.sender.en === firstSender.name.en,
@@ -19660,14 +21230,16 @@ function AddShipmentScreen({
   const selectedSender =
     activeSenderRecords.find((sender) => sender.id === senderKey)?.name ??
     firstSender.name;
-  const senderPolicy = findEffectiveSenderShipmentPolicy(
+  const policySettings = resolveSenderPolicySettings(
     selectedSender,
+    settings,
     senderPolicies,
   );
-  const policySettings = normalizeShipmentDataSettings(
-    senderPolicy?.settings ?? settings,
+  const policyFields = resolveSenderPolicyFields(
+    selectedSender,
+    fields,
+    senderPolicies,
   );
-  const policyFields = (senderPolicy?.fields ?? fields).map(normalizeShipmentField);
   const senderPriceList =
     priceLists.find(
       (priceList) =>
@@ -19760,12 +21332,10 @@ function AddShipmentScreen({
     const nextSender =
       activeSenderRecords.find((sender) => sender.id === nextKey) ??
       firstSender;
-    const nextPolicy = findEffectiveSenderShipmentPolicy(
+    const nextSettings = resolveSenderPolicySettings(
       nextSender.name,
+      settings,
       senderPolicies,
-    );
-    const nextSettings = normalizeShipmentDataSettings(
-      nextPolicy?.settings ?? settings,
     );
     setSenderKey(nextKey);
     setDraft((current) => ({
@@ -21606,7 +23176,7 @@ export default function Home() {
   );
   const [sharedSenderPolicies, setSharedSenderPolicies] = useState<
     SenderShipmentPolicy[]
-  >([]);
+  >(senderShipmentPoliciesDemoData);
   const [sharedShipments, setSharedShipments] = useState(shipments);
   const [sharedCourierDebts, setSharedCourierDebts] =
     useState(courierDebtsData);
@@ -21700,7 +23270,10 @@ export default function Home() {
             normalizeShipmentDataSettings(parsed.shipmentSettings),
           );
         }
-        if (Array.isArray(parsed.senderShipmentPolicies)) {
+        if (
+          Array.isArray(parsed.senderShipmentPolicies) &&
+          parsed.senderShipmentPolicies.length > 0
+        ) {
           setSharedSenderPolicies(
             parsed.senderShipmentPolicies.map((policy) => ({
               ...policy,
