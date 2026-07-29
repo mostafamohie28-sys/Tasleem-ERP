@@ -39,6 +39,7 @@ import {
   Pencil,
   Plus,
   Phone,
+  Printer,
   Search,
   Save,
   Settings2,
@@ -68,7 +69,8 @@ type Screen =
   | "addShipment"
   | "confirmation"
   | "assignment"
-  | "courierShipments";
+  | "courierShipments"
+  | "courierPrint";
 type Scenario =
   | "ready"
   | "loading"
@@ -97,6 +99,7 @@ type Shipment = {
   custody: Localized;
   custodyType: "warehouse" | "courier" | "recipient";
   courier: Localized | null;
+  assignedAt?: Localized;
   amount: number;
   deliveryDate: Localized;
   required: Localized;
@@ -431,6 +434,7 @@ const shipments: Shipment[] = [
     custody: { ar: "مع المندوب", en: "With courier" },
     custodyType: "courier",
     courier: { ar: "أحمد رجب", en: "Ahmed Ragab" },
+    assignedAt: { ar: "28 يوليو، 10:42 ص", en: "28 Jul, 10:42 AM" },
     amount: 1250,
     deliveryDate: { ar: "اليوم، 4:30 م", en: "Today, 4:30 PM" },
     required: { ar: "لا يوجد", en: "None" },
@@ -2500,6 +2504,14 @@ function Sidebar({
           label: lang === "ar" ? "شحنات المناديب" : "Courier shipments",
           icon: PackageCheck,
           screen: "courierShipments" as const,
+        },
+        {
+          label:
+            lang === "ar"
+              ? "طباعة شحنات المندوب"
+              : "Print courier shipments",
+          icon: Printer,
+          screen: "courierPrint" as const,
         },
         { label: t.warehouse, icon: Warehouse },
       ],
@@ -8090,6 +8102,563 @@ function CourierShipmentsScreen({
   );
 }
 
+function CourierPrintScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const initialCourier =
+    assignmentCourierProfiles.find((profile) =>
+      shipmentRecords.some(
+        (shipment) =>
+          shipment.custodyType === "courier" &&
+          shipment.courier?.en === profile.courier.en,
+      ),
+    ) ?? assignmentCourierProfiles[0];
+  const [courierKey, setCourierKey] = useState(initialCourier.courier.en);
+  const [search, setSearch] = useState("");
+  const [areaFilter, setAreaFilter] = useState("");
+  const [printedAt, setPrintedAt] = useState<Localized>({
+    ar: "يُسجّل تلقائيًا عند الطباعة",
+    en: "Recorded automatically when printed",
+  });
+
+  const selectedCourier =
+    assignmentCourierProfiles.find(
+      (profile) => profile.courier.en === courierKey,
+    ) ?? assignmentCourierProfiles[0];
+  const courierShipments = shipmentRecords.filter(
+    (shipment) =>
+      shipment.custodyType === "courier" &&
+      shipment.courier?.en === selectedCourier.courier.en,
+  );
+  const areas = Array.from(
+    new Map(
+      courierShipments.map((shipment) => [shipment.area.en, shipment.area]),
+    ).values(),
+  );
+  const normalized = search.trim().toLowerCase();
+  const visibleShipments = courierShipments.filter((shipment) => {
+    const matchesSearch =
+      !normalized ||
+      [
+        shipment.id,
+        shipment.reference,
+        shipment.phone,
+        shipment.recipient.ar,
+        shipment.recipient.en,
+        shipment.sender.ar,
+        shipment.sender.en,
+        shipment.area.ar,
+        shipment.area.en,
+        shipment.address.ar,
+        shipment.address.en,
+      ].some((value) => value.toLowerCase().includes(normalized));
+    const matchesArea = !areaFilter || shipment.area.en === areaFilter;
+    return matchesSearch && matchesArea;
+  });
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const totalPieces = visibleShipments.reduce(
+    (sum, shipment) => sum + shipment.pieces,
+    0,
+  );
+  const totalShipmentPrice = visibleShipments.reduce(
+    (sum, shipment) => sum + shipment.amount,
+    0,
+  );
+  const totalShippingFee = visibleShipments.reduce(
+    (sum, shipment) => sum + shipment.shippingFee,
+    0,
+  );
+  const totalCollection = visibleShipments.reduce(
+    (sum, shipment) =>
+      sum +
+      shipment.amount +
+      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
+    0,
+  );
+
+  function chooseCourier(nextKey: string) {
+    setCourierKey(nextKey);
+    setSearch("");
+    setAreaFilter("");
+    setPrintedAt({
+      ar: "يُسجّل تلقائيًا عند الطباعة",
+      en: "Recorded automatically when printed",
+    });
+  }
+
+  function resetFilters() {
+    setSearch("");
+    setAreaFilter("");
+  }
+
+  function printVisibleShipments() {
+    const now = new Date();
+    setPrintedAt({
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    });
+    window.setTimeout(() => window.print(), 80);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="courierPrint"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <Printer size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "طباعة شحنات المندوب"
+                  : "Print courier shipments"}
+              </strong>
+              <small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content courier-print-page">
+          <div className="welcome-row page-heading-row courier-print-screen-heading">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar"
+                    ? "طباعة شحنات المندوب"
+                    : "Print courier shipments"}
+                </h1>
+                <span className="demo-chip">
+                  {lang === "ar" ? "الحيازة الحالية فقط" : "Current custody only"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "الكشف يجمع كل الشحنات الموجودة مع المندوب الآن، حتى لو استلمها في أيام سابقة."
+                  : "The sheet includes everything currently with the courier, even if handed over on earlier days."}
+              </p>
+            </div>
+            <div className="courier-print-heading-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onNavigate("courierShipments")}
+              >
+                <PackageCheck size={17} />
+                {lang === "ar" ? "شحنات المندوب" : "Courier shipments"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={!visibleShipments.length}
+                onClick={printVisibleShipments}
+              >
+                <Printer size={17} />
+                {lang === "ar"
+                  ? `طباعة الظاهر (${visibleShipments.length})`
+                  : `Print visible (${visibleShipments.length})`}
+              </button>
+            </div>
+          </div>
+
+          <section className="courier-print-truth">
+            <ShieldCheck size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "الطباعة لا تنشئ إسنادًا جديدًا ولا تغيّر حالة أو حيازة أي شحنة"
+                  : "Printing does not create assignment or change shipment status or custody"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "المصدر الوحيد للكشف هو الشحنات الظاهرة حاليًا في حيازة المندوب داخل النظام."
+                  : "The sheet is sourced only from shipments currently recorded in courier custody."}
+              </small>
+            </span>
+          </section>
+
+          <section className="courier-print-controls">
+            <label className="courier-print-control courier-print-control--courier">
+              <span>{lang === "ar" ? "المندوب" : "Courier"}</span>
+              <span className="entry-select">
+                <select
+                  value={courierKey}
+                  onChange={(event) => chooseCourier(event.target.value)}
+                >
+                  {assignmentCourierProfiles.map((profile) => {
+                    const load = shipmentRecords.filter(
+                      (shipment) =>
+                        shipment.custodyType === "courier" &&
+                        shipment.courier?.en === profile.courier.en,
+                    ).length;
+                    return (
+                      <option value={profile.courier.en} key={profile.code}>
+                        {profile.courier[lang]} — {load}{" "}
+                        {lang === "ar" ? "شحنة" : "shipments"}
+                      </option>
+                    );
+                  })}
+                </select>
+                <ChevronDown size={16} />
+              </span>
+            </label>
+            <label className="courier-print-control courier-print-control--search">
+              <span>
+                {lang === "ar"
+                  ? "بحث داخل شحنات المندوب"
+                  : "Search courier shipments"}
+              </span>
+              <span className="courier-print-search">
+                <Search size={16} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "رقم الشحنة، الهاتف، المستلم، الراسل أو العنوان..."
+                      : "Shipment, phone, recipient, sender or address..."
+                  }
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")}>
+                    <X size={14} />
+                  </button>
+                )}
+              </span>
+            </label>
+            <label className="courier-print-control">
+              <span>{lang === "ar" ? "المنطقة" : "Area"}</span>
+              <span className="entry-select">
+                <select
+                  value={areaFilter}
+                  onChange={(event) => setAreaFilter(event.target.value)}
+                >
+                  <option value="">
+                    {lang === "ar" ? "كل المناطق" : "All areas"}
+                  </option>
+                  {areas.map((area) => (
+                    <option value={area.en} key={area.en}>
+                      {area[lang]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} />
+              </span>
+            </label>
+            <button
+              className="courier-print-reset"
+              type="button"
+              disabled={!search && !areaFilter}
+              onClick={resetFilters}
+            >
+              <X size={15} />
+              {lang === "ar" ? "مسح التصفية" : "Clear filters"}
+            </button>
+          </section>
+
+          <section className="courier-print-sheet">
+            <header className="courier-print-sheet__header">
+              <div className="courier-print-brand">
+                <span className="brand-mark">
+                  <PackageCheck size={24} />
+                </span>
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "تسليم للشحن الداخلي"
+                      : "Tasleem Domestic Shipping"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "كشف شحنات المندوب الحالية"
+                      : "Current courier shipment sheet"}
+                  </small>
+                </span>
+              </div>
+              <div className="courier-print-sheet__identity">
+                <strong>
+                  {lang === "ar"
+                    ? "كشف شحنات المندوب"
+                    : "Courier shipment sheet"}
+                </strong>
+                <small>
+                  {lang === "ar" ? "رقم الكشف:" : "Sheet no.:"}{" "}
+                  {selectedCourier.code}-CURRENT
+                </small>
+              </div>
+            </header>
+
+            <div className="courier-print-courier">
+              <div>
+                <span className="courier-print-avatar">
+                  {selectedCourier.courier[lang].slice(0, 1)}
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "المندوب" : "Courier"}</small>
+                  <strong>{selectedCourier.courier[lang]}</strong>
+                </span>
+              </div>
+              <span>
+                <small>{lang === "ar" ? "الكود" : "Code"}</small>
+                <strong>{selectedCourier.code}</strong>
+              </span>
+              <span>
+                <small>{lang === "ar" ? "الهاتف" : "Phone"}</small>
+                <strong dir="ltr">{selectedCourier.phone}</strong>
+              </span>
+              <span>
+                <small>{lang === "ar" ? "المركبة" : "Vehicle"}</small>
+                <strong>{selectedCourier.vehicle[lang]}</strong>
+              </span>
+              <span>
+                <small>{lang === "ar" ? "وقت الطباعة" : "Printed at"}</small>
+                <strong>{printedAt[lang]}</strong>
+              </span>
+            </div>
+
+            <div className="courier-print-summary">
+              <article>
+                <small>{lang === "ar" ? "الشحنات الظاهرة" : "Visible shipments"}</small>
+                <strong>{visibleShipments.length}</strong>
+                <span>
+                  {visibleShipments.length === courierShipments.length
+                    ? lang === "ar"
+                      ? "كل ما معه حاليًا"
+                      : "Everything currently held"
+                    : lang === "ar"
+                      ? `من إجمالي ${courierShipments.length}`
+                      : `of ${courierShipments.length} total`}
+                </span>
+              </article>
+              <article>
+                <small>{lang === "ar" ? "إجمالي القطع" : "Total pieces"}</small>
+                <strong>{totalPieces}</strong>
+                <span>{lang === "ar" ? "قطعة داخل الطرود" : "Pieces in parcels"}</span>
+              </article>
+              <article>
+                <small>{lang === "ar" ? "أسعار الشحنات" : "Shipment prices"}</small>
+                <strong>{money.format(totalShipmentPrice)}</strong>
+                <span>{lang === "ar" ? "بدون مصاريف الشحن" : "Before shipping fees"}</span>
+              </article>
+              <article>
+                <small>{lang === "ar" ? "مصاريف الشحن" : "Shipping fees"}</small>
+                <strong>{money.format(totalShippingFee)}</strong>
+                <span>{lang === "ar" ? "إجمالي الرسوم" : "Total fees"}</span>
+              </article>
+              <article className="courier-print-summary__total">
+                <small>{lang === "ar" ? "المطلوب تحصيله" : "Required collection"}</small>
+                <strong>{money.format(totalCollection)}</strong>
+                <span>{lang === "ar" ? "من المستلمين" : "From recipients"}</span>
+              </article>
+            </div>
+
+            <div className="courier-print-table">
+              <div className="courier-print-row courier-print-row--head">
+                <span>#</span>
+                <span>{lang === "ar" ? "الشحنة" : "Shipment"}</span>
+                <span>{lang === "ar" ? "المستلم والهاتف" : "Recipient & phone"}</span>
+                <span>{lang === "ar" ? "الراسل والمرجع" : "Sender & reference"}</span>
+                <span>{lang === "ar" ? "العنوان" : "Address"}</span>
+                <span>{lang === "ar" ? "القطع" : "Pieces"}</span>
+                <span>{lang === "ar" ? "سعر الشحنة" : "Shipment price"}</span>
+                <span>{lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}</span>
+                <span>{lang === "ar" ? "التحصيل" : "Collection"}</span>
+                <span>{lang === "ar" ? "تاريخ الإسناد" : "Assigned"}</span>
+              </div>
+              <div className="courier-print-table__body">
+                {visibleShipments.map((shipment, index) => {
+                  const requiredCollection =
+                    shipment.amount +
+                    (shipment.shippingPayer === "recipient"
+                      ? shipment.shippingFee
+                      : 0);
+                  return (
+                    <article className="courier-print-row" key={shipment.id}>
+                      <span className="courier-print-index">{index + 1}</span>
+                      <span className="courier-print-shipment">
+                        <strong>{shipment.id}</strong>
+                        <em
+                          className={`status-badge status-badge--${shipment.statusTone}`}
+                        >
+                          {shipment.status[lang]}
+                        </em>
+                      </span>
+                      <span className="courier-print-person">
+                        <strong>{shipment.recipient[lang]}</strong>
+                        <small dir="ltr">{shipment.phone}</small>
+                      </span>
+                      <span className="courier-print-sender">
+                        <strong>{shipment.sender[lang]}</strong>
+                        <small>{shipment.reference}</small>
+                      </span>
+                      <span className="courier-print-address">
+                        <strong>
+                          {shipment.area[lang]}، {shipment.governorate[lang]}
+                        </strong>
+                        <small>{shipment.address[lang]}</small>
+                      </span>
+                      <span className="courier-print-pieces">
+                        <small className="courier-print-mobile-label">
+                          {lang === "ar" ? "القطع" : "Pieces"}
+                        </small>
+                        <strong>{shipment.pieces}</strong>
+                      </span>
+                      <span className="courier-print-money">
+                        <small className="courier-print-mobile-label">
+                          {lang === "ar" ? "سعر الشحنة" : "Shipment price"}
+                        </small>
+                        <strong>{money.format(shipment.amount)}</strong>
+                      </span>
+                      <span className="courier-print-money">
+                        <small className="courier-print-mobile-label">
+                          {lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}
+                        </small>
+                        <strong>{money.format(shipment.shippingFee)}</strong>
+                        <small>
+                          {shipment.shippingPayer === "recipient"
+                            ? lang === "ar"
+                              ? "على المستلم"
+                              : "Recipient"
+                            : lang === "ar"
+                              ? "على الراسل"
+                              : "Sender"}
+                        </small>
+                      </span>
+                      <span className="courier-print-money courier-print-money--total">
+                        <small className="courier-print-mobile-label">
+                          {lang === "ar" ? "التحصيل" : "Collection"}
+                        </small>
+                        <strong>{money.format(requiredCollection)}</strong>
+                      </span>
+                      <span className="courier-print-assigned">
+                        <strong>
+                          {shipment.assignedAt?.[lang] ??
+                            shipment.lastEvent[lang]}
+                        </strong>
+                        <small>{shipment.deliveryDate[lang]}</small>
+                      </span>
+                    </article>
+                  );
+                })}
+                {!visibleShipments.length && (
+                  <div className="courier-print-empty">
+                    <Printer size={29} />
+                    <strong>
+                      {courierShipments.length
+                        ? lang === "ar"
+                          ? "لا توجد شحنات تطابق التصفية الحالية"
+                          : "No shipments match the current filters"
+                        : lang === "ar"
+                          ? "لا توجد شحنات حاليًا مع هذا المندوب"
+                          : "This courier currently holds no shipments"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "لن يخرج كشف فارغ للطباعة."
+                        : "An empty sheet cannot be printed."}
+                    </small>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <footer className="courier-print-sheet__footer">
+              <p>
+                {lang === "ar"
+                  ? "هذا كشف عمل بالحيازة الحالية وليس تسوية مالية. أي تغيير حالة أو تحصيل يُسجّل من صفحة شحنات المناديب."
+                  : "This is a current-custody work sheet, not a financial settlement. Statuses and collections are recorded from Courier shipments."}
+              </p>
+              <div>
+                <span>
+                  <small>{lang === "ar" ? "توقيع المندوب" : "Courier signature"}</small>
+                  <i />
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "مسؤول التشغيل" : "Operations officer"}</small>
+                  <i />
+                </span>
+              </div>
+            </footer>
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function AssignmentScreen({
   lang,
   theme,
@@ -8225,6 +8794,21 @@ function AssignmentScreen({
   function assignAndHandOver() {
     if (!selectedShipments.length) return;
     const assignedIds = new Set(selectedShipments.map((shipment) => shipment.id));
+    const now = new Date();
+    const assignedAt: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      en: now.toLocaleString("en-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    };
     const nextRecords = shipmentRecords.map((shipment) => {
       if (!assignedIds.has(shipment.id)) return shipment;
       const assignmentTask =
@@ -8236,6 +8820,7 @@ function AssignmentScreen({
         custody: { ar: "مع المندوب", en: "With courier" },
         custodyType: "courier" as const,
         courier: selectedCourier.courier,
+        assignedAt,
         required: assignmentTask
           ? { ar: "لا يوجد", en: "None" }
           : shipment.required,
@@ -11475,6 +12060,18 @@ export default function Home() {
         />
       ) : screen === "shipments" ? (
         <ShipmentsScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "courierPrint" ? (
+        <CourierPrintScreen
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
