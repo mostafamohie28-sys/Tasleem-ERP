@@ -67,7 +67,8 @@ type Screen =
   | "shipmentPolicies"
   | "addShipment"
   | "confirmation"
-  | "assignment";
+  | "assignment"
+  | "courierShipments";
 type Scenario =
   | "ready"
   | "loading"
@@ -91,9 +92,10 @@ type Shipment = {
   area: Localized;
   governorate: Localized;
   status: Localized;
+  statusPolicyId?: string;
   statusTone: "blue" | "orange" | "green" | "gray" | "red";
   custody: Localized;
-  custodyType: "warehouse" | "courier";
+  custodyType: "warehouse" | "courier" | "recipient";
   courier: Localized | null;
   amount: number;
   deliveryDate: Localized;
@@ -107,6 +109,20 @@ type Shipment = {
     result: "confirmed" | "no_answer" | "later";
     note: string;
     nextContact: string;
+    timestamp: Localized;
+  }[];
+  statusHistory?: {
+    id: string;
+    statusPolicyId: string;
+    status: Localized;
+    color: string;
+    recordedBy: Localized;
+    collectedAmount: number | null;
+    deliveredPieces: number | null;
+    returnedPieces: number | null;
+    reason: string;
+    note: string;
+    nextDate: string;
     timestamp: Localized;
   }[];
   pieces: number;
@@ -467,8 +483,8 @@ const shipments: Shipment[] = [
     status: { ar: "تم التسليم", en: "Delivered" },
     statusTone: "green",
     custody: { ar: "تم التسليم للمستلم", en: "Delivered to recipient" },
-    custodyType: "courier",
-    courier: { ar: "كريم حسن", en: "Karim Hassan" },
+    custodyType: "recipient",
+    courier: null,
     amount: 980,
     deliveryDate: { ar: "اليوم، 12:10 م", en: "Today, 12:10 PM" },
     required: { ar: "تسوية التحصيل", en: "Settle collection" },
@@ -2479,6 +2495,11 @@ function Sidebar({
           label: t.assignment,
           icon: Truck,
           screen: "assignment" as const,
+        },
+        {
+          label: lang === "ar" ? "شحنات المناديب" : "Courier shipments",
+          icon: PackageCheck,
+          screen: "courierShipments" as const,
         },
         { label: t.warehouse, icon: Warehouse },
       ],
@@ -7185,6 +7206,890 @@ const assignmentCourierProfiles = availableCouriers.map((courier, index) => ({
   code: `CR-${String(2001 + index)}`,
 }));
 
+function CourierShipmentsScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  statuses,
+  onShipmentsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  statuses: StatusPolicy[];
+  onShipmentsChange: (records: Shipment[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const initialCourier =
+    assignmentCourierProfiles.find((profile) =>
+      shipmentRecords.some(
+        (shipment) =>
+          shipment.custodyType === "courier" &&
+          shipment.courier?.en === profile.courier.en,
+      ),
+    ) ?? assignmentCourierProfiles[0];
+  const [courierKey, setCourierKey] = useState(initialCourier.courier.en);
+  const firstShipment =
+    shipmentRecords.find(
+      (shipment) =>
+        shipment.custodyType === "courier" &&
+        shipment.courier?.en === initialCourier.courier.en,
+    ) ?? null;
+  const [selectedId, setSelectedId] = useState(firstShipment?.id ?? "");
+  const [search, setSearch] = useState("");
+  const [selectedStatusId, setSelectedStatusId] = useState("");
+  const [collectedAmount, setCollectedAmount] = useState("");
+  const [deliveredPieces, setDeliveredPieces] = useState("");
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [nextDate, setNextDate] = useState("");
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const selectedCourier =
+    assignmentCourierProfiles.find(
+      (profile) => profile.courier.en === courierKey,
+    ) ?? assignmentCourierProfiles[0];
+  const courierShipments = shipmentRecords.filter(
+    (shipment) =>
+      shipment.custodyType === "courier" &&
+      shipment.courier?.en === selectedCourier.courier.en,
+  );
+  const normalized = search.trim().toLowerCase();
+  const visibleShipments = courierShipments.filter(
+    (shipment) =>
+      !normalized ||
+      [
+        shipment.id,
+        shipment.reference,
+        shipment.phone,
+        shipment.recipient.ar,
+        shipment.recipient.en,
+        shipment.sender.ar,
+        shipment.sender.en,
+        shipment.area.ar,
+        shipment.area.en,
+      ].some((value) => value.toLowerCase().includes(normalized)),
+  );
+  const selectedShipment =
+    courierShipments.find((shipment) => shipment.id === selectedId) ??
+    courierShipments[0] ??
+    null;
+  const courierStatuses = statuses.filter(
+    (status) =>
+      status.state === "published" &&
+      (status.executors.en.includes("Courier") ||
+        status.executors.ar.includes("المندوب")),
+  );
+  const selectedStatus =
+    courierStatuses.find((status) => status.id === selectedStatusId) ?? null;
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const totalCollection = courierShipments.reduce(
+    (sum, shipment) =>
+      sum +
+      shipment.amount +
+      (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0),
+    0,
+  );
+  const totalPieces = courierShipments.reduce(
+    (sum, shipment) => sum + shipment.pieces,
+    0,
+  );
+  const uniqueAreas = new Set(
+    courierShipments.map((shipment) => shipment.area.en),
+  ).size;
+
+  function statusNeeds(fieldName: string) {
+    return Boolean(
+      selectedStatus?.requiredFields.some((field) => field.en === fieldName),
+    );
+  }
+
+  function chooseCourier(nextKey: string) {
+    const nextShipment = shipmentRecords.find(
+      (shipment) =>
+        shipment.custodyType === "courier" &&
+        shipment.courier?.en === nextKey,
+    );
+    setCourierKey(nextKey);
+    setSelectedId(nextShipment?.id ?? "");
+    setSearch("");
+    resetStatusForm();
+  }
+
+  function chooseShipment(id: string) {
+    setSelectedId(id);
+    resetStatusForm();
+  }
+
+  function resetStatusForm() {
+    setSelectedStatusId("");
+    setCollectedAmount("");
+    setDeliveredPieces("");
+    setReason("");
+    setNote("");
+    setNextDate("");
+    setError("");
+  }
+
+  function chooseStatus(status: StatusPolicy) {
+    if (!selectedShipment) return;
+    const total =
+      selectedShipment.amount +
+      (selectedShipment.shippingPayer === "recipient"
+        ? selectedShipment.shippingFee
+        : 0);
+    setSelectedStatusId(status.id);
+    setCollectedAmount(
+      status.requiredFields.some((field) => field.en === "Collected amount")
+        ? String(total)
+        : "",
+    );
+    setDeliveredPieces(
+      status.pieceEffect.en === "All pieces delivered"
+        ? String(selectedShipment.pieces)
+        : status.pieceEffect.en === "All pieces returned"
+          ? "0"
+          : "",
+    );
+    setReason("");
+    setNote("");
+    setNextDate("");
+    setError("");
+  }
+
+  function saveStatus() {
+    if (!selectedShipment || !selectedStatus) return;
+    const missing: string[] = [];
+    if (statusNeeds("Collected amount") && !collectedAmount.trim()) {
+      missing.push(lang === "ar" ? "المبلغ المحصل" : "Collected amount");
+    }
+    if (statusNeeds("Delivered pieces") && deliveredPieces === "") {
+      missing.push(lang === "ar" ? "عدد القطع المسلمة" : "Delivered pieces");
+    }
+    if (statusNeeds("Reason") && !reason.trim()) {
+      missing.push(lang === "ar" ? "سبب الحالة" : "Status reason");
+    }
+    if (statusNeeds("Note") && !note.trim()) {
+      missing.push(lang === "ar" ? "الملاحظة" : "Note");
+    }
+    if (statusNeeds("New date") && !nextDate) {
+      missing.push(lang === "ar" ? "الموعد الجديد" : "New date");
+    }
+    const delivered = deliveredPieces === "" ? null : Number(deliveredPieces);
+    if (
+      delivered !== null &&
+      (delivered < 0 || delivered > selectedShipment.pieces)
+    ) {
+      setError(
+        lang === "ar"
+          ? `عدد القطع المسلمة يجب أن يكون من 0 إلى ${selectedShipment.pieces}`
+          : `Delivered pieces must be between 0 and ${selectedShipment.pieces}`,
+      );
+      return;
+    }
+    if (missing.length) {
+      setError(
+        lang === "ar"
+          ? `استكمل أولًا: ${missing.join("، ")}`
+          : `Complete first: ${missing.join(", ")}`,
+      );
+      return;
+    }
+
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      en: now.toLocaleString("en-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    };
+    const deliveredSnapshot =
+      selectedStatus.pieceEffect.en === "All pieces delivered"
+        ? selectedShipment.pieces
+        : selectedStatus.pieceEffect.en === "All pieces returned"
+          ? 0
+          : delivered;
+    const returnedSnapshot =
+      deliveredSnapshot === null
+        ? null
+        : Math.max(0, selectedShipment.pieces - deliveredSnapshot);
+    const isFullyDelivered =
+      selectedStatus.pieceEffect.en === "All pieces delivered";
+    const nextCustody: Localized = isFullyDelivered
+      ? { ar: "تم التسليم للمستلم", en: "Delivered to recipient" }
+      : selectedStatus.assignmentEffect.en === "Return route"
+        ? { ar: "مسار المرتجعات", en: "Return route" }
+        : selectedStatus.assignmentEffect.en === "End + follow-up queue"
+          ? { ar: "قائمة المتابعة", en: "Follow-up queue" }
+          : { ar: "المخزن الرئيسي", en: "Main warehouse" };
+    const tone: Shipment["statusTone"] =
+      selectedStatus.color.toLowerCase() === "#07835a"
+        ? "green"
+        : selectedStatus.color.toLowerCase() === "#c43737"
+          ? "red"
+          : selectedStatus.color.toLowerCase() === "#e95f00"
+            ? "orange"
+            : "blue";
+    const remaining = courierShipments.filter(
+      (shipment) => shipment.id !== selectedShipment.id,
+    );
+    const nextRecords = shipmentRecords.map((shipment) => {
+      if (shipment.id !== selectedShipment.id) return shipment;
+      return {
+        ...shipment,
+        status: selectedStatus.name,
+        statusPolicyId: selectedStatus.id,
+        statusTone: tone,
+        custody: nextCustody,
+        custodyType: isFullyDelivered
+          ? ("recipient" as const)
+          : ("warehouse" as const),
+        courier: null,
+        deliveryDate: nextDate
+          ? { ar: nextDate, en: nextDate }
+          : shipment.deliveryDate,
+        required: { ar: "لا يوجد", en: "None" },
+        requiredType: "none" as const,
+        lastEvent: {
+          ar: `سجّل المندوب حالة «${selectedStatus.name.ar}» الآن`,
+          en: `Courier recorded “${selectedStatus.name.en}” just now`,
+        },
+        statusHistory: [
+          {
+            id: `status-event-${Date.now()}`,
+            statusPolicyId: selectedStatus.id,
+            status: selectedStatus.name,
+            color: selectedStatus.color,
+            recordedBy: selectedCourier.courier,
+            collectedAmount:
+              collectedAmount === "" ? null : Number(collectedAmount),
+            deliveredPieces: deliveredSnapshot,
+            returnedPieces: returnedSnapshot,
+            reason,
+            note,
+            nextDate,
+            timestamp,
+          },
+          ...(shipment.statusHistory ?? []),
+        ],
+      };
+    });
+    onShipmentsChange(nextRecords);
+    setSelectedId(remaining[0]?.id ?? "");
+    resetStatusForm();
+    setToast(
+      lang === "ar"
+        ? "تم تسجيل الحالة وخرجت الشحنة من حيازة المندوب"
+        : "Status saved and shipment left courier custody",
+    );
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="courierShipments"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <PackageCheck size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar" ? "شحنات المناديب" : "Courier shipments"}
+              </strong>
+              <small>{lang === "ar" ? "الحيازة الحالية" : "Current custody"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content courier-shipments-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar" ? "شحنات المناديب" : "Courier shipments"}
+                </h1>
+                <span className="demo-chip">
+                  {courierShipments.length}{" "}
+                  {lang === "ar" ? "مع المندوب" : "with courier"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "كل ما لم يسجّل المندوب له حالة يظل ظاهرًا في حيازته دون ارتباط بيوم الإسناد."
+                  : "Anything without a recorded result remains in courier custody, regardless of assignment day."}
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("assignment")}
+            >
+              <Truck size={17} />
+              {lang === "ar" ? "فتح الإسناد" : "Open assignment"}
+            </button>
+          </div>
+
+          <section className="courier-custody-truth">
+            <ShieldCheck size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "تسجيل أي حالة من المندوب ينهي حيازته للشحنة"
+                  : "Any courier-recorded status ends courier custody"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "حتى التأجيل يخرج الشحنة من قائمته؛ أما عدم تسجيل حالة فيُبقيها معه كما هي."
+                  : "Even deferral removes it from this list; no status means it stays with the courier."}
+              </small>
+            </span>
+          </section>
+
+          <section className="courier-custody-metrics">
+            <article>
+              <span><Boxes size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "الشحنات معه" : "Shipments held"}</small>
+                <strong>{courierShipments.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span><PackageCheck size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "إجمالي القطع" : "Total pieces"}</small>
+                <strong>{totalPieces}</strong>
+              </div>
+            </article>
+            <article>
+              <span><HandCoins size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "التحصيل المتوقع" : "Expected collection"}</small>
+                <strong>{money.format(totalCollection)}</strong>
+              </div>
+            </article>
+            <article>
+              <span><MapPin size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "مناطق التوزيع" : "Delivery areas"}</small>
+                <strong>{uniqueAreas}</strong>
+              </div>
+            </article>
+          </section>
+
+          <div className="courier-custody-layout">
+            <aside className="custody-courier-panel">
+              <div className="assignment-panel-title">
+                <span className="entry-step">1</span>
+                <span>
+                  <strong>{lang === "ar" ? "المندوب" : "Courier"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "اختر لعرض حيازته الحالية"
+                      : "Choose to view current custody"}
+                  </small>
+                </span>
+              </div>
+              <div className="custody-courier-list">
+                {assignmentCourierProfiles.map((profile) => {
+                  const load = shipmentRecords.filter(
+                    (shipment) =>
+                      shipment.custodyType === "courier" &&
+                      shipment.courier?.en === profile.courier.en,
+                  ).length;
+                  return (
+                    <button
+                      type="button"
+                      key={profile.code}
+                      className={
+                        profile.courier.en === courierKey
+                          ? "custody-courier custody-courier--selected"
+                          : "custody-courier"
+                      }
+                      onClick={() => chooseCourier(profile.courier.en)}
+                    >
+                      <span className="mini-avatar">
+                        {profile.courier[lang].slice(0, 1)}
+                      </span>
+                      <span>
+                        <strong>{profile.courier[lang]}</strong>
+                        <small>{profile.code} · {profile.vehicle[lang]}</small>
+                      </span>
+                      <span>
+                        <strong>{load}</strong>
+                        <small>{lang === "ar" ? "شحنة" : "shipments"}</small>
+                      </span>
+                      {profile.courier.en === courierKey && <Check size={15} />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="custody-courier-contact">
+                <span className="mini-avatar">
+                  {selectedCourier.courier[lang].slice(0, 1)}
+                </span>
+                <span>
+                  <strong>{selectedCourier.courier[lang]}</strong>
+                  <small dir="ltr">{selectedCourier.phone}</small>
+                </span>
+                <Phone size={17} />
+              </div>
+            </aside>
+
+            <section className="custody-shipments-panel">
+              <div className="custody-list-heading">
+                <div>
+                  <span className="entry-step">2</span>
+                  <span>
+                    <strong>
+                      {lang === "ar" ? "الشحنات التي ما زالت معه" : "Still with courier"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "من كل أيام الإسناد السابقة"
+                        : "Across every assignment day"}
+                    </small>
+                  </span>
+                </div>
+                <span>
+                  {visibleShipments.length} {lang === "ar" ? "شحنة" : "shipments"}
+                </span>
+              </div>
+              <label className="custody-search">
+                <Search size={17} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "رقم الشحنة، الهاتف، المستلم، الراسل أو المنطقة..."
+                      : "Shipment, phone, recipient, sender or area..."
+                  }
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")}>
+                    <X size={15} />
+                  </button>
+                )}
+              </label>
+              <div className="custody-shipment-list">
+                {visibleShipments.map((shipment) => {
+                  const total =
+                    shipment.amount +
+                    (shipment.shippingPayer === "recipient"
+                      ? shipment.shippingFee
+                      : 0);
+                  return (
+                    <button
+                      type="button"
+                      key={shipment.id}
+                      className={
+                        selectedShipment?.id === shipment.id
+                          ? "custody-shipment custody-shipment--selected"
+                          : "custody-shipment"
+                      }
+                      onClick={() => chooseShipment(shipment.id)}
+                    >
+                      <span className="custody-shipment__id">
+                        <strong>{shipment.id}</strong>
+                        <small>{shipment.reference}</small>
+                      </span>
+                      <span className="custody-shipment__person">
+                        <span className="mini-avatar">
+                          {shipment.recipient[lang].slice(0, 1)}
+                        </span>
+                        <span>
+                          <strong>{shipment.recipient[lang]}</strong>
+                          <small dir="ltr">{shipment.phone}</small>
+                        </span>
+                      </span>
+                      <span className="custody-shipment__route">
+                        <strong>{shipment.area[lang]}</strong>
+                        <small>{shipment.sender[lang]}</small>
+                      </span>
+                      <span className="custody-shipment__pieces">
+                        <strong>{shipment.pieces}</strong>
+                        <small>{lang === "ar" ? "قطعة" : "pieces"}</small>
+                      </span>
+                      <span className="custody-shipment__money">
+                        <strong>{money.format(total)}</strong>
+                        <small>{lang === "ar" ? "تحصيل" : "collection"}</small>
+                      </span>
+                      <span
+                        className={`status-badge status-badge--${shipment.statusTone}`}
+                      >
+                        {shipment.status[lang]}
+                      </span>
+                      {lang === "ar" ? (
+                        <ChevronLeft size={16} />
+                      ) : (
+                        <ChevronRight size={16} />
+                      )}
+                    </button>
+                  );
+                })}
+                {visibleShipments.length === 0 && (
+                  <div className="custody-empty">
+                    <PackageCheck size={30} />
+                    <strong>
+                      {courierShipments.length
+                        ? lang === "ar"
+                          ? "لا توجد نتيجة تطابق البحث"
+                          : "No shipment matches your search"
+                        : lang === "ar"
+                          ? "لا توجد شحنات في حيازة هذا المندوب"
+                          : "This courier has no shipments in custody"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "أي شحنات جديدة تُسلّم له من صفحة الإسناد ستظهر هنا فورًا."
+                        : "Anything handed over through assignment appears here immediately."}
+                    </small>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <aside className="courier-status-panel">
+              {selectedShipment ? (
+                <>
+                  <div className="courier-status-heading">
+                    <div>
+                      <span className="mini-avatar">
+                        {selectedShipment.recipient[lang].slice(0, 1)}
+                      </span>
+                      <span>
+                        <strong>{selectedShipment.recipient[lang]}</strong>
+                        <small>
+                          {selectedShipment.id} · {selectedShipment.sender[lang]}
+                        </small>
+                      </span>
+                    </div>
+                    <span
+                      className={`status-badge status-badge--${selectedShipment.statusTone}`}
+                    >
+                      {selectedShipment.status[lang]}
+                    </span>
+                  </div>
+
+                  <div className="courier-shipment-facts">
+                    <span>
+                      <Phone size={15} />
+                      <b dir="ltr">{selectedShipment.phone}</b>
+                    </span>
+                    <span>
+                      <MapPin size={15} />
+                      <b>{selectedShipment.area[lang]}</b>
+                    </span>
+                    <span>
+                      <Boxes size={15} />
+                      <b>
+                        {selectedShipment.pieces}{" "}
+                        {lang === "ar" ? "قطعة" : "pieces"}
+                      </b>
+                    </span>
+                    <span>
+                      <HandCoins size={15} />
+                      <b>
+                        {money.format(
+                          selectedShipment.amount +
+                            (selectedShipment.shippingPayer === "recipient"
+                              ? selectedShipment.shippingFee
+                              : 0),
+                        )}
+                      </b>
+                    </span>
+                  </div>
+
+                  <div className="courier-status-choice">
+                    <div>
+                      <strong>
+                        {lang === "ar" ? "تسجيل حالة الشحنة" : "Record shipment status"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "الحالات المسموحة للمندوب فقط"
+                          : "Only statuses allowed for couriers"}
+                      </small>
+                    </div>
+                    {courierStatuses.length ? (
+                      <div className="courier-status-options">
+                        {courierStatuses.map((status) => (
+                          <button
+                            type="button"
+                            key={status.id}
+                            className={
+                              selectedStatusId === status.id ? "active" : ""
+                            }
+                            style={
+                              {
+                                "--policy-accent": status.color,
+                              } as CSSProperties
+                            }
+                            onClick={() => chooseStatus(status)}
+                          >
+                            <i />
+                            <span>
+                              <strong>{status.name[lang]}</strong>
+                              <small>{status.financialEffect[lang]}</small>
+                            </span>
+                            {selectedStatusId === status.id && <Check size={14} />}
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="no-courier-statuses">
+                        <CircleAlert size={18} />
+                        <span>
+                          <strong>
+                            {lang === "ar"
+                              ? "لا توجد حالات مسموحة للمندوب"
+                              : "No courier-enabled statuses"}
+                          </strong>
+                          <button
+                            type="button"
+                            onClick={() => onNavigate("statuses")}
+                          >
+                            {lang === "ar"
+                              ? "فتح حالات الشحنات"
+                              : "Open shipment statuses"}
+                          </button>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedStatus && (
+                    <div className="courier-status-fields">
+                      <div className="status-effect-preview">
+                        <GitBranch size={16} />
+                        <span>
+                          <strong>{selectedStatus.assignmentEffect[lang]}</strong>
+                          <small>
+                            {lang === "ar"
+                              ? "بعد الحفظ ستخرج من حيازة المندوب"
+                              : "It leaves courier custody after save"}
+                          </small>
+                        </span>
+                      </div>
+                      <div className="courier-dynamic-fields">
+                        {statusNeeds("Collected amount") && (
+                          <label>
+                            <span>{lang === "ar" ? "المبلغ المحصل" : "Collected amount"} *</span>
+                            <span className="courier-field-control">
+                              <input
+                                type="number"
+                                min="0"
+                                value={collectedAmount}
+                                onChange={(event) =>
+                                  setCollectedAmount(event.target.value)
+                                }
+                              />
+                              <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                            </span>
+                          </label>
+                        )}
+                        {statusNeeds("Delivered pieces") && (
+                          <label>
+                            <span>
+                              {lang === "ar"
+                                ? "عدد القطع المسلمة"
+                                : "Delivered pieces"}{" "}
+                              *
+                            </span>
+                            <span className="courier-field-control">
+                              <input
+                                type="number"
+                                min="0"
+                                max={selectedShipment.pieces}
+                                value={deliveredPieces}
+                                onChange={(event) =>
+                                  setDeliveredPieces(event.target.value)
+                                }
+                              />
+                              <b>
+                                / {selectedShipment.pieces}{" "}
+                                {lang === "ar" ? "قطعة" : "pcs"}
+                              </b>
+                            </span>
+                            {deliveredPieces !== "" && (
+                              <small>
+                                {lang === "ar" ? "المرتجع تلقائيًا:" : "Auto return:"}{" "}
+                                {Math.max(
+                                  0,
+                                  selectedShipment.pieces -
+                                    Number(deliveredPieces || 0),
+                                )}
+                              </small>
+                            )}
+                          </label>
+                        )}
+                        {statusNeeds("Reason") && (
+                          <label>
+                            <span>{lang === "ar" ? "سبب الحالة" : "Status reason"} *</span>
+                            <input
+                              value={reason}
+                              onChange={(event) => setReason(event.target.value)}
+                              placeholder={
+                                lang === "ar"
+                                  ? "اكتب السبب..."
+                                  : "Enter reason..."
+                              }
+                            />
+                          </label>
+                        )}
+                        {statusNeeds("New date") && (
+                          <label>
+                            <span>{lang === "ar" ? "الموعد الجديد" : "New date"} *</span>
+                            <input
+                              type="datetime-local"
+                              value={nextDate}
+                              onChange={(event) => setNextDate(event.target.value)}
+                            />
+                          </label>
+                        )}
+                        {statusNeeds("Note") && (
+                          <label className="courier-note-field">
+                            <span>{lang === "ar" ? "ملاحظة" : "Note"} *</span>
+                            <textarea
+                              value={note}
+                              onChange={(event) => setNote(event.target.value)}
+                              placeholder={
+                                lang === "ar"
+                                  ? "تفاصيل الحالة..."
+                                  : "Status details..."
+                              }
+                            />
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="courier-status-error" role="alert">
+                      <CircleAlert size={16} />
+                      {error}
+                    </div>
+                  )}
+
+                  <div className="courier-status-actions">
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={resetStatusForm}
+                    >
+                      {lang === "ar" ? "إلغاء" : "Cancel"}
+                    </button>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={!selectedStatus}
+                      onClick={saveStatus}
+                    >
+                      <Save size={17} />
+                      {lang === "ar" ? "حفظ الحالة" : "Save status"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="courier-status-empty">
+                  <Boxes size={29} />
+                  <strong>
+                    {lang === "ar"
+                      ? "اختر شحنة لتسجيل حالتها"
+                      : "Choose a shipment to record its status"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "ستظهر بياناتها والحالات المسموحة هنا."
+                      : "Its details and allowed statuses will appear here."}
+                  </small>
+                </div>
+              )}
+            </aside>
+          </div>
+        </main>
+      </div>
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssignmentScreen({
   lang,
   theme,
@@ -10187,8 +11092,10 @@ function ShipmentsScreen({
                                 <span className="custody-cell">
                                   {shipment.custodyType === "warehouse" ? (
                                     <Warehouse size={15} />
-                                  ) : (
+                                  ) : shipment.custodyType === "courier" ? (
                                     <Truck size={15} />
+                                  ) : (
+                                    <PackageCheck size={15} />
                                   )}
                                   <span className="custody-cell__copy">
                                     <strong>{shipment.custody[lang]}</strong>
@@ -10290,8 +11197,10 @@ function ShipmentsScreen({
                             <span>
                               {shipment.custodyType === "warehouse" ? (
                                 <Warehouse size={14} />
-                              ) : (
+                              ) : shipment.custodyType === "courier" ? (
                                 <Truck size={14} />
+                              ) : (
+                                <PackageCheck size={14} />
                               )}
                               {shipment.custody[lang]}
                             </span>
@@ -10407,7 +11316,18 @@ export default function Home() {
           setSharedShipmentSettings(parsed.shipmentSettings);
         }
         if (Array.isArray(parsed.shipments)) {
-          setSharedShipments(parsed.shipments);
+          setSharedShipments(
+            parsed.shipments.map((shipment) =>
+              shipment.custodyType === "courier" &&
+              shipment.custody.en === "Delivered to recipient"
+                ? {
+                    ...shipment,
+                    custodyType: "recipient" as const,
+                    courier: null,
+                  }
+                : shipment,
+            ),
+          );
         }
       }
     } catch {
@@ -10558,6 +11478,20 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "courierShipments" ? (
+        <CourierShipmentsScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          statuses={sharedStatuses}
+          onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
