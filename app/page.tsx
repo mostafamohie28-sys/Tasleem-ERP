@@ -72,6 +72,7 @@ type Screen =
   | "courierRates"
   | "shipmentPolicies"
   | "incompleteShipments"
+  | "warehouse"
   | "addShipment"
   | "confirmation"
   | "assignment"
@@ -96,6 +97,22 @@ type TabId = "all" | "action" | "warehouse" | "courier" | "incomplete";
 type Localized = {
   ar: string;
   en: string;
+};
+
+type WarehouseMovement = {
+  id: string;
+  type:
+    | "entered"
+    | "location_changed"
+    | "handed_to_courier"
+    | "return_received"
+    | "sender_handover";
+  pieces: number;
+  from: Localized;
+  to: Localized;
+  performedBy: Localized;
+  note: string;
+  timestamp: Localized;
 };
 
 type SenderRecord = {
@@ -148,7 +165,12 @@ type Shipment = {
   statusPolicyId?: string;
   statusTone: "blue" | "orange" | "green" | "gray" | "red";
   custody: Localized;
-  custodyType: "warehouse" | "courier" | "recipient";
+  custodyType:
+    | "warehouse"
+    | "courier"
+    | "return_route"
+    | "recipient"
+    | "sender";
   courier: Localized | null;
   assignedAt?: Localized;
   amount: number;
@@ -193,6 +215,9 @@ type Shipment = {
   shippingFee: number;
   /** Shipping amount shown to and collected from the recipient. */
   recipientShippingCharge?: number;
+  /** Pricing source saved with the shipment so later policy edits do not rewrite history. */
+  recipientShippingSource?: "company" | "custom";
+  recipientShippingAreaId?: string;
   shippingPayer: "recipient" | "sender";
   customValues?: Record<string, string>;
   customFinancialSnapshot?: {
@@ -200,6 +225,8 @@ type Shipment = {
     senderDeductions: number;
     companyCosts: number;
   };
+  warehouseLocation?: string;
+  warehouseHistory?: WarehouseMovement[];
   address: Localized;
 };
 
@@ -2673,6 +2700,11 @@ type ShippingChargeMode =
   | "fixed"
   | "manual";
 
+type RecipientAreaRate = {
+  source: "company" | "custom";
+  amount: number;
+};
+
 type ShipmentDataSettings = {
   confirmationMode: "off" | "optional" | "required_before_assignment";
   confirmationAttempts: number;
@@ -2701,6 +2733,7 @@ type SenderShipmentPolicy = {
   sender: Localized;
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
+  recipientAreaRates?: Record<string, RecipientAreaRate>;
   state?: "draft" | "published";
   version?: number;
   updatedAt?: Localized;
@@ -2717,6 +2750,7 @@ type SenderPolicyHistoryEntry = {
   updatedBy: Localized;
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
+  recipientAreaRates?: Record<string, RecipientAreaRate>;
   overrideKeys?: (keyof ShipmentDataSettings)[];
   fieldOverrideCodes?: string[];
 };
@@ -3031,8 +3065,6 @@ const senderShipmentPoliciesDemoData: SenderShipmentPolicy[] = [
       "confirmationMode",
       "confirmationAttempts",
       "allowAssignmentWithoutConfirmation",
-      "shippingChargeMode",
-      "shippingChargeValue",
       "recipientPriceDisplay",
       "deliveryProof",
     ],
@@ -3045,11 +3077,13 @@ const senderShipmentPoliciesDemoData: SenderShipmentPolicy[] = [
       confirmationMode: "required_before_assignment",
       confirmationAttempts: 3,
       allowAssignmentWithoutConfirmation: false,
-      shippingChargeMode: "company_plus",
-      shippingChargeValue: 30,
       recipientPriceDisplay: "separate_shipping",
       deliveryProof: "signature",
     }),
+    recipientAreaRates: {
+      "area-nasr-city": { source: "custom", amount: 100 },
+      "area-maadi": { source: "custom", amount: 95 },
+    },
     history: [],
   },
   {
@@ -3238,6 +3272,42 @@ function calculateRecipientShippingCharge(
     return Math.max(0, Number(manualValue) || 0);
   }
   return Math.max(0, companyFee);
+}
+
+function companyDeliveryPriceForArea(
+  priceList: PriceListRecord | null,
+  statuses: StatusPolicy[],
+  areaId: string,
+) {
+  const deliveredStatus =
+    statuses.find(
+      (status) =>
+        status.state === "published" &&
+        status.appearsInPricing &&
+        status.code.toUpperCase() === "DELIVERED",
+    ) ??
+    statuses.find(
+      (status) => status.state === "published" && status.appearsInPricing,
+    );
+  if (!priceList || !deliveredStatus) return null;
+  const price = priceList.prices[areaId]?.[deliveredStatus.id];
+  return typeof price === "number" ? price : null;
+}
+
+function recipientAreaShippingCharge(
+  companyFee: number,
+  payer: "recipient" | "sender",
+  sender: Localized,
+  areaId: string,
+  senderPolicies: SenderShipmentPolicy[],
+) {
+  if (payer === "sender") return 0;
+  const policy = findEffectiveSenderShipmentPolicy(sender, senderPolicies);
+  const rate = policy?.recipientAreaRates?.[areaId];
+  return Math.max(
+    0,
+    rate?.source === "custom" ? rate.amount : companyFee,
+  );
 }
 
 const shipmentPolicyCopy = {
@@ -3738,7 +3808,11 @@ function Sidebar({
           icon: Landmark,
           screen: "treasury" as const,
         },
-        { label: t.warehouse, icon: Warehouse },
+        {
+          label: t.warehouse,
+          icon: Warehouse,
+          screen: "warehouse" as const,
+        },
       ],
     },
     {
@@ -5885,6 +5959,8 @@ function SenderEditor({
   isNew,
   lang,
   appliedPriceList,
+  governorates,
+  statuses,
   companyFields,
   companySettings,
   senderPolicy,
@@ -5897,6 +5973,8 @@ function SenderEditor({
   isNew: boolean;
   lang: Lang;
   appliedPriceList: PriceListRecord | null;
+  governorates: GovernorateRecord[];
+  statuses: StatusPolicy[];
   companyFields: ShipmentFieldPolicy[];
   companySettings: ShipmentDataSettings;
   senderPolicy: SenderShipmentPolicy | null;
@@ -5945,9 +6023,33 @@ function SenderEditor({
       : [],
   );
   const [policySearch, setPolicySearch] = useState("");
+  const [recipientRateSearch, setRecipientRateSearch] = useState("");
   const [shippingPolicyPreviewFee, setShippingPolicyPreviewFee] = useState(70);
   const [shippingPolicyPreviewManual, setShippingPolicyPreviewManual] =
     useState(100);
+  const [recipientAreaRates, setRecipientAreaRates] = useState<
+    Record<string, RecipientAreaRate>
+  >(() =>
+    Object.fromEntries(
+      governorates.flatMap((governorate) =>
+        governorate.areas.map((area) => {
+          const saved = senderPolicy?.recipientAreaRates?.[area.id];
+          const companyPrice =
+            companyDeliveryPriceForArea(
+              appliedPriceList,
+              statuses,
+              area.id,
+            ) ?? 0;
+          return [
+            area.id,
+            saved?.source === "custom"
+              ? saved
+              : { source: "company" as const, amount: companyPrice },
+          ];
+        }),
+      ),
+    ),
+  );
   const [editingPolicyField, setEditingPolicyField] =
     useState<ShipmentFieldPolicy | null>(null);
   const [isNewPolicyField, setIsNewPolicyField] = useState(false);
@@ -5961,6 +6063,7 @@ function SenderEditor({
             sender: draft.name,
             fields: policyFields.map(normalizeShipmentField),
             settings: normalizeShipmentDataSettings(policySettings),
+            recipientAreaRates,
             state: policyState,
             version: senderPolicy?.version ?? 0,
             updatedAt: senderPolicy?.updatedAt,
@@ -6103,6 +6206,27 @@ function SenderEditor({
       })),
     );
     setPolicySettings(normalizeShipmentDataSettings(source.settings));
+    setRecipientAreaRates(
+      Object.fromEntries(
+        governorates.flatMap((governorate) =>
+          governorate.areas.map((area) => {
+            const copied = source.recipientAreaRates?.[area.id];
+            const companyPrice =
+              companyDeliveryPriceForArea(
+                appliedPriceList,
+                statuses,
+                area.id,
+              ) ?? 0;
+            return [
+              area.id,
+              copied?.source === "custom"
+                ? { ...copied }
+                : { source: "company" as const, amount: companyPrice },
+            ];
+          }),
+        ),
+      ),
+    );
     setOverrideKeys(
       source.overrideKeys ?? allSenderSettingKeys,
     );
@@ -6123,6 +6247,27 @@ function SenderEditor({
       })),
     );
     setPolicySettings(normalizeShipmentDataSettings(entry.settings));
+    setRecipientAreaRates(
+      Object.fromEntries(
+        governorates.flatMap((governorate) =>
+          governorate.areas.map((area) => {
+            const restored = entry.recipientAreaRates?.[area.id];
+            const companyPrice =
+              companyDeliveryPriceForArea(
+                appliedPriceList,
+                statuses,
+                area.id,
+              ) ?? 0;
+            return [
+              area.id,
+              restored?.source === "custom"
+                ? { ...restored }
+                : { source: "company" as const, amount: companyPrice },
+            ];
+          }),
+        ),
+      ),
+    );
     setOverrideKeys(entry.overrideKeys ?? allSenderSettingKeys);
     setFieldOverrideCodes(
       entry.fieldOverrideCodes ?? entry.fields.map((field) => field.code),
@@ -6154,6 +6299,48 @@ function SenderEditor({
     );
   }
 
+  const recipientPricingRows = governorates.flatMap((governorate) =>
+    governorate.areas
+      .filter((area) => area.state === "active")
+      .map((area) => {
+        const companyPrice =
+          companyDeliveryPriceForArea(
+            appliedPriceList,
+            statuses,
+            area.id,
+          ) ?? 0;
+        const savedRate = recipientAreaRates[area.id];
+        const source = savedRate?.source ?? "company";
+        const recipientPrice =
+          source === "custom" ? savedRate.amount : companyPrice;
+        return {
+          governorate,
+          area,
+          companyPrice,
+          recipientPrice,
+          source,
+          difference: recipientPrice - companyPrice,
+        };
+      }),
+  );
+  const normalizedRecipientRateSearch = recipientRateSearch
+    .trim()
+    .toLowerCase();
+  const visibleRecipientPricingRows = recipientPricingRows.filter((row) =>
+    normalizedRecipientRateSearch
+      ? [
+          row.governorate.name.ar,
+          row.governorate.name.en,
+          row.area.name.ar,
+          row.area.name.en,
+        ].some((value) =>
+          value.toLowerCase().includes(normalizedRecipientRateSearch),
+        )
+      : true,
+  );
+  const customRecipientRateCount = recipientPricingRows.filter(
+    (row) => row.source === "custom",
+  ).length;
   const shippingPolicyPreviewCharge = calculateRecipientShippingCharge(
     shippingPolicyPreviewFee,
     "recipient",
@@ -6162,6 +6349,26 @@ function SenderEditor({
   );
   const shippingPolicyPreviewDifference =
     shippingPolicyPreviewCharge - shippingPolicyPreviewFee;
+
+  function updateRecipientAreaRate(areaId: string, amount: number) {
+    setRecipientAreaRates((current) => ({
+      ...current,
+      [areaId]: {
+        source: "custom",
+        amount: Math.max(0, amount),
+      },
+    }));
+  }
+
+  function resetRecipientAreaRate(areaId: string, companyPrice: number) {
+    setRecipientAreaRates((current) => ({
+      ...current,
+      [areaId]: {
+        source: "company",
+        amount: companyPrice,
+      },
+    }));
+  }
 
   return (
     <>
@@ -6851,6 +7058,231 @@ function SenderEditor({
                             <ChevronDown size={15} />
                           </span>
                         </label>
+                        <article className="sender-recipient-area-pricing">
+                          <div className="sender-recipient-area-pricing__heading">
+                            <span>
+                              <strong>
+                                {lang === "ar"
+                                  ? "أسعار الشحن للمستلم حسب المنطقة"
+                                  : "Recipient shipping prices by area"}
+                              </strong>
+                              <small>
+                                {lang === "ar"
+                                  ? "سعر الشركة للقراءة من قائمة الأسعار، وسعر المستلم يبدأ به تلقائيًا ويمكن تخصيصه لهذه المنطقة فقط."
+                                  : "Company fee is read from the price list. The recipient price starts with it and can be customized for this area only."}
+                              </small>
+                            </span>
+                            <span className="sender-recipient-area-pricing__list">
+                              <ReceiptText size={15} />
+                              <span>
+                                <small>
+                                  {lang === "ar"
+                                    ? "قائمة أسعار الشركة"
+                                    : "Company price list"}
+                                </small>
+                                <strong>
+                                  {appliedPriceList?.name[lang] ??
+                                    (lang === "ar"
+                                      ? "غير مرتبطة"
+                                      : "Not linked")}
+                                </strong>
+                              </span>
+                            </span>
+                          </div>
+
+                          <div className="sender-recipient-area-pricing__summary">
+                            <span>
+                              <strong>{recipientPricingRows.length}</strong>
+                              <small>
+                                {lang === "ar" ? "منطقة مفعلة" : "active areas"}
+                              </small>
+                            </span>
+                            <span>
+                              <strong>
+                                {recipientPricingRows.length -
+                                  customRecipientRateCount}
+                              </strong>
+                              <small>
+                                {lang === "ar"
+                                  ? "تتبع سعر الشركة"
+                                  : "follow company fee"}
+                              </small>
+                            </span>
+                            <span>
+                              <strong>{customRecipientRateCount}</strong>
+                              <small>
+                                {lang === "ar"
+                                  ? "بسعر مستلم مخصص"
+                                  : "custom recipient rates"}
+                              </small>
+                            </span>
+                          </div>
+
+                          <label className="shipment-search sender-recipient-rate-search">
+                            <Search size={16} />
+                            <input
+                              value={recipientRateSearch}
+                              onChange={(event) =>
+                                setRecipientRateSearch(event.target.value)
+                              }
+                              placeholder={
+                                lang === "ar"
+                                  ? "ابحث عن محافظة أو منطقة..."
+                                  : "Search governorate or area..."
+                              }
+                            />
+                          </label>
+
+                          <div className="recipient-rate-table">
+                            <div className="recipient-rate-table__head">
+                              <span>
+                                {lang === "ar" ? "المنطقة" : "Area"}
+                              </span>
+                              <span>
+                                {lang === "ar"
+                                  ? "سعر الشركة"
+                                  : "Company fee"}
+                              </span>
+                              <span>
+                                {lang === "ar"
+                                  ? "سعر المستلم"
+                                  : "Recipient price"}
+                              </span>
+                              <span>
+                                {lang === "ar"
+                                  ? "فرق الراسل"
+                                  : "Sender difference"}
+                              </span>
+                              <span>
+                                {lang === "ar" ? "مصدر السعر" : "Price source"}
+                              </span>
+                            </div>
+                            <div className="recipient-rate-table__body">
+                              {visibleRecipientPricingRows.map((row) => (
+                                <article
+                                  className="recipient-rate-row"
+                                  key={row.area.id}
+                                >
+                                  <span className="recipient-rate-row__area">
+                                    <strong>{row.area.name[lang]}</strong>
+                                    <small>
+                                      {row.governorate.name[lang]}
+                                    </small>
+                                  </span>
+                                  <span className="recipient-rate-row__company">
+                                    <strong>
+                                      {row.companyPrice.toLocaleString(
+                                        lang === "ar" ? "ar-EG" : "en-EG",
+                                      )}{" "}
+                                      {lang === "ar" ? "ج.م" : "EGP"}
+                                    </strong>
+                                    <small>
+                                      {lang === "ar"
+                                        ? "من القائمة"
+                                        : "From price list"}
+                                    </small>
+                                  </span>
+                                  <label className="recipient-rate-input">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={row.recipientPrice}
+                                      onChange={(event) =>
+                                        updateRecipientAreaRate(
+                                          row.area.id,
+                                          Number(event.target.value) || 0,
+                                        )
+                                      }
+                                      aria-label={
+                                        lang === "ar"
+                                          ? `سعر المستلم لمنطقة ${row.area.name.ar}`
+                                          : `Recipient rate for ${row.area.name.en}`
+                                      }
+                                    />
+                                    <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                                  </label>
+                                  <span
+                                    className={
+                                      row.difference > 0
+                                        ? "recipient-rate-difference recipient-rate-difference--positive"
+                                        : row.difference < 0
+                                          ? "recipient-rate-difference recipient-rate-difference--negative"
+                                          : "recipient-rate-difference"
+                                    }
+                                  >
+                                    <strong>
+                                      {row.difference > 0 ? "+" : ""}
+                                      {row.difference.toLocaleString(
+                                        lang === "ar" ? "ar-EG" : "en-EG",
+                                      )}{" "}
+                                      {lang === "ar" ? "ج.م" : "EGP"}
+                                    </strong>
+                                    <small>
+                                      {row.difference > 0
+                                        ? lang === "ar"
+                                          ? "للراسل"
+                                          : "to sender"
+                                        : row.difference < 0
+                                          ? lang === "ar"
+                                            ? "على الراسل"
+                                            : "borne by sender"
+                                          : lang === "ar"
+                                            ? "لا فرق"
+                                            : "No difference"}
+                                    </small>
+                                  </span>
+                                  <span className="recipient-rate-source">
+                                    {row.source === "custom" ? (
+                                      <>
+                                        <b className="policy-scope-chip policy-scope-chip--custom">
+                                          {lang === "ar"
+                                            ? "سعر مخصص"
+                                            : "Custom rate"}
+                                        </b>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            resetRecipientAreaRate(
+                                              row.area.id,
+                                              row.companyPrice,
+                                            )
+                                          }
+                                        >
+                                          {lang === "ar"
+                                            ? "استخدام سعر الشركة"
+                                            : "Use company fee"}
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <b className="policy-scope-chip">
+                                        {lang === "ar"
+                                          ? "يتبع سعر الشركة"
+                                          : "Follows company fee"}
+                                      </b>
+                                    )}
+                                  </span>
+                                </article>
+                              ))}
+                            </div>
+                          </div>
+
+                          <p className="sender-recipient-area-pricing__formula">
+                            <ShieldCheck size={15} />
+                            {lang === "ar"
+                              ? "مستحق الراسل = قيمة الطلب + سعر شحن المستلم للمنطقة − سعر شحن الشركة − الخصومات الأخرى."
+                              : "Sender due = order value + recipient shipping for the area − company shipping fee − other deductions."}
+                          </p>
+
+                          {policySettings.defaultShippingPayer === "sender" && (
+                            <p className="sender-recipient-area-pricing__warning">
+                              <CircleAlert size={15} />
+                              {lang === "ar"
+                                ? "الراسل هو المتحمل الافتراضي؛ لذلك لا يضاف سعر المستلم إلا عند تغيير المتحمل إلى المستلم داخل الشحنة."
+                                : "The sender is the default payer, so the recipient area price is used only when the payer is changed to recipient on the shipment."}
+                            </p>
+                          )}
+                        </article>
+                        {false && (
                         <article className="sender-shipping-charge-policy">
                           <div className="sender-shipping-charge-policy__heading">
                             <span>
@@ -7146,6 +7578,7 @@ function SenderEditor({
                             )}
                           </div>
                         </article>
+                        )}
                       </div>
                       <div className="sender-policy-toggles">
                         <button
@@ -7736,6 +8169,8 @@ function SendersScreen({
   theme,
   records,
   priceLists,
+  governorates,
+  statuses,
   shipmentRecords,
   senderPolicies,
   companyFields,
@@ -7755,6 +8190,8 @@ function SendersScreen({
   theme: Theme;
   records: SenderRecord[];
   priceLists: PriceListRecord[];
+  governorates: GovernorateRecord[];
+  statuses: StatusPolicy[];
   shipmentRecords: Shipment[];
   senderPolicies: SenderShipmentPolicy[];
   companyFields: ShipmentFieldPolicy[];
@@ -7925,6 +8362,13 @@ function SendersScreen({
             },
           fields: previousPolicy.fields.map(normalizeShipmentField),
           settings: normalizeShipmentDataSettings(previousPolicy.settings),
+          recipientAreaRates: previousPolicy.recipientAreaRates
+            ? Object.fromEntries(
+                Object.entries(previousPolicy.recipientAreaRates).map(
+                  ([areaId, rate]) => [areaId, { ...rate }],
+                ),
+              )
+            : undefined,
           overrideKeys: previousPolicy.overrideKeys,
           fieldOverrideCodes: previousPolicy.fieldOverrideCodes,
         });
@@ -8202,6 +8646,8 @@ function SendersScreen({
           isNew={isNew}
           lang={lang}
           appliedPriceList={linkedPriceList(editing)}
+          governorates={governorates}
+          statuses={statuses}
           companyFields={companyFields}
           companySettings={companySettings}
           senderPolicy={
@@ -12309,6 +12755,7 @@ function SenderPolicy360Drawer({
 }) {
   const [tab, setTab] = useState<SenderPolicy360Tab>("summary");
   const [companyFee, setCompanyFee] = useState(70);
+  const [recipientAreaFee, setRecipientAreaFee] = useState(100);
   const [orderValue, setOrderValue] = useState(1000);
   const [confirmed, setConfirmed] = useState(true);
   const [completeData, setCompleteData] = useState(true);
@@ -12318,12 +12765,13 @@ function SenderPolicy360Drawer({
   const overrideKeys = policy?.overrideKeys ?? [];
   const fieldOverrideCodes = policy?.fieldOverrideCodes ?? [];
   const settings = row.effectiveSettings;
-  const recipientCharge = calculateRecipientShippingCharge(
-    companyFee,
-    settings.defaultShippingPayer,
-    settings,
-    String(settings.shippingChargeValue),
-  );
+  const customRecipientRates = Object.values(
+    policy?.recipientAreaRates ?? {},
+  ).filter((rate) => rate.source === "custom");
+  const recipientCharge =
+    settings.defaultShippingPayer === "recipient"
+      ? recipientAreaFee
+      : 0;
   const assignmentAllowed =
     completeData &&
     (settings.confirmationMode !== "required_before_assignment" ||
@@ -12556,6 +13004,10 @@ function SenderPolicy360Drawer({
                     <span>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</span>
                     <input type="number" min="0" value={companyFee} onChange={(event) => setCompanyFee(Math.max(0, Number(event.target.value) || 0))} />
                   </label>
+                  <label>
+                    <span>{lang === "ar" ? "سعر شحن المستلم للمنطقة" : "Recipient shipping price for area"}</span>
+                    <input type="number" min="0" value={recipientAreaFee} onChange={(event) => setRecipientAreaFee(Math.max(0, Number(event.target.value) || 0))} />
+                  </label>
                   <button className={completeData ? "policy360-sim-toggle active" : "policy360-sim-toggle"} type="button" onClick={() => setCompleteData((value) => !value)}>
                     {completeData && <Check size={14} />}
                     {lang === "ar" ? "البيانات مكتملة" : "Data complete"}
@@ -12585,6 +13037,10 @@ function SenderPolicy360Drawer({
                   <article>
                     <small>{lang === "ar" ? "الشحن المحصل" : "Collected shipping"}</small>
                     <strong>{recipientCharge.toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} {lang === "ar" ? "ج.م" : "EGP"}</strong>
+                  </article>
+                  <article className={recipientCharge - companyFee >= 0 ? "success" : "danger"}>
+                    <small>{lang === "ar" ? "فرق شحن الراسل" : "Sender shipping difference"}</small>
+                    <strong>{(recipientCharge - companyFee).toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} {lang === "ar" ? "ج.م" : "EGP"}</strong>
                   </article>
                   <article>
                     <small>{lang === "ar" ? "طريقة العرض" : "Price display"}</small>
@@ -12736,21 +13192,16 @@ function SenderPolicy360Drawer({
                 {policyFact({ ar: "تغيير المتحمل عند التسجيل", en: "Payer override on entry" }, yesNo(settings.shippingPayerOverride), "shippingPayerOverride")}
                 {policyFact(
                   {
-                    ar: "مصاريف الشحن التي يدفعها المستلم",
-                    en: "Shipping fee paid by recipient",
+                    ar: "أسعار شحن المستلم حسب المنطقة",
+                    en: "Recipient shipping rates by area",
                   },
-                  settings.shippingChargeMode === "company_price"
+                  customRecipientRates.length
                     ? lang === "ar"
-                      ? "يساوي سعر الشركة"
-                      : "Same as company fee"
-                    : settings.shippingChargeMode === "company_plus"
-                      ? `${lang === "ar" ? "سعر الشركة +" : "Company fee +"} ${settings.shippingChargeValue}`
-                      : settings.shippingChargeMode === "fixed"
-                        ? `${settings.shippingChargeValue} ${lang === "ar" ? "ج.م" : "EGP"}`
-                        : lang === "ar"
-                          ? "يدوي لكل شحنة"
-                          : "Manual per shipment",
-                  "shippingChargeMode",
+                      ? `${customRecipientRates.length} منطقة بسعر مخصص، والباقي يتبع سعر الشركة`
+                      : `${customRecipientRates.length} custom area rate(s); others follow company fee`
+                    : lang === "ar"
+                      ? "كل المناطق تتبع سعر الشركة"
+                      : "All areas follow company fee",
                 )}
                 {policyFact(
                   { ar: "عرض السعر للمستلم", en: "Recipient price display" },
@@ -13053,8 +13504,6 @@ function ShipmentPoliciesScreen({
         "confirmationMode",
         "incompleteRoute",
         "defaultShippingPayer",
-        "shippingChargeMode",
-        "shippingChargeValue",
         "shippingPayerOverride",
         "phoneLookupEnabled",
       ] as (keyof ShipmentDataSettings)[]
@@ -13063,6 +13512,15 @@ function ShipmentPoliciesScreen({
         differences.push(settingsLabel(key, policySettings[key]));
       }
     });
+    const customAreaRates = Object.values(
+      policy.recipientAreaRates ?? {},
+    ).filter((rate) => rate.source === "custom").length;
+    if (customAreaRates > 0) {
+      differences.push({
+        ar: `${customAreaRates} منطقة بسعر شحن مستلم مخصص`,
+        en: `${customAreaRates} area(s) with custom recipient shipping rates`,
+      });
+    }
     const companyFieldMap = new Map(
       normalizedCompanyFields.map((field) => [field.code, field]),
     );
@@ -13214,14 +13672,17 @@ function ShipmentPoliciesScreen({
     return lang === "ar" ? "غير مستخدم" : "Off";
   }
 
-  function shippingModeLabel(mode: ShippingChargeMode) {
-    const labels: Record<ShippingChargeMode, Localized> = {
-      company_price: { ar: "سعر الشركة", en: "Company fee" },
-      company_plus: { ar: "سعر الشركة + زيادة", en: "Company fee + markup" },
-      fixed: { ar: "مبلغ ثابت", en: "Fixed amount" },
-      manual: { ar: "يدوي لكل شحنة", en: "Manual per shipment" },
-    };
-    return labels[mode][lang];
+  function recipientRateLabel(policy: SenderShipmentPolicy | null) {
+    const customRates = Object.values(
+      policy?.recipientAreaRates ?? {},
+    ).filter((rate) => rate.source === "custom").length;
+    return customRates
+      ? lang === "ar"
+        ? `${customRates} منطقة بسعر مستلم مخصص`
+        : `${customRates} custom recipient area rate(s)`
+      : lang === "ar"
+        ? "أسعار المستلم تتبع الشركة"
+        : "Recipient rates follow company fees";
   }
 
   return (
@@ -13600,9 +14061,7 @@ function ShipmentPoliciesScreen({
                               : "Sender"}
                         </strong>
                         <span>
-                          {shippingModeLabel(
-                            row.effectiveSettings.shippingChargeMode,
-                          )}
+                          {recipientRateLabel(row.policy)}
                           {" · "}
                           {row.priceList?.name[lang] ?? "—"}
                         </span>
@@ -14536,6 +14995,935 @@ function IncompleteShipmentsScreen({
   );
 }
 
+type WarehouseFilter =
+  | "all"
+  | "ready"
+  | "incomplete"
+  | "returns"
+  | "before_warehouse";
+
+const warehouseLocations = [
+  {
+    id: "main-storage",
+    name: { ar: "التخزين الرئيسي", en: "Main storage" },
+  },
+  {
+    id: "dispatch-zone",
+    name: { ar: "منطقة التجهيز والتوزيع", en: "Dispatch preparation zone" },
+  },
+  {
+    id: "data-completion",
+    name: { ar: "رف استكمال البيانات", en: "Data completion shelf" },
+  },
+  {
+    id: "returns-zone",
+    name: { ar: "منطقة المرتجعات", en: "Returns zone" },
+  },
+] as const;
+
+function warehouseLocationLabel(id: string): Localized {
+  return warehouseLocations.find((location) => location.id === id)?.name ?? {
+    ar: "مكان داخلي غير محدد",
+    en: "Internal location not set",
+  };
+}
+
+function WarehouseScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  settings,
+  senderPolicies,
+  onShipmentsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
+  onShipmentsChange: (records: Shipment[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [senderFilter, setSenderFilter] = useState("all");
+  const [filter, setFilter] = useState<WarehouseFilter>("all");
+  const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(
+    null,
+  );
+  const [locationDraft, setLocationDraft] = useState("");
+  const [receiverName, setReceiverName] = useState("");
+  const [handoverNote, setHandoverNote] = useState("");
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const returnEvent = (shipment: Shipment) =>
+    shipment.statusHistory?.find(
+      (event) =>
+        (event.returnedPieces ?? 0) > 0 &&
+        !(event.senderReturnSettled ?? false),
+    );
+
+  const isBeforeWarehouse = (shipment: Shipment) =>
+    shipment.requiredType === "incomplete" &&
+    resolveShipmentDataSettings(
+      shipment,
+      settings,
+      senderPolicies,
+    ).incompleteRoute === "complete_before_warehouse";
+
+  const isPhysicalWarehouseShipment = (shipment: Shipment) =>
+    shipment.custodyType === "warehouse" && !isBeforeWarehouse(shipment);
+
+  const isReturnAwaitingSender = (shipment: Shipment) =>
+    isPhysicalWarehouseShipment(shipment) && Boolean(returnEvent(shipment));
+
+  const inventoryPieces = (shipment: Shipment) => {
+    const event = returnEvent(shipment);
+    return event ? Math.max(0, event.returnedPieces ?? 0) : shipment.pieces;
+  };
+
+  const defaultLocation = (shipment: Shipment) => {
+    if (shipment.warehouseLocation) return shipment.warehouseLocation;
+    if (isReturnAwaitingSender(shipment)) return "returns-zone";
+    if (shipment.requiredType === "incomplete") return "data-completion";
+    if (
+      shipment.required.en.toLowerCase().includes("assign") ||
+      shipment.status.en.toLowerCase().includes("ready")
+    ) {
+      return "dispatch-zone";
+    }
+    return "main-storage";
+  };
+
+  const locationName = warehouseLocationLabel;
+
+  const physicalShipments = shipmentRecords.filter(
+    isPhysicalWarehouseShipment,
+  );
+  const beforeWarehouseShipments = shipmentRecords.filter(isBeforeWarehouse);
+  const returnShipments = physicalShipments.filter(isReturnAwaitingSender);
+  const incompleteInWarehouse = physicalShipments.filter(
+    (shipment) => shipment.requiredType === "incomplete",
+  );
+  const readyShipments = physicalShipments.filter(
+    (shipment) =>
+      shipment.requiredType !== "incomplete" &&
+      !isReturnAwaitingSender(shipment) &&
+      (shipment.required.en.toLowerCase().includes("assign") ||
+        shipment.status.en.toLowerCase().includes("ready")),
+  );
+  const totalPieces = physicalShipments.reduce(
+    (sum, shipment) => sum + inventoryPieces(shipment),
+    0,
+  );
+  const returnPieces = returnShipments.reduce(
+    (sum, shipment) => sum + inventoryPieces(shipment),
+    0,
+  );
+  const senderOptions = Array.from(
+    new Map(
+      [...physicalShipments, ...beforeWarehouseShipments].map((shipment) => [
+        shipment.sender.en,
+        shipment.sender,
+      ]),
+    ).values(),
+  );
+
+  const filterSource =
+    filter === "before_warehouse"
+      ? beforeWarehouseShipments
+      : filter === "ready"
+        ? readyShipments
+        : filter === "incomplete"
+          ? incompleteInWarehouse
+          : filter === "returns"
+            ? returnShipments
+            : physicalShipments;
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleShipments = filterSource.filter((shipment) => {
+    const matchesSearch =
+      !normalizedSearch ||
+      [
+        shipment.id,
+        shipment.reference,
+        shipment.phone,
+        shipment.recipient.ar,
+        shipment.recipient.en,
+        shipment.sender.ar,
+        shipment.sender.en,
+        shipment.area.ar,
+        shipment.area.en,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch));
+    const matchesSender =
+      senderFilter === "all" || shipment.sender.en === senderFilter;
+    return matchesSearch && matchesSender;
+  });
+
+  function nowTimestamp(): Localized {
+    const now = new Date();
+    return {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+  }
+
+  function movementHistory(shipment: Shipment): WarehouseMovement[] {
+    if (shipment.warehouseHistory?.length) return shipment.warehouseHistory;
+    return [
+      {
+        id: `warehouse-initial-${shipment.id}`,
+        type: "entered",
+        pieces: inventoryPieces(shipment),
+        from: { ar: "التسجيل أو المرتجعات", en: "Entry or returns" },
+        to: locationName(defaultLocation(shipment)),
+        performedBy: { ar: "النظام", en: "System" },
+        note: shipment.lastEvent[lang],
+        timestamp: { ar: "السجل الحالي", en: "Current record" },
+      },
+    ];
+  }
+
+  function openShipment(shipment: Shipment) {
+    setSelectedShipment(shipment);
+    setLocationDraft(defaultLocation(shipment));
+    setReceiverName("");
+    setHandoverNote("");
+    setError("");
+  }
+
+  function saveLocation() {
+    if (!selectedShipment || isBeforeWarehouse(selectedShipment)) return;
+    const currentLocation = defaultLocation(selectedShipment);
+    if (!locationDraft || locationDraft === currentLocation) {
+      setError(
+        lang === "ar"
+          ? "اختر مكانًا داخليًا مختلفًا لتسجيل الحركة."
+          : "Choose a different internal location to record a movement.",
+      );
+      return;
+    }
+    const timestamp = nowTimestamp();
+    const movement: WarehouseMovement = {
+      id: `warehouse-move-${Date.now()}`,
+      type: "location_changed",
+      pieces: inventoryPieces(selectedShipment),
+      from: locationName(currentLocation),
+      to: locationName(locationDraft),
+      performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      note:
+        lang === "ar"
+          ? "نقل داخلي داخل المخزن"
+          : "Internal warehouse movement",
+      timestamp,
+    };
+    const updated: Shipment = {
+      ...selectedShipment,
+      warehouseLocation: locationDraft,
+      warehouseHistory: [
+        movement,
+        ...(selectedShipment.warehouseHistory ?? []),
+      ],
+      lastEvent: {
+        ar: `نُقلت داخل المخزن إلى «${locationName(locationDraft).ar}»`,
+        en: `Moved internally to “${locationName(locationDraft).en}”`,
+      },
+    };
+    onShipmentsChange(
+      shipmentRecords.map((shipment) =>
+        shipment.id === updated.id ? updated : shipment,
+      ),
+    );
+    setSelectedShipment(updated);
+    setError("");
+    setToast(
+      lang === "ar"
+        ? `تم تحديث مكان ${updated.id} دون تغيير حالتها أو عهدتها`
+        : `${updated.id} location updated without changing status or custody`,
+    );
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function handReturnToSender() {
+    if (!selectedShipment || !isReturnAwaitingSender(selectedShipment)) return;
+    if (!receiverName.trim()) {
+      setError(
+        lang === "ar"
+          ? "اسم مستلم المرتجع من جهة الراسل مطلوب."
+          : "The sender-side return receiver name is required.",
+      );
+      return;
+    }
+    const timestamp = nowTimestamp();
+    const pieces = inventoryPieces(selectedShipment);
+    const movement: WarehouseMovement = {
+      id: `sender-handover-${Date.now()}`,
+      type: "sender_handover",
+      pieces,
+      from: locationName(defaultLocation(selectedShipment)),
+      to: selectedShipment.sender,
+      performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      note:
+        handoverNote.trim() ||
+        (lang === "ar"
+          ? `استلم المرتجع: ${receiverName.trim()}`
+          : `Return received by: ${receiverName.trim()}`),
+      timestamp,
+    };
+    const updated: Shipment = {
+      ...selectedShipment,
+      custodyType: "sender",
+      custody: {
+        ar: `تم تسليم المرتجع للراسل — ${selectedShipment.sender.ar}`,
+        en: `Return handed to sender — ${selectedShipment.sender.en}`,
+      },
+      courier: null,
+      warehouseLocation: "",
+      required: { ar: "لا يوجد", en: "None" },
+      requiredType: "none",
+      lastEvent: {
+        ar: `سلّم المخزن ${pieces} قطعة للراسل واستلمها ${receiverName.trim()}`,
+        en: `Warehouse handed ${pieces} piece(s) to sender; received by ${receiverName.trim()}`,
+      },
+      warehouseHistory: [
+        movement,
+        ...(selectedShipment.warehouseHistory ?? []),
+      ],
+      statusHistory: selectedShipment.statusHistory?.map((event) =>
+        (event.returnedPieces ?? 0) > 0 &&
+        !(event.senderReturnSettled ?? false)
+          ? {
+              ...event,
+              senderReturnSettled: true,
+            }
+          : event,
+      ),
+    };
+    onShipmentsChange(
+      shipmentRecords.map((shipment) =>
+        shipment.id === updated.id ? updated : shipment,
+      ),
+    );
+    setSelectedShipment(null);
+    setError("");
+    setToast(
+      lang === "ar"
+        ? `تم تسليم مرتجع ${updated.id} للراسل وإغلاق عهدته بالمخزن`
+        : `${updated.id} return handed to sender and cleared from warehouse custody`,
+    );
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  const filters: {
+    id: WarehouseFilter;
+    label: Localized;
+    count: number;
+  }[] = [
+    {
+      id: "all",
+      label: { ar: "كل عهدة المخزن", en: "All warehouse custody" },
+      count: physicalShipments.length,
+    },
+    {
+      id: "ready",
+      label: { ar: "جاهزة للتوزيع", en: "Ready for dispatch" },
+      count: readyShipments.length,
+    },
+    {
+      id: "incomplete",
+      label: { ar: "ناقصة داخل المخزن", en: "Incomplete in warehouse" },
+      count: incompleteInWarehouse.length,
+    },
+    {
+      id: "returns",
+      label: { ar: "مرتجعات للرسل", en: "Sender returns" },
+      count: returnShipments.length,
+    },
+    {
+      id: "before_warehouse",
+      label: { ar: "قبل اعتماد المخزن", en: "Before warehouse acceptance" },
+      count: beforeWarehouseShipments.length,
+    },
+  ];
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="warehouse"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <Warehouse size={20} />
+            </span>
+            <span>
+              <strong>{lang === "ar" ? "محطة المخزن" : "Warehouse station"}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content warehouse-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "المخزن والعهدة" : "Warehouse & custody"}</h1>
+                <span className="demo-chip">
+                  {lang === "ar" ? "الفرع الرئيسي" : "Main branch"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "اعرف مكان كل طرد فعليًا، وحركه داخل المخزن، وسلّم المرتجعات للرسل بسجل لا يمسح الماضي."
+                  : "Know where every parcel physically is, move it internally, and hand returns to senders without erasing history."}
+              </p>
+            </div>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => onNavigate("assignment")}
+            >
+              <Truck size={17} />
+              {lang === "ar" ? "التوزيع والإسناد" : "Distribution & assignment"}
+            </button>
+          </div>
+
+          <section className="warehouse-truth">
+            <ShieldCheck size={19} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "العهدة تتغير فقط مع الحركة الحقيقية للطرد"
+                  : "Custody changes only when the parcel physically moves"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "النقل بين أرفف المخزن لا يغير حالة الشحنة، وتسليم المرتجع للراسل يخرجه من عهدة الشركة دون اختراع حالة جديدة."
+                  : "Moving between warehouse locations does not change shipment status; handing a return to its sender clears company custody without inventing a new status."}
+              </small>
+            </span>
+          </section>
+
+          <section className="warehouse-metrics">
+            <article>
+              <span><Boxes size={19} /></span>
+              <div>
+                <small>{lang === "ar" ? "طرود في العهدة" : "Parcels in custody"}</small>
+                <strong>{totalPieces}</strong>
+                <em>
+                  {physicalShipments.length}{" "}
+                  {lang === "ar" ? "شحنة فعلية" : "physical shipments"}
+                </em>
+              </div>
+            </article>
+            <article>
+              <span><PackageCheck size={19} /></span>
+              <div>
+                <small>{lang === "ar" ? "جاهزة للتوزيع" : "Ready for dispatch"}</small>
+                <strong>{readyShipments.length}</strong>
+                <em>{lang === "ar" ? "يمكن إسنادها الآن" : "Can be assigned now"}</em>
+              </div>
+            </article>
+            <article>
+              <span><UsersRound size={19} /></span>
+              <div>
+                <small>{lang === "ar" ? "مرتجعات تنتظر الرسل" : "Returns awaiting senders"}</small>
+                <strong>{returnPieces}</strong>
+                <em>
+                  {returnShipments.length}{" "}
+                  {lang === "ar" ? "شحنة" : "shipments"}
+                </em>
+              </div>
+            </article>
+            <article>
+              <span><CircleAlert size={19} /></span>
+              <div>
+                <small>{lang === "ar" ? "قبل اعتماد المخزن" : "Before warehouse acceptance"}</small>
+                <strong>{beforeWarehouseShipments.length}</strong>
+                <em>{lang === "ar" ? "ليست في عهدة المخزن" : "Not in warehouse custody"}</em>
+              </div>
+            </article>
+          </section>
+
+          <section className="warehouse-panel">
+            <div className="warehouse-toolbar">
+              <label className="shipment-search">
+                <Search size={18} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "امسح الباركود أو ابحث برقم الشحنة أو الهاتف أو الراسل..."
+                      : "Scan barcode or search shipment, phone, or sender..."
+                  }
+                />
+              </label>
+              <label className="select-wrap">
+                <select
+                  value={senderFilter}
+                  onChange={(event) => setSenderFilter(event.target.value)}
+                >
+                  <option value="all">
+                    {lang === "ar" ? "كل الرسل" : "All senders"}
+                  </option>
+                  {senderOptions.map((sender) => (
+                    <option key={sender.en} value={sender.en}>
+                      {sender[lang]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="warehouse-tabs" role="tablist">
+              {filters.map((item) => (
+                <button
+                  key={item.id}
+                  className={filter === item.id ? "active" : ""}
+                  type="button"
+                  onClick={() => setFilter(item.id)}
+                >
+                  {item.label[lang]}
+                  <span>{item.count}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="warehouse-list">
+              <div className="warehouse-list__head">
+                <span>{lang === "ar" ? "الشحنة" : "Shipment"}</span>
+                <span>{lang === "ar" ? "المستلم والراسل" : "Recipient & sender"}</span>
+                <span>{lang === "ar" ? "الحالة" : "Status"}</span>
+                <span>{lang === "ar" ? "نوع العهدة" : "Custody type"}</span>
+                <span>{lang === "ar" ? "القطع" : "Pieces"}</span>
+                <span>{lang === "ar" ? "المكان الحالي" : "Current location"}</span>
+                <span>{lang === "ar" ? "آخر حركة" : "Last movement"}</span>
+                <span>{lang === "ar" ? "الإجراء" : "Action"}</span>
+              </div>
+
+              {visibleShipments.length ? (
+                visibleShipments.map((shipment) => {
+                  const beforeWarehouse = isBeforeWarehouse(shipment);
+                  const senderReturn = isReturnAwaitingSender(shipment);
+                  return (
+                    <article className="warehouse-row" key={shipment.id}>
+                      <span className="warehouse-shipment-id">
+                        <strong>{shipment.id}</strong>
+                        <small>{shipment.reference}</small>
+                      </span>
+                      <span className="warehouse-party">
+                        <strong>{shipment.recipient[lang]}</strong>
+                        <small>{shipment.sender[lang]} · {shipment.phone}</small>
+                      </span>
+                      <span>
+                        <b className={`status-badge status-badge--${shipment.statusTone}`}>
+                          <i />
+                          {shipment.status[lang]}
+                        </b>
+                      </span>
+                      <span className="warehouse-custody-kind">
+                        {beforeWarehouse ? (
+                          <b className="warehouse-label warehouse-label--outside">
+                            <CircleAlert size={14} />
+                            {lang === "ar" ? "خارج عهدة المخزن" : "Outside warehouse custody"}
+                          </b>
+                        ) : senderReturn ? (
+                          <b className="warehouse-label warehouse-label--return">
+                            <UsersRound size={14} />
+                            {lang === "ar" ? "مرتجع للراسل" : "Sender return"}
+                          </b>
+                        ) : (
+                          <b className="warehouse-label">
+                            <Warehouse size={14} />
+                            {lang === "ar" ? "عهدة مخزن" : "Warehouse custody"}
+                          </b>
+                        )}
+                      </span>
+                      <span className="warehouse-pieces">
+                        <strong>{beforeWarehouse ? "—" : inventoryPieces(shipment)}</strong>
+                        <small>
+                          {lang === "ar"
+                            ? `من أصل ${shipment.pieces}`
+                            : `of ${shipment.pieces}`}
+                        </small>
+                      </span>
+                      <span className="warehouse-location">
+                        <MapPin size={15} />
+                        <span>
+                          <strong>
+                            {beforeWarehouse
+                              ? lang === "ar"
+                                ? "قائمة استكمال البيانات"
+                                : "Data completion queue"
+                              : locationName(defaultLocation(shipment))[lang]}
+                          </strong>
+                          <small>
+                            {beforeWarehouse
+                              ? lang === "ar"
+                                ? "لم تعتمد مخزنيًا"
+                                : "Not warehouse accepted"
+                              : lang === "ar"
+                                ? "الفرع الرئيسي"
+                                : "Main branch"}
+                          </small>
+                        </span>
+                      </span>
+                      <span className="warehouse-last-event">
+                        <Clock3 size={14} />
+                        {shipment.lastEvent[lang]}
+                      </span>
+                      <button
+                        className={
+                          senderReturn
+                            ? "primary-button"
+                            : "secondary-button"
+                        }
+                        type="button"
+                        onClick={() => openShipment(shipment)}
+                      >
+                        {senderReturn ? <UsersRound size={15} /> : <Eye size={15} />}
+                        {senderReturn
+                          ? lang === "ar"
+                            ? "تسليم الراسل"
+                            : "Handover"
+                          : lang === "ar"
+                            ? "فتح"
+                            : "Open"}
+                      </button>
+                    </article>
+                  );
+                })
+              ) : (
+                <div className="warehouse-empty">
+                  <Warehouse size={30} />
+                  <strong>
+                    {lang === "ar"
+                      ? "لا توجد شحنات تطابق العرض الحالي"
+                      : "No shipments match this view"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "غيّر البحث أو الفلتر دون التأثير على العهدة."
+                      : "Change search or filters without affecting custody."}
+                  </small>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {selectedShipment && (
+        <>
+          <button
+            className="drawer-backdrop"
+            type="button"
+            aria-label={lang === "ar" ? "إغلاق" : "Close"}
+            onClick={() => setSelectedShipment(null)}
+          />
+          <aside className="shipment-drawer warehouse-drawer">
+            <header className="drawer__header">
+              <div className="drawer__title-row">
+                <span className="workspace-icon">
+                  <Warehouse size={19} />
+                </span>
+                <span>
+                  <small className="drawer__eyebrow">
+                    {lang === "ar" ? "عهدة ومكان الطرد" : "Parcel custody & location"}
+                  </small>
+                  <h2>{selectedShipment.id}</h2>
+                </span>
+              </div>
+              <button
+                className="square-button"
+                type="button"
+                onClick={() => setSelectedShipment(null)}
+                aria-label={lang === "ar" ? "إغلاق" : "Close"}
+              >
+                <X size={18} />
+              </button>
+            </header>
+
+            <div className="drawer__content">
+              <section className="warehouse-drawer__summary">
+                <article>
+                  <small>{lang === "ar" ? "المستلم" : "Recipient"}</small>
+                  <strong>{selectedShipment.recipient[lang]}</strong>
+                  <span>{selectedShipment.phone}</span>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "الراسل" : "Sender"}</small>
+                  <strong>{selectedShipment.sender[lang]}</strong>
+                  <span>{selectedShipment.reference}</span>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "العهدة الحالية" : "Current custody"}</small>
+                  <strong>{selectedShipment.custody[lang]}</strong>
+                  <span>
+                    {isBeforeWarehouse(selectedShipment)
+                      ? lang === "ar"
+                        ? "لم تعتمد داخل المخزن"
+                        : "Not accepted into warehouse"
+                      : `${inventoryPieces(selectedShipment)} ${
+                          lang === "ar" ? "قطعة فعلية" : "physical piece(s)"
+                        }`}
+                  </span>
+                </article>
+              </section>
+
+              {!isBeforeWarehouse(selectedShipment) && (
+                <section className="warehouse-location-editor">
+                  <div>
+                    <MapPin size={18} />
+                    <span>
+                      <strong>
+                        {lang === "ar" ? "تحريك داخلي" : "Internal movement"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "يغير مكان الطرد فقط ولا يغير حالته أو عهدته."
+                          : "Changes parcel location only, not its status or custody."}
+                      </small>
+                    </span>
+                  </div>
+                  <label className="select-wrap">
+                    <select
+                      value={locationDraft}
+                      onChange={(event) => {
+                        setLocationDraft(event.target.value);
+                        setError("");
+                      }}
+                    >
+                      {warehouseLocations.map((location) => (
+                        <option key={location.id} value={location.id}>
+                          {location.name[lang]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={15} />
+                  </label>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={saveLocation}
+                  >
+                    <Save size={15} />
+                    {lang === "ar" ? "حفظ المكان" : "Save location"}
+                  </button>
+                </section>
+              )}
+
+              {isBeforeWarehouse(selectedShipment) && (
+                <section className="warehouse-before-note">
+                  <CircleAlert size={18} />
+                  <div>
+                    <strong>
+                      {lang === "ar"
+                        ? "هذه الشحنة ليست في عهدة المخزن"
+                        : "This shipment is not in warehouse custody"}
+                    </strong>
+                    <p>
+                      {lang === "ar"
+                        ? "سياسة الراسل تشترط استكمال البيانات قبل اعتمادها مخزنيًا؛ لذلك لا يمكن تحديد رف أو تسجيل حركة مخزن لها الآن."
+                        : "Sender policy requires data completion before warehouse acceptance, so no shelf or warehouse movement can be recorded yet."}
+                    </p>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => {
+                        setSelectedShipment(null);
+                        onNavigate("incompleteShipments");
+                      }}
+                    >
+                      <CircleAlert size={15} />
+                      {lang === "ar" ? "فتح قائمة الاستكمال" : "Open completion queue"}
+                    </button>
+                  </div>
+                </section>
+              )}
+
+              {isReturnAwaitingSender(selectedShipment) && (
+                <section className="warehouse-handover">
+                  <div className="warehouse-handover__head">
+                    <UsersRound size={18} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? "تسليم المرتجع للراسل"
+                          : "Handover return to sender"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "التأكيد يخرج القطع من عهدة الشركة ويثبت من استلمها."
+                          : "Confirmation clears company custody and records who received it."}
+                      </small>
+                    </span>
+                  </div>
+                  <label className="field">
+                    <span>
+                      {lang === "ar"
+                        ? "اسم مستلم المرتجع من جهة الراسل"
+                        : "Sender-side return receiver"}
+                      <b className="required-star">*</b>
+                    </span>
+                    <span className="field__control">
+                      <input
+                        value={receiverName}
+                        onChange={(event) => {
+                          setReceiverName(event.target.value);
+                          setError("");
+                        }}
+                        placeholder={
+                          lang === "ar"
+                            ? "مثال: محمود عادل"
+                            : "Example: Mahmoud Adel"
+                        }
+                      />
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span>
+                      {lang === "ar" ? "ملاحظة التسليم" : "Handover note"}
+                    </span>
+                    <span className="field__control">
+                      <input
+                        value={handoverNote}
+                        onChange={(event) => setHandoverNote(event.target.value)}
+                        placeholder={
+                          lang === "ar"
+                            ? "اختياري: رقم مستند أو ملاحظة"
+                            : "Optional: document number or note"
+                        }
+                      />
+                    </span>
+                  </label>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={handReturnToSender}
+                  >
+                    <PackageCheck size={16} />
+                    {lang === "ar"
+                      ? `تأكيد تسليم ${inventoryPieces(selectedShipment)} قطعة`
+                      : `Confirm ${inventoryPieces(selectedShipment)} piece(s) handover`}
+                  </button>
+                </section>
+              )}
+
+              {error && (
+                <div className="warehouse-error" role="alert">
+                  <CircleAlert size={16} />
+                  {error}
+                </div>
+              )}
+
+              <section className="warehouse-timeline">
+                <div className="warehouse-timeline__title">
+                  <Clock3 size={17} />
+                  <span>
+                    <strong>
+                      {lang === "ar" ? "سجل حركة المخزن" : "Warehouse movement log"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "الحركات الجديدة تُضاف ولا تمسح ما قبلها."
+                        : "New movements are appended without erasing history."}
+                    </small>
+                  </span>
+                </div>
+                <div className="warehouse-timeline__items">
+                  {movementHistory(selectedShipment).map((movement) => (
+                    <article key={movement.id}>
+                      <i />
+                      <span>
+                        <strong>
+                          {movement.from[lang]} <ChevronLeft size={14} />{" "}
+                          {movement.to[lang]}
+                        </strong>
+                        <small>
+                          {movement.pieces}{" "}
+                          {lang === "ar" ? "قطعة" : "piece(s)"} ·{" "}
+                          {movement.timestamp[lang]}
+                        </small>
+                        <p>
+                          {movement.note} · {movement.performedBy[lang]}
+                        </p>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            </div>
+          </aside>
+        </>
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type ShipmentEntryDraft = {
   phone: string;
   recipientName: string;
@@ -14559,6 +15947,7 @@ type PreparedShipment = ShipmentEntryDraft & {
   localId: string;
   shippingFee: number;
   recipientShippingCharge: number;
+  recipientShippingSource: "company" | "custom";
   customFinancialSnapshot: {
     recipientAdditions: number;
     senderDeductions: number;
@@ -14826,11 +16215,10 @@ function CourierShipmentsScreen({
       selectedStatus.pieceEffect.en === "All pieces delivered";
     const nextCustody: Localized = isFullyDelivered
       ? { ar: "تم التسليم للمستلم", en: "Delivered to recipient" }
-      : selectedStatus.assignmentEffect.en === "Return route"
-        ? { ar: "مسار المرتجعات", en: "Return route" }
-        : selectedStatus.assignmentEffect.en === "End + follow-up queue"
-          ? { ar: "قائمة المتابعة", en: "Follow-up queue" }
-          : { ar: "المخزن الرئيسي", en: "Main warehouse" };
+      : {
+          ar: "مرتجع مطلوب من المندوب",
+          en: "Return due from courier",
+        };
     const tone: Shipment["statusTone"] =
       selectedStatus.color.toLowerCase() === "#07835a"
         ? "green"
@@ -14852,16 +16240,29 @@ function CourierShipmentsScreen({
         custody: nextCustody,
         custodyType: isFullyDelivered
           ? ("recipient" as const)
-          : ("warehouse" as const),
-        courier: null,
+          : ("return_route" as const),
+        courier: isFullyDelivered ? null : selectedCourier.courier,
+        warehouseLocation: "",
+        warehouseHistory: shipment.warehouseHistory,
         deliveryDate: nextDate
           ? { ar: nextDate, en: nextDate }
           : shipment.deliveryDate,
-        required: { ar: "لا يوجد", en: "None" },
-        requiredType: "none" as const,
+        required: isFullyDelivered
+          ? { ar: "لا يوجد", en: "None" }
+          : {
+              ar: "تسليم المرتجع للشركة",
+              en: "Hand return to company",
+            },
+        requiredType: isFullyDelivered
+          ? ("none" as const)
+          : ("attention" as const),
         lastEvent: {
-          ar: `سجّل المندوب حالة «${selectedStatus.name.ar}» الآن`,
-          en: `Courier recorded “${selectedStatus.name.en}” just now`,
+          ar: isFullyDelivered
+            ? `سجّل المندوب حالة «${selectedStatus.name.ar}» الآن`
+            : `سجّل المندوب حالة «${selectedStatus.name.ar}» والمرتجع لم تستلمه الشركة بعد`,
+          en: isFullyDelivered
+            ? `Courier recorded “${selectedStatus.name.en}” just now`
+            : `Courier recorded “${selectedStatus.name.en}”; company has not received the return yet`,
         },
         statusHistory: [
           {
@@ -19904,19 +21305,68 @@ function CourierAccountScreen({
     const settlementId = `courier-settlement-${Date.now()}`;
     const pendingIds = new Set(pendingItems.map((item) => item.event.id));
     onShipmentsChange(
-      shipmentRecords.map((shipment) => ({
-        ...shipment,
-        statusHistory: shipment.statusHistory?.map((event) =>
-          pendingIds.has(event.id)
+      shipmentRecords.map((shipment) => {
+        const receivedReturn = pendingItems.find(
+          (item) =>
+            item.shipment.id === shipment.id &&
+            pendingIds.has(item.event.id) &&
+            (item.event.returnedPieces ?? 0) > 0,
+        );
+        const receivedPieces = receivedReturn?.event.returnedPieces ?? 0;
+        const returnMovement: WarehouseMovement | null = receivedReturn
+          ? {
+              id: `warehouse-return-${Date.now()}-${shipment.id}`,
+              type: "return_received",
+              pieces: receivedPieces,
+              from: selectedCourier.courier,
+              to: warehouseLocationLabel("returns-zone"),
+              performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+              note:
+                lang === "ar"
+                  ? `استلام المرتجع فعليًا ضمن تسوية المندوب ${settlementId}`
+                  : `Return physically received during courier settlement ${settlementId}`,
+              timestamp,
+            }
+          : null;
+
+        return {
+          ...shipment,
+          ...(receivedReturn
             ? {
-                ...event,
-                settlementStatus: "settled" as const,
-                settlementId,
-                settledAt: timestamp,
+                custody: {
+                  ar: "منطقة المرتجعات",
+                  en: "Returns zone",
+                },
+                custodyType: "warehouse" as const,
+                courier: null,
+                warehouseLocation: "returns-zone",
+                required: {
+                  ar: "تسليم المرتجع للراسل",
+                  en: "Return handover to sender",
+                },
+                requiredType: "attention" as const,
+                lastEvent: {
+                  ar: `استلمت الشركة ${receivedPieces} قطعة مرتجعة من المندوب أثناء الحساب`,
+                  en: `Company received ${receivedPieces} returned piece(s) from courier during settlement`,
+                },
+                warehouseHistory: [
+                  returnMovement!,
+                  ...(shipment.warehouseHistory ?? []),
+                ],
               }
-            : event,
-        ),
-      })),
+            : {}),
+          statusHistory: shipment.statusHistory?.map((event) =>
+            pendingIds.has(event.id)
+              ? {
+                  ...event,
+                  settlementStatus: "settled" as const,
+                  settlementId,
+                  settledAt: timestamp,
+                }
+              : event,
+          ),
+        };
+      }),
     );
 
     let remainingDebtPayment = debtPayment;
@@ -21022,12 +22472,35 @@ function AssignmentScreen({
         shipment.required.ar.includes("مندوب") ||
         shipment.required.en.toLowerCase().includes("assign") ||
         shipment.required.en.toLowerCase().includes("courier");
+      const previousLocation =
+        shipment.warehouseLocation ||
+        (shipment.requiredType === "incomplete"
+          ? "data-completion"
+          : "dispatch-zone");
+      const movement: WarehouseMovement = {
+        id: `warehouse-courier-handover-${Date.now()}-${shipment.id}`,
+        type: "handed_to_courier",
+        pieces: shipment.pieces,
+        from: warehouseLocationLabel(previousLocation),
+        to: selectedCourier.courier,
+        performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        note:
+          lang === "ar"
+            ? "إسناد وتسليم فعلي للمندوب"
+            : "Assigned and physically handed to courier",
+        timestamp: assignedAt,
+      };
       return {
         ...shipment,
         custody: { ar: "مع المندوب", en: "With courier" },
         custodyType: "courier" as const,
         courier: selectedCourier.courier,
         assignedAt,
+        warehouseLocation: "",
+        warehouseHistory: [
+          movement,
+          ...(shipment.warehouseHistory ?? []),
+        ],
         required: assignmentTask
           ? { ar: "لا يوجد", en: "None" }
           : shipment.required,
@@ -22324,11 +23797,15 @@ function AddShipmentScreen({
     draft.areaId && senderPriceList && pricingStatus
       ? senderPriceList.prices[draft.areaId]?.[pricingStatus.id] ?? 0
       : 0;
-  const recipientShippingCharge = calculateRecipientShippingCharge(
+  const recipientAreaRate =
+    findEffectiveSenderShipmentPolicy(selectedSender, senderPolicies)
+      ?.recipientAreaRates?.[draft.areaId];
+  const recipientShippingCharge = recipientAreaShippingCharge(
     shippingFee,
     draft.shippingPayer,
-    policySettings,
-    draft.recipientShippingChargeInput,
+    selectedSender,
+    draft.areaId,
+    senderPolicies,
   );
   const activeGovernorates = governorates.filter(
     (governorate) => governorate.state === "active",
@@ -22503,6 +23980,7 @@ function AddShipmentScreen({
       localId: `prepared-${Date.now()}-${prepared.length}`,
       shippingFee,
       recipientShippingCharge,
+      recipientShippingSource: recipientAreaRate?.source ?? "company",
       customFinancialSnapshot,
       incompleteFields,
     };
@@ -22541,6 +24019,16 @@ function AddShipmentScreen({
     if (!allPrepared.length) return;
 
     const now = Date.now();
+    const createdAt: Localized = {
+      ar: new Date(now).toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: new Date(now).toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
     const records: Shipment[] = allPrepared.map((item, index) => {
       const governorate = governorates.find(
         (record) => record.id === item.governorateId,
@@ -22550,6 +24038,10 @@ function AddShipmentScreen({
       const beforeWarehouse =
         incomplete &&
         policySettings.incompleteRoute === "complete_before_warehouse";
+      const warehouseLocation = incomplete
+        ? "data-completion"
+        : "dispatch-zone";
+      const pieceCount = Math.max(1, Number(item.pieces) || 1);
       const confirmationText: Localized =
         item.confirmation === "confirmed"
           ? { ar: "تم التأكيد", en: "Confirmed" }
@@ -22602,12 +24094,29 @@ function AddShipmentScreen({
         confirmation: confirmationText,
         confirmationCode: item.confirmation,
         confirmationHistory: [],
-        pieces: Math.max(1, Number(item.pieces) || 1),
+        pieces: pieceCount,
         shippingFee: item.shippingFee,
         recipientShippingCharge: item.recipientShippingCharge,
+        recipientShippingSource: item.recipientShippingSource,
+        recipientShippingAreaId: item.areaId,
         shippingPayer: item.shippingPayer,
         customValues: item.customValues,
         customFinancialSnapshot: item.customFinancialSnapshot,
+        warehouseLocation: beforeWarehouse ? "" : warehouseLocation,
+        warehouseHistory: beforeWarehouse
+          ? []
+          : [
+              {
+                id: `warehouse-entry-${now + index}`,
+                type: "entered",
+                pieces: pieceCount,
+                from: { ar: "تسجيل الشحنة", en: "Shipment intake" },
+                to: warehouseLocationLabel(warehouseLocation),
+                performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                note: lang === "ar" ? "إدخال أولي للمخزن" : "Initial warehouse entry",
+                timestamp: createdAt,
+              },
+            ],
         address: {
           ar: item.address || "غير مكتمل",
           en: item.address || "Incomplete",
@@ -23155,41 +24664,24 @@ function AddShipmentScreen({
                           <input
                             type="number"
                             min="0"
-                            value={
-                              policySettings.shippingChargeMode === "manual"
-                                ? draft.recipientShippingChargeInput
-                                : String(recipientShippingCharge)
-                            }
-                            disabled={
-                              policySettings.shippingChargeMode !== "manual" ||
-                              draft.shippingPayer === "sender"
-                            }
-                            onChange={(event) =>
-                              updateDraft(
-                                "recipientShippingChargeInput",
-                                event.target.value,
-                              )
-                            }
+                            value={String(recipientShippingCharge)}
+                            disabled
                             placeholder="0"
                           />
                           <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
                         </span>
                         <small>
-                          {policySettings.shippingChargeMode === "company_price"
+                          {draft.shippingPayer === "sender"
                             ? lang === "ar"
-                              ? "يساوي سعر شحن الشركة"
-                              : "Matches the company shipping fee"
-                            : policySettings.shippingChargeMode === "company_plus"
+                              ? "الراسل هو المتحمل؛ المستلم لا يدفع شحنًا"
+                              : "Sender pays; recipient is not charged shipping"
+                            : recipientAreaRate?.source === "custom"
                               ? lang === "ar"
-                                ? `سعر الشركة + ${money.format(policySettings.shippingChargeValue)}`
-                                : `Company fee + ${money.format(policySettings.shippingChargeValue)}`
-                              : policySettings.shippingChargeMode === "fixed"
-                                ? lang === "ar"
-                                  ? "مبلغ ثابت من سياسة الراسل"
-                                  : "Fixed by sender policy"
-                                : lang === "ar"
-                                  ? "يُكتب لهذه الشحنة"
-                                  : "Entered for this shipment"}
+                                ? "سعر مستلم مخصص لهذه المنطقة داخل ملف الراسل"
+                                : "Custom recipient price for this area in sender profile"
+                              : lang === "ar"
+                                ? "يتبع سعر الشركة لهذه المنطقة"
+                                : "Follows the company fee for this area"}
                         </small>
                       </label>
                     )}
@@ -24342,22 +25834,43 @@ export default function Home() {
           parsed.senderShipmentPolicies.length > 0
         ) {
           setSharedSenderPolicies(
-            parsed.senderShipmentPolicies.map((policy) => ({
-              ...policy,
-              state: policy.state ?? "published",
-              version: policy.version ?? 1,
-              fields: (policy.fields ?? shipmentFieldPoliciesData).map(
-                normalizeShipmentField,
-              ),
-              settings: normalizeShipmentDataSettings(policy.settings),
-              history: (policy.history ?? []).map((entry) => ({
-                ...entry,
-                fields: (entry.fields ?? shipmentFieldPoliciesData).map(
+            parsed.senderShipmentPolicies.map((policy) => {
+              const demoPolicy = senderShipmentPoliciesDemoData.find(
+                (candidate) =>
+                  candidate.sender.en === policy.sender.en ||
+                  candidate.sender.ar === policy.sender.ar,
+              );
+              return {
+                ...policy,
+                state: policy.state ?? "published",
+                version: policy.version ?? 1,
+                fields: (policy.fields ?? shipmentFieldPoliciesData).map(
                   normalizeShipmentField,
                 ),
-                settings: normalizeShipmentDataSettings(entry.settings),
-              })),
-            })),
+                settings: normalizeShipmentDataSettings({
+                  ...policy.settings,
+                  shippingChargeMode: "company_price",
+                  shippingChargeValue: 0,
+                }),
+                recipientAreaRates:
+                  policy.recipientAreaRates ??
+                  demoPolicy?.recipientAreaRates ??
+                  {},
+                overrideKeys: policy.overrideKeys?.filter(
+                  (key) =>
+                    key !== "shippingChargeMode" &&
+                    key !== "shippingChargeValue",
+                ),
+                history: (policy.history ?? []).map((entry) => ({
+                  ...entry,
+                  fields: (entry.fields ?? shipmentFieldPoliciesData).map(
+                    normalizeShipmentField,
+                  ),
+                  settings: normalizeShipmentDataSettings(entry.settings),
+                  recipientAreaRates: entry.recipientAreaRates ?? {},
+                })),
+              };
+            }),
           );
         }
         if (Array.isArray(parsed.courierDebts)) {
@@ -24401,6 +25914,17 @@ export default function Home() {
                   (shipment.shippingPayer === "recipient"
                     ? shipment.shippingFee
                     : 0),
+                recipientShippingSource:
+                  shipment.recipientShippingSource ?? "company",
+                recipientShippingAreaId:
+                  shipment.recipientShippingAreaId ??
+                  sharedGovernorates
+                    .flatMap((governorate) => governorate.areas)
+                    .find(
+                      (area) =>
+                        area.name.en === shipment.area.en ||
+                        area.name.ar === shipment.area.ar,
+                    )?.id,
                 ...(shipment.custodyType === "courier" &&
                 shipment.custody.en === "Delivered to recipient"
                   ? {
@@ -24689,6 +26213,8 @@ export default function Home() {
           theme={theme}
           records={sharedSenders}
           priceLists={sharedPriceLists}
+          governorates={sharedGovernorates}
+          statuses={sharedStatuses}
           shipmentRecords={sharedShipments}
           senderPolicies={sharedSenderPolicies}
           companyFields={sharedShipmentFields}
@@ -24869,6 +26395,21 @@ export default function Home() {
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           governorates={sharedGovernorates}
+          onShipmentsChange={setSharedShipments}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "warehouse" ? (
+        <WarehouseScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
