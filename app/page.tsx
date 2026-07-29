@@ -2059,10 +2059,10 @@ const priceListCopy = {
     draft: "مسودة",
     defaultList: "استخدامها كقائمة افتراضية",
     defaultHint:
-      "تُستخدم تلقائيًا للراسل الذي لم تُربط به قائمة خاصة، ويمكن تغييرها من إعدادات الراسل.",
-    senderLink: "الرسل المرتبطون بهذه القائمة",
+      "تُستخدم تلقائيًا لأي راسل لم يُربط بقائمة خاصة.",
+    senderLink: "إدارة الرسل المرتبطين بالقائمة",
     senderLinkHint:
-      "يمكن ربط أكثر من راسل بالقائمة نفسها أو إنشاء قائمة خاصة؛ اختيار راسل مرتبط بقائمة أخرى ينقله إلى هذه القائمة.",
+      "هذا هو المكان الوحيد لتغيير قائمة الراسل؛ نقله إلى هذه القائمة يزيله تلقائيًا من قائمته القديمة.",
     noSender: "لا يوجد راسل مرتبط",
     cancel: "إلغاء",
     save: "حفظ الإعدادات",
@@ -2119,10 +2119,10 @@ const priceListCopy = {
     draft: "Draft",
     defaultList: "Use as the default price list",
     defaultHint:
-      "Used automatically for senders without a private list and can be changed in sender settings.",
-    senderLink: "Senders assigned to this list",
+      "Used automatically for senders without a private list.",
+    senderLink: "Manage senders assigned to this list",
     senderLinkHint:
-      "Assign multiple senders to one list or create a private list; selecting a sender already assigned elsewhere moves it to this list.",
+      "This is the only place to change a sender's list; moving it here automatically removes its previous assignment.",
     noSender: "No assigned sender",
     cancel: "Cancel",
     save: "Save settings",
@@ -5642,25 +5642,22 @@ function SenderEditor({
   sender,
   isNew,
   lang,
-  priceLists,
-  selectedPriceListId,
+  appliedPriceList,
   onClose,
   onSave,
 }: {
   sender: SenderRecord;
   isNew: boolean;
   lang: Lang;
-  priceLists: PriceListRecord[];
-  selectedPriceListId: string;
+  appliedPriceList: PriceListRecord | null;
   onClose: () => void;
-  onSave: (sender: SenderRecord, priceListId: string) => void;
+  onSave: (sender: SenderRecord) => void;
 }) {
   const [draft, setDraft] = useState(() => normalizeSenderRecord(sender));
-  const [priceListId, setPriceListId] = useState(selectedPriceListId);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave(draft, priceListId);
+    onSave(draft);
   }
 
   return (
@@ -6034,37 +6031,48 @@ function SenderEditor({
               <div className="policy-form-section__title">
                 <span><HandCoins size={16} /></span>
                 <div>
-                  <strong>{lang === "ar" ? "قائمة الأسعار" : "Price list"}</strong>
+                  <strong>{lang === "ar" ? "قائمة أسعار الراسل" : "Sender price list"}</strong>
                   <small>
                     {lang === "ar"
-                      ? "اربط الراسل بقائمة واحدة، ويمكن تغييرها لاحقًا."
-                      : "Link the sender to one list; it can be changed later."}
+                      ? "للقراءة فقط؛ يتم الربط والنقل من صفحة قوائم الأسعار لمنع تعارض القوائم."
+                      : "Read only; assignment is managed from Price lists to prevent conflicting links."}
                   </small>
                 </div>
               </div>
-              <label className="select-field">
-                <span>{lang === "ar" ? "القائمة المستخدمة" : "Applied list"}</span>
-                <span className="select-wrap">
-                  <select
-                    value={priceListId}
-                    onChange={(event) => setPriceListId(event.target.value)}
-                  >
-                    <option value="">
-                      {lang === "ar"
-                        ? "القائمة الافتراضية للشركة"
-                        : "Company default list"}
-                    </option>
-                    {priceLists
-                      .filter((priceList) => priceList.state === "active")
-                      .map((priceList) => (
-                        <option key={priceList.id} value={priceList.id}>
-                          {priceList.name[lang]}
-                        </option>
-                      ))}
-                  </select>
-                  <ChevronDown size={16} />
+              <div className="sender-readonly-price">
+                <span>
+                  <HandCoins size={18} />
                 </span>
-              </label>
+                <span>
+                  <small>{lang === "ar" ? "القائمة المطبقة حاليًا" : "Currently applied list"}</small>
+                  <strong>
+                    {appliedPriceList?.name[lang] ??
+                      (lang === "ar"
+                        ? "القائمة الافتراضية للشركة"
+                        : "Company default list")}
+                  </strong>
+                  <em dir="ltr">{appliedPriceList?.code ?? "DEFAULT"}</em>
+                </span>
+                <span className="policy-scope-chip">
+                  <LockKeyhole size={13} />
+                  {lang === "ar" ? "للقراءة فقط" : "Read only"}
+                </span>
+              </div>
+              <div className="geo-safety-card">
+                <ShieldCheck size={18} />
+                <div>
+                  <strong>
+                    {lang === "ar"
+                      ? "مصدر تحكم واحد"
+                      : "One control source"}
+                  </strong>
+                  <p>
+                    {lang === "ar"
+                      ? "تغيير قائمة الراسل يتم فقط من «قوائم الأسعار». عند نقله لقائمة جديدة يُزال تلقائيًا من القائمة القديمة."
+                      : "Change a sender's list only from Price lists. Moving to a new list automatically removes the old link."}
+                  </p>
+                </div>
+              </div>
             </section>
 
             <label className="field sender-notes-field">
@@ -6204,7 +6212,7 @@ function SendersScreen({
     });
   }
 
-  function saveSender(next: SenderRecord, priceListId: string) {
+  function saveSender(next: SenderRecord) {
     next = normalizeSenderRecord(next);
     const previous = records.find((record) => record.id === next.id);
     onRecordsChange((current) =>
@@ -6212,28 +6220,18 @@ function SendersScreen({
         ? current.map((record) => (record.id === next.id ? next : record))
         : [...current, next],
     );
-    onPriceListsChange((current) =>
-      current.map((priceList) => {
-        const cleaned = priceList.senders.filter(
-          (name) =>
-            !previous ||
-            (name.en !== previous.name.en && name.ar !== previous.name.ar),
-        );
-        if (priceList.id !== priceListId) {
-          return { ...priceList, senders: cleaned };
-        }
-        return {
+    if (previous) {
+      onPriceListsChange((current) =>
+        current.map((priceList) => ({
           ...priceList,
-          senders: [
-            ...cleaned.filter(
-              (name) =>
-                name.en !== next.name.en && name.ar !== next.name.ar,
-            ),
-            next.name,
-          ],
-        };
-      }),
-    );
+          senders: priceList.senders.map((name) =>
+            name.en === previous.name.en || name.ar === previous.name.ar
+              ? next.name
+              : name,
+          ),
+        })),
+      );
+    }
     if (previous) {
       onSenderPoliciesChange((current) =>
         current.map((policy) =>
@@ -6248,8 +6246,8 @@ function SendersScreen({
     setIsNew(false);
     setToast(
       lang === "ar"
-        ? "تم حفظ الراسل وربطه بالتسعير والسياسات"
-        : "Sender saved and linked to pricing and policies",
+        ? "تم حفظ بيانات الراسل"
+        : "Sender details saved",
     );
     window.setTimeout(() => setToast(""), 2600);
   }
@@ -6503,8 +6501,7 @@ function SendersScreen({
           sender={editing}
           isNew={isNew}
           lang={lang}
-          priceLists={priceLists}
-          selectedPriceListId={linkedPriceList(editing)?.id ?? ""}
+          appliedPriceList={linkedPriceList(editing)}
           onClose={() => {
             setEditing(null);
             setIsNew(false);

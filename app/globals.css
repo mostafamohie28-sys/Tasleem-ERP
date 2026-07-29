@@ -16677,6 +16677,62 @@ table td small,
   gap: 13px;
 }
 
+.sender-readonly-price {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  min-height: 72px;
+  padding: 12px 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.sender-readonly-price > span:first-child {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(37, 81, 185, 0.1);
+  color: var(--blue-600);
+}
+
+.sender-readonly-price > span:nth-child(2) {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sender-readonly-price small {
+  color: var(--text-soft);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.sender-readonly-price strong {
+  overflow: hidden;
+  font-size: 13.5px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sender-readonly-price em {
+  color: var(--text-faint);
+  font-size: 10.5px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.sender-readonly-price .policy-scope-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
 .sender-notes-field textarea {
   min-height: 88px;
   width: 100%;
@@ -16747,5 +16803,14 @@ table td small,
 
   .sender-row {
     grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .sender-readonly-price {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .sender-readonly-price .policy-scope-chip {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }
