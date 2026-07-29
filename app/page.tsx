@@ -76,7 +76,8 @@ type Screen =
   | "courierPrint"
   | "courierAccount"
   | "senderAccountPrep"
-  | "senderAccount";
+  | "senderAccount"
+  | "senderAccountHistory";
 type Scenario =
   | "ready"
   | "loading"
@@ -225,6 +226,23 @@ type SenderSettlementReceipt = {
   receiverName: string;
   moneyExecuted: boolean;
   returnsExecuted: boolean;
+  executor?: Localized;
+  state?:
+    | "completed"
+    | "money_settled_returns_pending"
+    | "returns_settled_money_pending";
+  shipmentSnapshots?: {
+    shipmentId: string;
+    reference: string;
+    recipient: Localized;
+    status: Localized;
+    collectedAmount: number;
+    shippingCharge: number;
+    otherFees: number;
+    senderDue: number;
+    companyDue: number;
+    returnPieces: number;
+  }[];
   timestamp: Localized;
 };
 
@@ -2051,7 +2069,57 @@ const senderBalancesData: SenderBalance[] = [
 ];
 
 const senderSettlementDraftsData: SenderSettlementDraft[] = [];
-const senderSettlementReceiptsData: SenderSettlementReceipt[] = [];
+const senderSettlementReceiptsData: SenderSettlementReceipt[] = [
+  {
+    id: "SR-1048",
+    draftId: "sender-draft-history-1048",
+    sender: { ar: "أوركيد", en: "Orchid" },
+    shipmentEventIds: [
+      "sender-history-event-1048-1",
+      "sender-history-event-1048-2",
+    ],
+    newSenderDue: 915,
+    companyDue: 0,
+    previousBalanceRequested: 0,
+    paidNow: 500,
+    remainingBalance: 415,
+    returnedShipmentCount: 1,
+    returnedPieces: 1,
+    paymentSource: "main-cash",
+    receiverName: "أحمد منصور",
+    moneyExecuted: true,
+    returnsExecuted: true,
+    executor: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    state: "completed",
+    shipmentSnapshots: [
+      {
+        shipmentId: "TS-12792",
+        reference: "OR-5421",
+        recipient: { ar: "سلمى وائل", en: "Salma Wael" },
+        status: { ar: "تم التسليم", en: "Delivered" },
+        collectedAmount: 620,
+        shippingCharge: 50,
+        otherFees: 0,
+        senderDue: 570,
+        companyDue: 0,
+        returnPieces: 0,
+      },
+      {
+        shipmentId: "TS-12788",
+        reference: "OR-5398",
+        recipient: { ar: "محمود سامي", en: "Mahmoud Samy" },
+        status: { ar: "تسليم جزئي", en: "Partial delivery" },
+        collectedAmount: 400,
+        shippingCharge: 45,
+        otherFees: 10,
+        senderDue: 345,
+        companyDue: 0,
+        returnPieces: 1,
+      },
+    ],
+    timestamp: { ar: "24 يوليو، 5:30 م", en: "24 Jul, 5:30 PM" },
+  },
+];
 
 const courierRateCopy = {
   ar: {
@@ -2920,6 +2988,12 @@ function Sidebar({
           label: lang === "ar" ? "حساب الراسل" : "Sender account",
           icon: ReceiptText,
           screen: "senderAccount" as const,
+        },
+        {
+          label:
+            lang === "ar" ? "سجل حسابات الراسل" : "Sender account history",
+          icon: CalendarDays,
+          screen: "senderAccountHistory" as const,
         },
         { label: t.warehouse, icon: Warehouse },
       ],
@@ -9095,6 +9169,619 @@ function CourierPrintScreen({
   );
 }
 
+function SenderAccountHistoryScreen({
+  lang,
+  theme,
+  receipts,
+  balances,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  receipts: SenderSettlementReceipt[];
+  balances: SenderBalance[];
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [senderFilter, setSenderFilter] = useState("all");
+  const [stateFilter, setStateFilter] = useState("all");
+  const [selectedReceipt, setSelectedReceipt] =
+    useState<SenderSettlementReceipt | null>(null);
+  const money = useMemo(
+    () =>
+      new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
+        style: "currency",
+        currency: "EGP",
+        maximumFractionDigits: 0,
+      }),
+    [lang],
+  );
+  const senderOptions = useMemo(() => {
+    const map = new Map<string, Localized>();
+    receipts.forEach((receipt) => map.set(receipt.sender.en, receipt.sender));
+    return [...map.values()];
+  }, [receipts]);
+  const filteredReceipts = receipts
+    .filter(
+      (receipt) =>
+        senderFilter === "all" || receipt.sender.en === senderFilter,
+    )
+    .filter(
+      (receipt) =>
+        stateFilter === "all" ||
+        (receipt.state ?? "completed") === stateFilter,
+    )
+    .filter((receipt) => {
+      const normalized = search.trim().toLowerCase();
+      if (!normalized) return true;
+      return [
+        receipt.id,
+        receipt.sender.ar,
+        receipt.sender.en,
+        receipt.receiverName,
+        ...(receipt.shipmentSnapshots ?? []).flatMap((shipment) => [
+          shipment.shipmentId,
+          shipment.reference,
+          shipment.recipient.ar,
+          shipment.recipient.en,
+        ]),
+      ].some((value) => value.toLowerCase().includes(normalized));
+    })
+    .reverse();
+  const totalPaid = receipts.reduce((sum, receipt) => sum + receipt.paidNow, 0);
+  const outstanding = balances
+    .filter((balance) => balance.state === "active")
+    .reduce((sum, balance) => sum + balance.balance, 0);
+  const returnedPieces = receipts.reduce(
+    (sum, receipt) => sum + receipt.returnedPieces,
+    0,
+  );
+
+  function sourceLabel(source: string) {
+    if (source === "main-cash") {
+      return lang === "ar" ? "الخزنة الرئيسية" : "Main cash treasury";
+    }
+    if (source === "bank") {
+      return lang === "ar" ? "الحساب البنكي" : "Bank account";
+    }
+    if (source === "wallet") {
+      return lang === "ar" ? "المحفظة الإلكترونية" : "E-wallet";
+    }
+    return source || (lang === "ar" ? "لا يوجد دفع" : "No payment");
+  }
+
+  function stateLabel(
+    state: SenderSettlementReceipt["state"],
+  ): Localized {
+    if (state === "money_settled_returns_pending") {
+      return {
+        ar: "الدفع تم والمرتجعات معلقة",
+        en: "Money paid; returns pending",
+      };
+    }
+    if (state === "returns_settled_money_pending") {
+      return {
+        ar: "المرتجعات سُلّمت والدفع معلق",
+        en: "Returns handed; money pending",
+      };
+    }
+    return { ar: "مكتمل", en: "Completed" };
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="senderAccountHistory"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <CalendarDays size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "سجل حسابات الراسل"
+                  : "Sender account history"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "الإيصالات والحركات المثبتة"
+                  : "Receipts and recorded movements"}
+              </small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content sender-history-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar"
+                    ? "سجل حسابات الراسل"
+                    : "Sender account history"}
+                </h1>
+                <span className="demo-chip">
+                  {receipts.length} {lang === "ar" ? "إيصال" : "receipts"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "راجع ما دُفع وما سُلّم فعليًا، وافتح أي إيصال لعرض تفاصيله أو طباعته."
+                  : "Review what was actually paid and handed over, then open any receipt for details or printing."}
+              </p>
+            </div>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => onNavigate("senderAccountPrep")}
+            >
+              <ClipboardCheck size={17} />
+              {lang === "ar" ? "تجهيز حساب جديد" : "Prepare new account"}
+            </button>
+          </div>
+
+          <section className="sender-history-truth">
+            <LockKeyhole size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "الإيصال المؤكد لا يُعدّل ولا يُحذف"
+                  : "A confirmed receipt cannot be edited or deleted"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "أي خطأ لاحق يُعالج بحركة تصحيح مرتبطة بالأصل حتى يظل التاريخ قابلًا للمراجعة."
+                  : "Any later error is handled by a linked correction so the original history remains auditable."}
+              </small>
+            </span>
+          </section>
+
+          <section className="sender-history-metrics">
+            <article>
+              <span className="metric-icon metric-icon--blue">
+                <ReceiptText size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "إجمالي الإيصالات" : "Total receipts"}</small>
+                <strong>{receipts.length}</strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--green">
+                <Banknote size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "إجمالي المدفوع" : "Total paid"}</small>
+                <strong>{money.format(totalPaid)}</strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--orange">
+                <HandCoins size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "أرصدة ما زالت مستحقة" : "Outstanding balances"}</small>
+                <strong>{money.format(outstanding)}</strong>
+              </span>
+            </article>
+            <article>
+              <span className="metric-icon metric-icon--red">
+                <PackageCheck size={18} />
+              </span>
+              <span>
+                <small>{lang === "ar" ? "قطع مرتجع مسلّمة" : "Returned pieces handed"}</small>
+                <strong>{returnedPieces}</strong>
+              </span>
+            </article>
+          </section>
+
+          <section className="sender-history-card">
+            <div className="sender-history-filters">
+              <label className="sender-history-search">
+                <Search size={17} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "رقم الإيصال، الراسل، الشحنة أو المستلم..."
+                      : "Receipt, sender, shipment or recipient..."
+                  }
+                />
+              </label>
+              <label className="entry-select">
+                <select
+                  value={senderFilter}
+                  onChange={(event) => setSenderFilter(event.target.value)}
+                >
+                  <option value="all">
+                    {lang === "ar" ? "كل الرسل" : "All senders"}
+                  </option>
+                  {senderOptions.map((sender) => (
+                    <option value={sender.en} key={sender.en}>
+                      {sender[lang]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="entry-select">
+                <select
+                  value={stateFilter}
+                  onChange={(event) => setStateFilter(event.target.value)}
+                >
+                  <option value="all">
+                    {lang === "ar" ? "كل حالات الحساب" : "All account states"}
+                  </option>
+                  <option value="completed">
+                    {lang === "ar" ? "مكتمل" : "Completed"}
+                  </option>
+                  <option value="money_settled_returns_pending">
+                    {lang === "ar"
+                      ? "المرتجعات معلقة"
+                      : "Returns pending"}
+                  </option>
+                  <option value="returns_settled_money_pending">
+                    {lang === "ar" ? "الدفع معلق" : "Money pending"}
+                  </option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <span>
+                {filteredReceipts.length} {lang === "ar" ? "نتيجة" : "results"}
+              </span>
+            </div>
+
+            <div className="sender-history-row sender-history-row--head">
+              <span>{lang === "ar" ? "الإيصال" : "Receipt"}</span>
+              <span>{lang === "ar" ? "الراسل" : "Sender"}</span>
+              <span>{lang === "ar" ? "الشحنات" : "Shipments"}</span>
+              <span>{lang === "ar" ? "المستحق الجديد" : "New due"}</span>
+              <span>{lang === "ar" ? "الرصيد السابق" : "Old balance"}</span>
+              <span>{lang === "ar" ? "المدفوع" : "Paid"}</span>
+              <span>{lang === "ar" ? "المتبقي" : "Remaining"}</span>
+              <span>{lang === "ar" ? "المرتجعات" : "Returns"}</span>
+              <span>{lang === "ar" ? "المصدر" : "Source"}</span>
+              <span>{lang === "ar" ? "حالة الحساب" : "Account state"}</span>
+              <span>{lang === "ar" ? "فتح" : "Open"}</span>
+            </div>
+            <div className="sender-history-body">
+              {filteredReceipts.length ? (
+                filteredReceipts.map((receipt) => {
+                  const state = receipt.state ?? "completed";
+                  const stateText = stateLabel(state);
+                  return (
+                    <button
+                      type="button"
+                      className="sender-history-row"
+                      onClick={() => setSelectedReceipt(receipt)}
+                      key={receipt.id}
+                    >
+                      <span className="sender-history-receipt-id">
+                        <strong>{receipt.id}</strong>
+                        <small>{receipt.timestamp[lang]}</small>
+                      </span>
+                      <span>
+                        <strong>{receipt.sender[lang]}</strong>
+                        <small>{receipt.receiverName}</small>
+                      </span>
+                      <strong>{receipt.shipmentEventIds.length}</strong>
+                      <strong className="money">
+                        {money.format(receipt.newSenderDue - receipt.companyDue)}
+                      </strong>
+                      <strong className="money">
+                        {money.format(receipt.previousBalanceRequested)}
+                      </strong>
+                      <strong className="sender-history-paid">
+                        {money.format(receipt.paidNow)}
+                      </strong>
+                      <strong
+                        className={
+                          receipt.remainingBalance > 0
+                            ? "sender-history-remaining"
+                            : "money"
+                        }
+                      >
+                        {money.format(receipt.remainingBalance)}
+                      </strong>
+                      <span>
+                        <strong>
+                          {receipt.returnedShipmentCount}{" "}
+                          {lang === "ar" ? "شحنة" : "shipments"}
+                        </strong>
+                        <small>
+                          {receipt.returnedPieces}{" "}
+                          {lang === "ar" ? "قطعة" : "pieces"}
+                        </small>
+                      </span>
+                      <span>
+                        <strong>{sourceLabel(receipt.paymentSource)}</strong>
+                        <small>
+                          {receipt.executor?.[lang] ??
+                            (lang === "ar" ? "أحمد حسن" : "Ahmed Hassan")}
+                        </small>
+                      </span>
+                      <span>
+                        <b className={`sender-history-state sender-history-state--${state}`}>
+                          {stateText[lang]}
+                        </b>
+                      </span>
+                      <span className="sender-history-open">
+                        <Eye size={17} />
+                      </span>
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="sender-prep-empty">
+                  <ReceiptText size={26} />
+                  <strong>
+                    {lang === "ar"
+                      ? "لا توجد إيصالات تطابق البحث"
+                      : "No receipts match the current search"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "غيّر الفلاتر أو جهّز حسابًا جديدًا."
+                      : "Change the filters or prepare a new account."}
+                  </small>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {selectedReceipt && (
+        <div
+          className="sender-receipt-overlay"
+          role="presentation"
+          onClick={() => setSelectedReceipt(null)}
+        >
+          <article
+            className="sender-receipt-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              lang === "ar" ? "تفاصيل إيصال الراسل" : "Sender receipt details"
+            }
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="sender-receipt-modal__actions">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => window.print()}
+              >
+                <Printer size={17} />
+                {lang === "ar" ? "طباعة الإيصال" : "Print receipt"}
+              </button>
+              <button
+                className="icon-button"
+                type="button"
+                onClick={() => setSelectedReceipt(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <section className="sender-receipt-document">
+              <header className="sender-receipt-document__head">
+                <div className="sender-receipt-brand">
+                  <Brand compact lang={lang} />
+                </div>
+                <div>
+                  <span>{lang === "ar" ? "إيصال حساب راسل" : "Sender account receipt"}</span>
+                  <strong>{selectedReceipt.id}</strong>
+                  <small>{selectedReceipt.timestamp[lang]}</small>
+                </div>
+              </header>
+
+              <div className="sender-receipt-parties">
+                <article>
+                  <small>{lang === "ar" ? "الراسل" : "Sender"}</small>
+                  <strong>{selectedReceipt.sender[lang]}</strong>
+                  <span>
+                    {lang === "ar" ? "استلم بواسطة:" : "Received by:"}{" "}
+                    {selectedReceipt.receiverName}
+                  </span>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "نفّذ العملية" : "Executed by"}</small>
+                  <strong>
+                    {selectedReceipt.executor?.[lang] ??
+                      (lang === "ar" ? "أحمد حسن" : "Ahmed Hassan")}
+                  </strong>
+                  <span>{sourceLabel(selectedReceipt.paymentSource)}</span>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "حالة الحساب" : "Account state"}</small>
+                  <strong>
+                    {stateLabel(selectedReceipt.state ?? "completed")[lang]}
+                  </strong>
+                  <span>
+                    {selectedReceipt.moneyExecuted
+                      ? lang === "ar"
+                        ? "الدفع مثبت"
+                        : "Payment recorded"
+                      : lang === "ar"
+                        ? "لا يوجد دفع في هذا الإيصال"
+                        : "No payment in this receipt"}
+                  </span>
+                </article>
+              </div>
+
+              <div className="sender-receipt-summary">
+                <article>
+                  <small>{lang === "ar" ? "حق الشحنات" : "Shipment due"}</small>
+                  <strong>{money.format(selectedReceipt.newSenderDue)}</strong>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "مستحق الشركة" : "Company due"}</small>
+                  <strong>− {money.format(selectedReceipt.companyDue)}</strong>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "من الرصيد السابق" : "Old balance selected"}</small>
+                  <strong>
+                    {money.format(selectedReceipt.previousBalanceRequested)}
+                  </strong>
+                </article>
+                <article className="sender-receipt-summary__paid">
+                  <small>{lang === "ar" ? "المدفوع الآن" : "Paid now"}</small>
+                  <strong>{money.format(selectedReceipt.paidNow)}</strong>
+                </article>
+                <article className="sender-receipt-summary__remaining">
+                  <small>{lang === "ar" ? "الرصيد المتبقي" : "Remaining balance"}</small>
+                  <strong>{money.format(selectedReceipt.remainingBalance)}</strong>
+                </article>
+              </div>
+
+              <section className="sender-receipt-lines">
+                <div className="sender-receipt-line sender-receipt-line--head">
+                  <span>{lang === "ar" ? "الشحنة" : "Shipment"}</span>
+                  <span>{lang === "ar" ? "المستلم" : "Recipient"}</span>
+                  <span>{lang === "ar" ? "الحالة" : "Status"}</span>
+                  <span>{lang === "ar" ? "التحصيل" : "Collection"}</span>
+                  <span>{lang === "ar" ? "الشحن" : "Shipping"}</span>
+                  <span>{lang === "ar" ? "رسوم أخرى" : "Other fees"}</span>
+                  <span>{lang === "ar" ? "صافي الراسل" : "Sender net"}</span>
+                  <span>{lang === "ar" ? "المرتجع" : "Return"}</span>
+                </div>
+                {(selectedReceipt.shipmentSnapshots ?? []).map((shipment) => (
+                  <div className="sender-receipt-line" key={shipment.shipmentId}>
+                    <span>
+                      <strong>{shipment.shipmentId}</strong>
+                      <small>{shipment.reference}</small>
+                    </span>
+                    <strong>{shipment.recipient[lang]}</strong>
+                    <strong>{shipment.status[lang]}</strong>
+                    <strong>{money.format(shipment.collectedAmount)}</strong>
+                    <strong>{money.format(shipment.shippingCharge)}</strong>
+                    <strong>{money.format(shipment.otherFees)}</strong>
+                    <strong>
+                      {money.format(shipment.senderDue - shipment.companyDue)}
+                    </strong>
+                    <strong>
+                      {shipment.returnPieces > 0
+                        ? `${shipment.returnPieces} ${lang === "ar" ? "قطعة" : "pcs"}`
+                        : "—"}
+                    </strong>
+                  </div>
+                ))}
+                {!selectedReceipt.shipmentSnapshots?.length && (
+                  <div className="sender-receipt-no-snapshot">
+                    {lang === "ar"
+                      ? "تفاصيل الشحنات غير متاحة في هذا الإيصال القديم."
+                      : "Shipment detail is unavailable for this older receipt."}
+                  </div>
+                )}
+              </section>
+
+              <div className="sender-receipt-returns">
+                <PackageCheck size={18} />
+                <span>
+                  <small>
+                    {lang === "ar"
+                      ? "المرتجعات التي سُلّمت في هذا الإيصال"
+                      : "Returns handed over in this receipt"}
+                  </small>
+                  <strong>
+                    {selectedReceipt.returnedShipmentCount}{" "}
+                    {lang === "ar" ? "شحنة" : "shipments"} ·{" "}
+                    {selectedReceipt.returnedPieces}{" "}
+                    {lang === "ar" ? "قطعة" : "pieces"}
+                  </strong>
+                </span>
+                <b>
+                  {selectedReceipt.returnsExecuted
+                    ? lang === "ar"
+                      ? "تم التسليم"
+                      : "Handed over"
+                    : lang === "ar"
+                      ? "لم تُسلّم في هذا الإيصال"
+                      : "Not handed in this receipt"}
+                </b>
+              </div>
+
+              <footer className="sender-receipt-document__footer">
+                <span>
+                  <small>{lang === "ar" ? "توقيع المستلم" : "Receiver signature"}</small>
+                  <i />
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "توقيع الموظف" : "Employee signature"}</small>
+                  <i />
+                </span>
+                <p>
+                  <ShieldCheck size={14} />
+                  {lang === "ar"
+                    ? "هذا الإيصال يثبت ما حدث فعليًا وقت تسجيله ولا يُعدّل بعد التأكيد."
+                    : "This receipt proves what occurred when recorded and is immutable after confirmation."}
+                </p>
+              </footer>
+            </section>
+          </article>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SenderSettlementLineDrawer({
   line,
   lang,
@@ -10339,6 +11026,24 @@ function SenderAccountScreen({
             : receiverName.trim(),
         moneyExecuted: executeMoney,
         returnsExecuted: executeReturns && readyReturnLines.length > 0,
+        executor: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        state: accountCompleted
+          ? "completed"
+          : executeMoney
+            ? "money_settled_returns_pending"
+            : "returns_settled_money_pending",
+        shipmentSnapshots: draftLines.map((line) => ({
+          shipmentId: line.shipment.id,
+          reference: line.shipment.reference,
+          recipient: line.shipment.recipient,
+          status: line.statusEvent.status,
+          collectedAmount: line.statusEvent.collectedAmount ?? 0,
+          shippingCharge: line.shippingCharge,
+          otherFees: line.otherFees,
+          senderDue: line.senderDue,
+          companyDue: line.companyDue,
+          returnPieces: line.returnPieces,
+        })),
         timestamp,
       },
     ]);
@@ -15567,7 +16272,10 @@ export default function Home() {
             .find((draft) => draft.state === "open");
           if (latestOpenDraft) setActiveSenderDraftId(latestOpenDraft.id);
         }
-        if (Array.isArray(parsed.senderReceipts)) {
+        if (
+          Array.isArray(parsed.senderReceipts) &&
+          parsed.senderReceipts.length > 0
+        ) {
           setSharedSenderReceipts(parsed.senderReceipts);
         }
         if (Array.isArray(parsed.shipments)) {
@@ -15823,6 +16531,19 @@ export default function Home() {
           onBalancesChange={setSharedSenderBalances}
           onDraftsChange={setSharedSenderDrafts}
           onReceiptsChange={setSharedSenderReceipts}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "senderAccountHistory" ? (
+        <SenderAccountHistoryScreen
+          lang={lang}
+          theme={theme}
+          receipts={sharedSenderReceipts}
+          balances={sharedSenderBalances}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
