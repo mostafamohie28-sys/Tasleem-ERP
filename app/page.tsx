@@ -70,7 +70,8 @@ type Screen =
   | "confirmation"
   | "assignment"
   | "courierShipments"
-  | "courierPrint";
+  | "courierPrint"
+  | "courierAccount";
 type Scenario =
   | "ready"
   | "loading"
@@ -127,11 +128,47 @@ type Shipment = {
     note: string;
     nextDate: string;
     timestamp: Localized;
+    settlementStatus?: "pending" | "settled";
+    settlementId?: string;
+    settledAt?: Localized;
   }[];
   pieces: number;
   shippingFee: number;
   shippingPayer: "recipient" | "sender";
   address: Localized;
+};
+
+type CourierDebt = {
+  id: string;
+  courier: Localized;
+  originalAmount: number;
+  paidAmount: number;
+  balance: number;
+  reason: string;
+  createdAt: Localized;
+  state: "active" | "closed";
+  history: {
+    id: string;
+    type: "created" | "payment";
+    amount: number;
+    note: string;
+    timestamp: Localized;
+  }[];
+};
+
+type CourierSettlement = {
+  id: string;
+  courier: Localized;
+  shipmentEventIds: string[];
+  collectedAmount: number;
+  commissionEarned: number;
+  commissionPaidNow: number;
+  debtPayment: number;
+  expectedCash: number;
+  actualCash: number;
+  difference: number;
+  adjustmentReason: string;
+  timestamp: Localized;
 };
 
 const copy = {
@@ -485,6 +522,7 @@ const shipments: Shipment[] = [
     area: { ar: "المعادي", en: "Maadi" },
     governorate: { ar: "القاهرة", en: "Cairo" },
     status: { ar: "تم التسليم", en: "Delivered" },
+    statusPolicyId: "status-delivered",
     statusTone: "green",
     custody: { ar: "تم التسليم للمستلم", en: "Delivered to recipient" },
     custodyType: "recipient",
@@ -495,6 +533,23 @@ const shipments: Shipment[] = [
     requiredType: "attention",
     lastEvent: { ar: "سجّل المندوب التسليم منذ 9 د", en: "Courier delivered 9m ago" },
     confirmation: { ar: "تم التأكيد", en: "Confirmed" },
+    statusHistory: [
+      {
+        id: "status-event-demo-delivered",
+        statusPolicyId: "status-delivered",
+        status: { ar: "تم التسليم", en: "Delivered" },
+        color: "#07835a",
+        recordedBy: { ar: "كريم فؤاد", en: "Karim Fouad" },
+        collectedAmount: 1035,
+        deliveredPieces: 1,
+        returnedPieces: 0,
+        reason: "",
+        note: "تم التسليم والتحصيل كاملًا",
+        nextDate: "",
+        timestamp: { ar: "28 يوليو، 12:10 م", en: "28 Jul, 12:10 PM" },
+        settlementStatus: "pending",
+      },
+    ],
     pieces: 1,
     shippingFee: 55,
     shippingPayer: "recipient",
@@ -1661,6 +1716,30 @@ const courierRatePlansData: CourierRatePlan[] = [
   },
 ];
 
+const courierDebtsData: CourierDebt[] = [
+  {
+    id: "courier-debt-demo-1",
+    courier: availableCouriers[2],
+    originalAmount: 200,
+    paidAmount: 0,
+    balance: 200,
+    reason: "عجز في تسوية سابقة",
+    createdAt: { ar: "26 يوليو، 6:15 م", en: "26 Jul, 6:15 PM" },
+    state: "active",
+    history: [
+      {
+        id: "debt-history-demo-1",
+        type: "created",
+        amount: 200,
+        note: "عجز في مبلغ التحصيل المستلم",
+        timestamp: { ar: "26 يوليو، 6:15 م", en: "26 Jul, 6:15 PM" },
+      },
+    ],
+  },
+];
+
+const courierSettlementsData: CourierSettlement[] = [];
+
 const courierRateCopy = {
   ar: {
     title: "قوائم عمولات المناديب",
@@ -2512,6 +2591,11 @@ function Sidebar({
               : "Print courier shipments",
           icon: Printer,
           screen: "courierPrint" as const,
+        },
+        {
+          label: lang === "ar" ? "حساب المندوب" : "Courier account",
+          icon: HandCoins,
+          screen: "courierAccount" as const,
         },
         { label: t.warehouse, icon: Warehouse },
       ],
@@ -7503,6 +7587,7 @@ function CourierShipmentsScreen({
             note,
             nextDate,
             timestamp,
+            settlementStatus: "pending",
           },
           ...(shipment.statusHistory ?? []),
         ],
@@ -8106,6 +8191,7 @@ function CourierPrintScreen({
   lang,
   theme,
   shipmentRecords,
+  debts,
   onLang,
   onTheme,
   onNavigate,
@@ -8114,6 +8200,7 @@ function CourierPrintScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  debts: CourierDebt[];
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -8146,6 +8233,13 @@ function CourierPrintScreen({
       shipment.custodyType === "courier" &&
       shipment.courier?.en === selectedCourier.courier.en,
   );
+  const courierDebtBalance = debts
+    .filter(
+      (debt) =>
+        debt.courier.en === selectedCourier.courier.en &&
+        debt.state === "active",
+    )
+    .reduce((sum, debt) => sum + debt.balance, 0);
   const areas = Array.from(
     new Map(
       courierShipments.map((shipment) => [shipment.area.en, shipment.area]),
@@ -8489,6 +8583,24 @@ function CourierPrintScreen({
               </span>
             </div>
 
+            {courierDebtBalance > 0 && (
+              <div className="courier-print-debt-alert">
+                <CircleAlert size={16} />
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? `مديونية قائمة على المندوب: ${money.format(courierDebtBalance)}`
+                      : `Outstanding courier debt: ${money.format(courierDebtBalance)}`}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "تظل ظاهرة في كل كشف وحساب حتى السداد الكامل أو الجزئي من صفحة حساب المندوب."
+                      : "It remains on every sheet and account until paid fully or partially from Courier account."}
+                  </small>
+                </span>
+              </div>
+            )}
+
             <div className="courier-print-summary">
               <article>
                 <small>{lang === "ar" ? "الشحنات الظاهرة" : "Visible shipments"}</small>
@@ -8655,6 +8767,1228 @@ function CourierPrintScreen({
           </section>
         </main>
       </div>
+    </div>
+  );
+}
+
+function CourierAccountScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  courierPlans,
+  governorates,
+  debts,
+  settlements,
+  onShipmentsChange,
+  onDebtsChange,
+  onSettlementsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  courierPlans: CourierRatePlan[];
+  governorates: GovernorateRecord[];
+  debts: CourierDebt[];
+  settlements: CourierSettlement[];
+  onShipmentsChange: (records: Shipment[]) => void;
+  onDebtsChange: (records: CourierDebt[]) => void;
+  onSettlementsChange: (records: CourierSettlement[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const courierWithPending =
+    assignmentCourierProfiles.find((profile) =>
+      shipmentRecords.some((shipment) =>
+        (shipment.statusHistory ?? []).some(
+          (event) =>
+            event.recordedBy.en === profile.courier.en &&
+            event.settlementStatus !== "settled",
+        ),
+      ),
+    ) ??
+    assignmentCourierProfiles.find((profile) =>
+      debts.some(
+        (debt) =>
+          debt.courier.en === profile.courier.en &&
+          debt.state === "active" &&
+          debt.balance > 0,
+      ),
+    ) ??
+    assignmentCourierProfiles[0];
+  const [courierKey, setCourierKey] = useState(
+    courierWithPending.courier.en,
+  );
+  const [customAmountOpen, setCustomAmountOpen] = useState(false);
+  const [actualCashInput, setActualCashInput] = useState("");
+  const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [debtMode, setDebtMode] = useState<"none" | "full" | "partial">(
+    "none",
+  );
+  const [partialDebtInput, setPartialDebtInput] = useState("");
+  const [selectedItem, setSelectedItem] = useState<{
+    shipment: Shipment;
+    event: NonNullable<Shipment["statusHistory"]>[number];
+  } | null>(null);
+  const [showDebtDetails, setShowDebtDetails] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const selectedCourier =
+    assignmentCourierProfiles.find(
+      (profile) => profile.courier.en === courierKey,
+    ) ?? assignmentCourierProfiles[0];
+  const pendingItems = shipmentRecords.flatMap((shipment) =>
+    (shipment.statusHistory ?? [])
+      .filter(
+        (event) =>
+          event.recordedBy.en === selectedCourier.courier.en &&
+          event.settlementStatus !== "settled",
+      )
+      .map((event) => ({ shipment, event })),
+  );
+  const activePlan =
+    courierPlans.find(
+      (plan) =>
+        plan.state === "active" &&
+        plan.couriers.some(
+          (courier) => courier.en === selectedCourier.courier.en,
+        ),
+    ) ??
+    courierPlans.find(
+      (plan) => plan.state === "active" && plan.isDefault,
+    ) ??
+    courierPlans[0];
+  const activeDebts = debts.filter(
+    (debt) =>
+      debt.courier.en === selectedCourier.courier.en &&
+      debt.state === "active" &&
+      debt.balance > 0,
+  );
+  const debtBalance = activeDebts.reduce(
+    (sum, debt) => sum + debt.balance,
+    0,
+  );
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const areaRecords = governorates.flatMap((governorate) =>
+    governorate.areas.map((area) => ({ area, governorate })),
+  );
+
+  function itemCommission(item: {
+    shipment: Shipment;
+    event: NonNullable<Shipment["statusHistory"]>[number];
+  }) {
+    if (!activePlan || activePlan.compensationType === "salary") return 0;
+    const area = areaRecords.find(
+      (record) =>
+        record.area.name.en === item.shipment.area.en ||
+        record.area.name.ar === item.shipment.area.ar,
+    );
+    if (!area) return 0;
+    return activePlan.rates[area.area.id]?.[item.event.statusPolicyId] ?? 0;
+  }
+
+  function cycleLabel(cycle: CourierSettlementCycle) {
+    if (cycle === "instant") return lang === "ar" ? "فوري" : "Instant";
+    if (cycle === "daily") return lang === "ar" ? "يومي" : "Daily";
+    if (cycle === "weekly") return lang === "ar" ? "أسبوعي" : "Weekly";
+    return lang === "ar" ? "شهري" : "Monthly";
+  }
+
+  const totalCollected = pendingItems.reduce(
+    (sum, item) => sum + (item.event.collectedAmount ?? 0),
+    0,
+  );
+  const totalCommission = pendingItems.reduce(
+    (sum, item) => sum + itemCommission(item),
+    0,
+  );
+  const commissionPaidNow =
+    activePlan &&
+    activePlan.compensationType !== "salary" &&
+    (activePlan.settlementCycle === "instant" ||
+      activePlan.settlementCycle === "daily")
+      ? totalCommission
+      : 0;
+  const currentCompanyDue = Math.max(
+    0,
+    totalCollected - commissionPaidNow,
+  );
+  const totalReturnedPieces = pendingItems.reduce(
+    (sum, item) => sum + (item.event.returnedPieces ?? 0),
+    0,
+  );
+  const debtPayment =
+    debtMode === "full"
+      ? debtBalance
+      : debtMode === "partial"
+        ? Math.min(
+            debtBalance,
+            Math.max(0, Number(partialDebtInput) || 0),
+          )
+        : 0;
+  const expectedCash = currentCompanyDue + debtPayment;
+  const actualCash = customAmountOpen
+    ? Math.max(0, Number(actualCashInput) || 0)
+    : expectedCash;
+  const shortage = Math.max(0, expectedCash - actualCash);
+  const surplus = Math.max(0, actualCash - expectedCash);
+  const latestSettlement = settlements
+    .filter(
+      (settlement) =>
+        settlement.courier.en === selectedCourier.courier.en,
+    )
+    .slice(-1)[0];
+
+  function resetAccountInputs() {
+    setCustomAmountOpen(false);
+    setActualCashInput("");
+    setAdjustmentReason("");
+    setDebtMode("none");
+    setPartialDebtInput("");
+    setError("");
+  }
+
+  function chooseCourier(nextKey: string) {
+    setCourierKey(nextKey);
+    setSelectedItem(null);
+    setShowDebtDetails(false);
+    resetAccountInputs();
+  }
+
+  function toggleCustomAmount() {
+    setCustomAmountOpen((current) => {
+      const next = !current;
+      setActualCashInput(next ? String(expectedCash) : "");
+      setAdjustmentReason("");
+      setError("");
+      return next;
+    });
+  }
+
+  function settleCourierAccount() {
+    if (!pendingItems.length && debtPayment === 0) {
+      setError(
+        lang === "ar"
+          ? "لا توجد شحنات غير مسوّاة أو دفعة مديونية لاستلامها."
+          : "There are no unsettled shipments or debt payments to receive.",
+      );
+      return;
+    }
+    if (debtMode === "partial" && debtPayment <= 0) {
+      setError(
+        lang === "ar"
+          ? "أدخل قيمة السداد الجزئي من المديونية."
+          : "Enter the partial debt payment amount.",
+      );
+      return;
+    }
+    if (
+      customAmountOpen &&
+      actualCash !== expectedCash &&
+      !adjustmentReason.trim()
+    ) {
+      setError(
+        lang === "ar"
+          ? "سبب اختلاف المبلغ إجباري قبل تأكيد الاستلام."
+          : "A reason is required before confirming a different amount.",
+      );
+      return;
+    }
+
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const settlementId = `courier-settlement-${Date.now()}`;
+    const pendingIds = new Set(pendingItems.map((item) => item.event.id));
+    onShipmentsChange(
+      shipmentRecords.map((shipment) => ({
+        ...shipment,
+        statusHistory: shipment.statusHistory?.map((event) =>
+          pendingIds.has(event.id)
+            ? {
+                ...event,
+                settlementStatus: "settled" as const,
+                settlementId,
+                settledAt: timestamp,
+              }
+            : event,
+        ),
+      })),
+    );
+
+    let remainingDebtPayment = debtPayment;
+    const nextDebts = debts.map((debt) => {
+      if (
+        remainingDebtPayment <= 0 ||
+        debt.courier.en !== selectedCourier.courier.en ||
+        debt.state !== "active" ||
+        debt.balance <= 0
+      ) {
+        return debt;
+      }
+      const paidNow = Math.min(debt.balance, remainingDebtPayment);
+      remainingDebtPayment -= paidNow;
+      const nextBalance = debt.balance - paidNow;
+      return {
+        ...debt,
+        paidAmount: debt.paidAmount + paidNow,
+        balance: nextBalance,
+        state: nextBalance === 0 ? ("closed" as const) : debt.state,
+        history: [
+          {
+            id: `debt-payment-${Date.now()}-${debt.id}`,
+            type: "payment" as const,
+            amount: paidNow,
+            note:
+              lang === "ar"
+                ? `سداد ضمن التسوية ${settlementId}`
+                : `Payment in settlement ${settlementId}`,
+            timestamp,
+          },
+          ...debt.history,
+        ],
+      };
+    });
+
+    if (shortage > 0) {
+      nextDebts.unshift({
+        id: `courier-debt-${Date.now()}`,
+        courier: selectedCourier.courier,
+        originalAmount: shortage,
+        paidAmount: 0,
+        balance: shortage,
+        reason: adjustmentReason.trim() || "عجز في استلام التسوية",
+        createdAt: timestamp,
+        state: "active",
+        history: [
+          {
+            id: `debt-created-${Date.now()}`,
+            type: "created",
+            amount: shortage,
+            note:
+              adjustmentReason.trim() ||
+              (lang === "ar"
+                ? "عجز في المبلغ المستلم من المندوب"
+                : "Shortage in cash received from courier"),
+            timestamp,
+          },
+        ],
+      });
+    }
+    onDebtsChange(nextDebts);
+    onSettlementsChange([
+      ...settlements,
+      {
+        id: settlementId,
+        courier: selectedCourier.courier,
+        shipmentEventIds: [...pendingIds],
+        collectedAmount: totalCollected,
+        commissionEarned: totalCommission,
+        commissionPaidNow,
+        debtPayment,
+        expectedCash,
+        actualCash,
+        difference: actualCash - expectedCash,
+        adjustmentReason: adjustmentReason.trim(),
+        timestamp,
+      },
+    ]);
+    resetAccountInputs();
+    setSelectedItem(null);
+    setToast(
+      lang === "ar"
+        ? `تم استلام ${money.format(actualCash)} وإثباتها للخزنة`
+        : `${money.format(actualCash)} received and recorded for treasury`,
+    );
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="courierAccount"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <HandCoins size={20} />
+            </span>
+            <span>
+              <strong>
+                {lang === "ar" ? "حساب المندوب" : "Courier account"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "التحصيل والمرتجعات والمديونية"
+                  : "Collection, returns and debt"}
+              </small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              placeholder={
+                lang === "ar"
+                  ? "ابحث أو انتقل بسرعة..."
+                  : "Search or jump quickly..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content courier-account-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "حساب المندوب" : "Courier account"}</h1>
+                <span className="demo-chip">
+                  {pendingItems.length}{" "}
+                  {lang === "ar" ? "شحنة غير مسوّاة" : "unsettled shipments"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "كل شحنة سجّل المندوب حالتها تدخل هذا الحساب إلزاميًا؛ وما زال في حيازته لا يظهر هنا."
+                  : "Every courier-recorded result enters this account automatically; anything still in custody stays outside it."}
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("courierShipments")}
+            >
+              <PackageCheck size={17} />
+              {lang === "ar" ? "شحنات المندوب" : "Courier shipments"}
+            </button>
+          </div>
+
+          <section className="courier-account-truth">
+            <ShieldCheck size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "لا يوجد تحديد شحنات داخل الحساب: كل السجلات الظاهرة جزء إلزامي من التسوية الحالية"
+                  : "There is no shipment selection: every visible record is mandatory in this settlement"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "تحديد السجلات حدث فعليًا عند تسجيل المندوب للحالة، لذلك لا يمكن نسيان شحنة أو مرتجع هنا."
+                  : "The records were determined when the courier saved each status, so no shipment or return can be skipped here."}
+              </small>
+            </span>
+          </section>
+
+          <section className="courier-account-selector">
+            <label>
+              <span>{lang === "ar" ? "المندوب" : "Courier"}</span>
+              <span className="entry-select">
+                <select
+                  value={courierKey}
+                  onChange={(event) => chooseCourier(event.target.value)}
+                >
+                  {assignmentCourierProfiles.map((profile) => {
+                    const pendingCount = shipmentRecords.reduce(
+                      (count, shipment) =>
+                        count +
+                        (shipment.statusHistory ?? []).filter(
+                          (event) =>
+                            event.recordedBy.en === profile.courier.en &&
+                            event.settlementStatus !== "settled",
+                        ).length,
+                      0,
+                    );
+                    const courierDebt = debts
+                      .filter(
+                        (debt) =>
+                          debt.courier.en === profile.courier.en &&
+                          debt.state === "active",
+                      )
+                      .reduce((sum, debt) => sum + debt.balance, 0);
+                    return (
+                      <option value={profile.courier.en} key={profile.code}>
+                        {profile.courier[lang]} — {pendingCount}{" "}
+                        {lang === "ar" ? "شحنة" : "shipments"}
+                        {courierDebt > 0
+                          ? ` · ${lang === "ar" ? "مديونية" : "debt"} ${courierDebt}`
+                          : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+                <ChevronDown size={16} />
+              </span>
+            </label>
+            <div className="courier-account-profile">
+              <span className="mini-avatar">
+                {selectedCourier.courier[lang].slice(0, 1)}
+              </span>
+              <span>
+                <strong>{selectedCourier.courier[lang]}</strong>
+                <small>
+                  {selectedCourier.code} · {selectedCourier.vehicle[lang]}
+                </small>
+              </span>
+            </div>
+            <div className="courier-account-plan">
+              <span>
+                <small>{lang === "ar" ? "خطة الأجر" : "Compensation plan"}</small>
+                <strong>
+                  {activePlan?.name[lang] ??
+                    (lang === "ar" ? "غير محددة" : "Not configured")}
+                </strong>
+              </span>
+              <span>
+                <small>{lang === "ar" ? "دورة الصرف" : "Payout cycle"}</small>
+                <strong>
+                  {activePlan
+                    ? cycleLabel(activePlan.settlementCycle)
+                    : "—"}
+                </strong>
+              </span>
+              <button
+                type="button"
+                onClick={() => onNavigate("courierRates")}
+              >
+                {lang === "ar" ? "فتح الخطة" : "Open plan"}
+              </button>
+            </div>
+          </section>
+
+          <section className="courier-account-metrics">
+            <article>
+              <span><HandCoins size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "جمع من المستلمين" : "Collected"}</small>
+                <strong>{money.format(totalCollected)}</strong>
+              </div>
+            </article>
+            <article>
+              <span><Truck size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "عمولة مكتسبة" : "Commission earned"}</small>
+                <strong>{money.format(totalCommission)}</strong>
+              </div>
+            </article>
+            <article>
+              <span><Boxes size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "قطع مرتجعة" : "Returned pieces"}</small>
+                <strong>{totalReturnedPieces}</strong>
+              </div>
+            </article>
+            <article className={debtBalance > 0 ? "has-debt" : ""}>
+              <span><CircleAlert size={18} /></span>
+              <div>
+                <small>{lang === "ar" ? "مديونية سابقة" : "Previous debt"}</small>
+                <strong>{money.format(debtBalance)}</strong>
+              </div>
+            </article>
+          </section>
+
+          <div className="courier-account-workspace">
+            <section className="courier-account-table-card">
+              <div className="courier-account-table-heading">
+                <div>
+                  <span className="entry-step">1</span>
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? "الشحنات غير المسوّاة"
+                        : "Unsettled shipments"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "جدول واحد للفلوس والقطع والمرتجعات"
+                        : "One table for money, pieces and returns"}
+                    </small>
+                  </span>
+                </div>
+                <span>
+                  {pendingItems.length}{" "}
+                  {lang === "ar" ? "سجل إلزامي" : "mandatory records"}
+                </span>
+              </div>
+
+              <div className="courier-account-table">
+                <div className="courier-account-row courier-account-row--head">
+                  <span>{lang === "ar" ? "الشحنة" : "Shipment"}</span>
+                  <span>{lang === "ar" ? "المستلم" : "Recipient"}</span>
+                  <span>{lang === "ar" ? "الحالة" : "Status"}</span>
+                  <span>{lang === "ar" ? "التحصيل" : "Collection"}</span>
+                  <span>{lang === "ar" ? "عمولة المندوب" : "Commission"}</span>
+                  <span>{lang === "ar" ? "مطلوب للشركة" : "Company due"}</span>
+                  <span>{lang === "ar" ? "المسلّم" : "Delivered"}</span>
+                  <span>{lang === "ar" ? "المرتجع" : "Return"}</span>
+                  <span>{lang === "ar" ? "وقت التسجيل" : "Recorded"}</span>
+                </div>
+                <div className="courier-account-table__body">
+                  {pendingItems.map((item) => {
+                    const commission = itemCommission(item);
+                    const paidNow =
+                      commissionPaidNow > 0 ? commission : 0;
+                    const companyDue = Math.max(
+                      0,
+                      (item.event.collectedAmount ?? 0) - paidNow,
+                    );
+                    return (
+                      <button
+                        type="button"
+                        className="courier-account-row"
+                        key={item.event.id}
+                        onClick={() => setSelectedItem(item)}
+                      >
+                        <span className="courier-account-shipment">
+                          <strong>{item.shipment.id}</strong>
+                          <small>{item.shipment.reference}</small>
+                        </span>
+                        <span className="courier-account-person">
+                          <strong>{item.shipment.recipient[lang]}</strong>
+                          <small dir="ltr">{item.shipment.phone}</small>
+                        </span>
+                        <span>
+                          <em
+                            className={`status-badge status-badge--${item.shipment.statusTone}`}
+                          >
+                            {item.event.status[lang]}
+                          </em>
+                        </span>
+                        <span className="courier-account-money">
+                          <small>{lang === "ar" ? "التحصيل" : "Collection"}</small>
+                          <strong>
+                            {money.format(item.event.collectedAmount ?? 0)}
+                          </strong>
+                        </span>
+                        <span className="courier-account-money">
+                          <small>{cycleLabel(activePlan?.settlementCycle ?? "daily")}</small>
+                          <strong>{money.format(commission)}</strong>
+                        </span>
+                        <span className="courier-account-money courier-account-money--due">
+                          <small>{lang === "ar" ? "للشركة" : "Company"}</small>
+                          <strong>{money.format(companyDue)}</strong>
+                        </span>
+                        <span className="courier-account-pieces">
+                          <strong>{item.event.deliveredPieces ?? "—"}</strong>
+                          <small>{lang === "ar" ? "قطعة" : "pcs"}</small>
+                        </span>
+                        <span className="courier-account-pieces courier-account-pieces--return">
+                          <strong>{item.event.returnedPieces ?? "—"}</strong>
+                          <small>{lang === "ar" ? "قطعة" : "pcs"}</small>
+                        </span>
+                        <span className="courier-account-time">
+                          <strong>{item.event.timestamp[lang]}</strong>
+                          <small>{lang === "ar" ? "اضغط للمراجعة" : "Open details"}</small>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!pendingItems.length && (
+                    <div className="courier-account-empty">
+                      <Check size={30} />
+                      <strong>
+                        {lang === "ar"
+                          ? "لا توجد شحنات غير مسوّاة لهذا المندوب"
+                          : "No unsettled shipments for this courier"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "أي حالة جديدة يسجّلها ستظهر هنا تلقائيًا."
+                          : "Any new courier-recorded status appears here automatically."}
+                      </small>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {latestSettlement && (
+                <div className="courier-account-last-settlement">
+                  <Clock3 size={16} />
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? "آخر تسوية مسجلة"
+                        : "Latest recorded settlement"}
+                    </strong>
+                    <small>
+                      {latestSettlement.timestamp[lang]} ·{" "}
+                      {money.format(latestSettlement.actualCash)}{" "}
+                      {lang === "ar" ? "دخلت الخزنة" : "recorded for treasury"}
+                    </small>
+                  </span>
+                </div>
+              )}
+            </section>
+
+            <aside className="courier-settlement-panel">
+              <div className="courier-settlement-heading">
+                <span className="entry-step">2</span>
+                <span>
+                  <strong>{lang === "ar" ? "استلام الحساب" : "Receive account"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "الفلوس والمرتجعات في عملية واحدة"
+                      : "Money and returns in one operation"}
+                  </small>
+                </span>
+              </div>
+
+              <div className="courier-settlement-breakdown">
+                <span>
+                  <small>{lang === "ar" ? "تحصيل الشحنات" : "Shipment collection"}</small>
+                  <strong>{money.format(totalCollected)}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "عمولة مكتسبة" : "Commission earned"}</small>
+                  <strong>{money.format(totalCommission)}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "عمولة تُدفع الآن" : "Commission paid now"}</small>
+                  <strong>- {money.format(commissionPaidNow)}</strong>
+                </span>
+                <span className="courier-settlement-breakdown__due">
+                  <small>{lang === "ar" ? "مطلوب من الحساب الحالي" : "Current account due"}</small>
+                  <strong>{money.format(currentCompanyDue)}</strong>
+                </span>
+              </div>
+
+              <div className="courier-debt-card">
+                <div className="courier-debt-card__heading">
+                  <span>
+                    <CircleAlert size={16} />
+                    <span>
+                      <strong>{lang === "ar" ? "مديونية المندوب" : "Courier debt"}</strong>
+                      <small>
+                        {lang === "ar"
+                          ? "تظل ظاهرة حتى السداد الكامل"
+                          : "Remains visible until fully paid"}
+                      </small>
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!activeDebts.length}
+                    onClick={() => setShowDebtDetails(true)}
+                  >
+                    {lang === "ar" ? "التفاصيل" : "Details"}
+                  </button>
+                </div>
+                <strong className="courier-debt-balance">
+                  {money.format(debtBalance)}
+                </strong>
+                {debtBalance > 0 ? (
+                  <div className="courier-debt-options">
+                    <button
+                      type="button"
+                      className={debtMode === "none" ? "active" : ""}
+                      onClick={() => {
+                        setDebtMode("none");
+                        setPartialDebtInput("");
+                      }}
+                    >
+                      {lang === "ar" ? "لا يدفع اليوم" : "No payment today"}
+                    </button>
+                    <button
+                      type="button"
+                      className={debtMode === "full" ? "active" : ""}
+                      onClick={() => {
+                        setDebtMode("full");
+                        setPartialDebtInput("");
+                      }}
+                    >
+                      {lang === "ar" ? "سداد كامل" : "Pay in full"}
+                    </button>
+                    <button
+                      type="button"
+                      className={debtMode === "partial" ? "active" : ""}
+                      onClick={() => {
+                        setDebtMode("partial");
+                        setPartialDebtInput("");
+                      }}
+                    >
+                      {lang === "ar" ? "سداد جزئي" : "Partial payment"}
+                    </button>
+                  </div>
+                ) : (
+                  <small className="courier-debt-clear">
+                    <Check size={14} />
+                    {lang === "ar"
+                      ? "لا توجد مديونية سابقة"
+                      : "No previous debt"}
+                  </small>
+                )}
+                {debtMode === "partial" && (
+                  <label className="courier-partial-debt">
+                    <span>{lang === "ar" ? "المدفوع اليوم" : "Paid today"}</span>
+                    <span>
+                      <input
+                        type="number"
+                        min="0"
+                        max={debtBalance}
+                        value={partialDebtInput}
+                        onChange={(event) => {
+                          setPartialDebtInput(event.target.value);
+                          setError("");
+                        }}
+                      />
+                      <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                    </span>
+                    <small>
+                      {lang === "ar" ? "المتبقي بعد السداد:" : "Remaining after payment:"}{" "}
+                      {money.format(Math.max(0, debtBalance - debtPayment))}
+                    </small>
+                  </label>
+                )}
+              </div>
+
+              <div className="courier-final-cash">
+                <div>
+                  <small>{lang === "ar" ? "الحساب الحالي" : "Current account"}</small>
+                  <strong>{money.format(currentCompanyDue)}</strong>
+                </div>
+                <i>+</i>
+                <div>
+                  <small>{lang === "ar" ? "سداد مديونية" : "Debt payment"}</small>
+                  <strong>{money.format(debtPayment)}</strong>
+                </div>
+                <i>=</i>
+                <div className="courier-final-cash__total">
+                  <small>{lang === "ar" ? "المتوقع للخزنة" : "Expected for treasury"}</small>
+                  <strong>{money.format(expectedCash)}</strong>
+                </div>
+              </div>
+
+              <div className="courier-actual-cash">
+                <div className="courier-actual-cash__heading">
+                  <span>
+                    <strong>{lang === "ar" ? "المبلغ المستلم فعليًا" : "Actual cash received"}</strong>
+                    <small>
+                      {lang === "ar"
+                        ? "مقفول على المتوقع لحماية الحساب"
+                        : "Locked to expected amount for safety"}
+                    </small>
+                  </span>
+                  <button type="button" onClick={toggleCustomAmount}>
+                    {customAmountOpen
+                      ? lang === "ar"
+                        ? "إلغاء المبلغ الآخر"
+                        : "Cancel other amount"
+                      : lang === "ar"
+                        ? "مبلغ آخر"
+                        : "Other amount"}
+                  </button>
+                </div>
+                <span
+                  className={
+                    customAmountOpen
+                      ? "courier-actual-cash__input active"
+                      : "courier-actual-cash__input"
+                  }
+                >
+                  <input
+                    type="number"
+                    min="0"
+                    disabled={!customAmountOpen}
+                    value={
+                      customAmountOpen
+                        ? actualCashInput
+                        : String(expectedCash)
+                    }
+                    onChange={(event) => {
+                      setActualCashInput(event.target.value);
+                      setError("");
+                    }}
+                  />
+                  <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                  {!customAmountOpen && <LockKeyhole size={15} />}
+                </span>
+                {customAmountOpen && actualCash !== expectedCash && (
+                  <label className="courier-adjustment-reason">
+                    <span>
+                      {lang === "ar"
+                        ? "سبب اختلاف المبلغ"
+                        : "Reason for amount difference"}{" "}
+                      *
+                    </span>
+                    <textarea
+                      value={adjustmentReason}
+                      onChange={(event) => {
+                        setAdjustmentReason(event.target.value);
+                        setError("");
+                      }}
+                      placeholder={
+                        lang === "ar"
+                          ? "اكتب السبب بوضوح..."
+                          : "Enter a clear reason..."
+                      }
+                    />
+                  </label>
+                )}
+                {shortage > 0 && (
+                  <div className="courier-cash-difference courier-cash-difference--short">
+                    <CircleAlert size={16} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? `سيُسجّل ${money.format(shortage)} مديونية جديدة على المندوب`
+                          : `${money.format(shortage)} will become new courier debt`}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "تظهر في كل حساب لاحق حتى السداد."
+                          : "It remains on every later account until paid."}
+                      </small>
+                    </span>
+                  </div>
+                )}
+                {surplus > 0 && (
+                  <div className="courier-cash-difference courier-cash-difference--surplus">
+                    <CircleAlert size={16} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? `هناك زيادة ${money.format(surplus)} ستُثبت بالخزنة`
+                          : `${money.format(surplus)} surplus will be recorded in treasury`}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "سبب الاختلاف سيظل محفوظًا للمراجعة."
+                          : "The reason remains recorded for review."}
+                      </small>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {error && (
+                <div className="courier-settlement-error" role="alert">
+                  <CircleAlert size={16} />
+                  {error}
+                </div>
+              )}
+
+              <div className="courier-settlement-submit">
+                <span>
+                  <small>{lang === "ar" ? "سيدخل الخزنة" : "Treasury receives"}</small>
+                  <strong>{money.format(actualCash)}</strong>
+                  <small>
+                    + {totalReturnedPieces}{" "}
+                    {lang === "ar" ? "قطعة مرتجعة" : "returned pieces"}
+                  </small>
+                </span>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={!pendingItems.length && debtPayment === 0}
+                  onClick={settleCourierAccount}
+                >
+                  <ShieldCheck size={17} />
+                  {lang === "ar" ? "تأكيد واستلام الحساب" : "Confirm and receive"}
+                </button>
+              </div>
+            </aside>
+          </div>
+        </main>
+      </div>
+
+      {selectedItem && (
+        <div
+          className="settlement-detail-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedItem(null);
+          }}
+        >
+          <aside
+            className="settlement-detail-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              lang === "ar" ? "تفاصيل شحنة الحساب" : "Account shipment details"
+            }
+          >
+            <header>
+              <span>
+                <strong>{selectedItem.shipment.id}</strong>
+                <small>
+                  {selectedItem.shipment.reference} ·{" "}
+                  {selectedItem.event.status[lang]}
+                </small>
+              </span>
+              <button type="button" onClick={() => setSelectedItem(null)}>
+                <X size={18} />
+              </button>
+            </header>
+            <div className="settlement-detail-body">
+              <section>
+                <h3>{lang === "ar" ? "بيانات الشحنة" : "Shipment details"}</h3>
+                <div className="settlement-detail-grid">
+                  <span>
+                    <small>{lang === "ar" ? "المستلم" : "Recipient"}</small>
+                    <strong>{selectedItem.shipment.recipient[lang]}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "الهاتف" : "Phone"}</small>
+                    <strong dir="ltr">{selectedItem.shipment.phone}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "الراسل" : "Sender"}</small>
+                    <strong>{selectedItem.shipment.sender[lang]}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "المنطقة" : "Area"}</small>
+                    <strong>{selectedItem.shipment.area[lang]}</strong>
+                  </span>
+                  <span className="wide">
+                    <small>{lang === "ar" ? "العنوان" : "Address"}</small>
+                    <strong>{selectedItem.shipment.address[lang]}</strong>
+                  </span>
+                </div>
+              </section>
+              <section>
+                <h3>{lang === "ar" ? "تفاصيل المال والمرتجع" : "Money and return details"}</h3>
+                <div className="settlement-detail-money">
+                  <span>
+                    <small>{lang === "ar" ? "سعر الشحنة" : "Shipment price"}</small>
+                    <strong>{money.format(selectedItem.shipment.amount)}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}</small>
+                    <strong>{money.format(selectedItem.shipment.shippingFee)}</strong>
+                    <em>
+                      {selectedItem.shipment.shippingPayer === "recipient"
+                        ? lang === "ar"
+                          ? "على المستلم"
+                          : "Recipient"
+                        : lang === "ar"
+                          ? "على الراسل"
+                          : "Sender"}
+                    </em>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "المبلغ المحصل" : "Collected amount"}</small>
+                    <strong>
+                      {money.format(selectedItem.event.collectedAmount ?? 0)}
+                    </strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "عمولة المندوب" : "Courier commission"}</small>
+                    <strong>{money.format(itemCommission(selectedItem))}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "القطع المسلّمة" : "Delivered pieces"}</small>
+                    <strong>{selectedItem.event.deliveredPieces ?? "—"}</strong>
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "القطع المرتجعة" : "Returned pieces"}</small>
+                    <strong>{selectedItem.event.returnedPieces ?? "—"}</strong>
+                  </span>
+                </div>
+              </section>
+              {(selectedItem.event.reason ||
+                selectedItem.event.note ||
+                selectedItem.event.nextDate) && (
+                <section>
+                  <h3>{lang === "ar" ? "بيانات الحالة" : "Status details"}</h3>
+                  <div className="settlement-status-notes">
+                    {selectedItem.event.reason && (
+                      <p>
+                        <strong>{lang === "ar" ? "السبب:" : "Reason:"}</strong>{" "}
+                        {selectedItem.event.reason}
+                      </p>
+                    )}
+                    {selectedItem.event.note && (
+                      <p>
+                        <strong>{lang === "ar" ? "الملاحظة:" : "Note:"}</strong>{" "}
+                        {selectedItem.event.note}
+                      </p>
+                    )}
+                    {selectedItem.event.nextDate && (
+                      <p>
+                        <strong>{lang === "ar" ? "الموعد:" : "Date:"}</strong>{" "}
+                        {selectedItem.event.nextDate}
+                      </p>
+                    )}
+                  </div>
+                </section>
+              )}
+            </div>
+            <footer>
+              <span>
+                <Clock3 size={15} />
+                {selectedItem.event.timestamp[lang]}
+              </span>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setSelectedItem(null)}
+              >
+                {lang === "ar" ? "إغلاق" : "Close"}
+              </button>
+            </footer>
+          </aside>
+        </div>
+      )}
+
+      {showDebtDetails && (
+        <div
+          className="settlement-detail-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowDebtDetails(false);
+            }
+          }}
+        >
+          <aside
+            className="settlement-detail-drawer debt-detail-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label={
+              lang === "ar" ? "تفاصيل مديونية المندوب" : "Courier debt details"
+            }
+          >
+            <header>
+              <span>
+                <strong>
+                  {lang === "ar" ? "تفاصيل المديونية" : "Debt details"}
+                </strong>
+                <small>{selectedCourier.courier[lang]}</small>
+              </span>
+              <button type="button" onClick={() => setShowDebtDetails(false)}>
+                <X size={18} />
+              </button>
+            </header>
+            <div className="settlement-detail-body">
+              <div className="debt-detail-total">
+                <small>{lang === "ar" ? "إجمالي المتبقي" : "Total remaining"}</small>
+                <strong>{money.format(debtBalance)}</strong>
+              </div>
+              {activeDebts.map((debt) => (
+                <section className="debt-detail-record" key={debt.id}>
+                  <div>
+                    <span>
+                      <small>{lang === "ar" ? "أصل المديونية" : "Original debt"}</small>
+                      <strong>{money.format(debt.originalAmount)}</strong>
+                    </span>
+                    <span>
+                      <small>{lang === "ar" ? "تم سداده" : "Paid"}</small>
+                      <strong>{money.format(debt.paidAmount)}</strong>
+                    </span>
+                    <span>
+                      <small>{lang === "ar" ? "المتبقي" : "Remaining"}</small>
+                      <strong>{money.format(debt.balance)}</strong>
+                    </span>
+                  </div>
+                  <p>{debt.reason}</p>
+                  <small>{debt.createdAt[lang]}</small>
+                  <div className="debt-history">
+                    {debt.history.map((history) => (
+                      <article key={history.id}>
+                        <i
+                          className={
+                            history.type === "payment"
+                              ? "payment"
+                              : "created"
+                          }
+                        />
+                        <span>
+                          <strong>
+                            {history.type === "payment"
+                              ? lang === "ar"
+                                ? `سداد ${money.format(history.amount)}`
+                                : `Payment ${money.format(history.amount)}`
+                              : lang === "ar"
+                                ? `إنشاء ${money.format(history.amount)}`
+                                : `Created ${money.format(history.amount)}`}
+                          </strong>
+                          <small>{history.timestamp[lang]}</small>
+                          <p>{history.note}</p>
+                        </span>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </div>
+            <footer>
+              <span>
+                <ShieldCheck size={15} />
+                {lang === "ar"
+                  ? "السجل لا يُحذف ويُغلق عند اكتمال السداد"
+                  : "The record is retained and closes after full payment"}
+              </span>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setShowDebtDetails(false)}
+              >
+                {lang === "ar" ? "إغلاق" : "Close"}
+              </button>
+            </footer>
+          </aside>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -11857,6 +13191,11 @@ export default function Home() {
     shipmentDataSettingsDefault,
   );
   const [sharedShipments, setSharedShipments] = useState(shipments);
+  const [sharedCourierDebts, setSharedCourierDebts] =
+    useState(courierDebtsData);
+  const [sharedCourierSettlements, setSharedCourierSettlements] = useState(
+    courierSettlementsData,
+  );
   const [controlCenterReady, setControlCenterReady] = useState(false);
 
   useEffect(() => {
@@ -11876,6 +13215,8 @@ export default function Home() {
           shipmentFields?: ShipmentFieldPolicy[];
           shipmentSettings?: ShipmentDataSettings;
           shipments?: Shipment[];
+          courierDebts?: CourierDebt[];
+          courierSettlements?: CourierSettlement[];
         };
         if (Array.isArray(parsed.statuses)) {
           setSharedStatuses(
@@ -11900,18 +13241,38 @@ export default function Home() {
         if (parsed.shipmentSettings) {
           setSharedShipmentSettings(parsed.shipmentSettings);
         }
+        if (Array.isArray(parsed.courierDebts)) {
+          setSharedCourierDebts(parsed.courierDebts);
+        }
+        if (Array.isArray(parsed.courierSettlements)) {
+          setSharedCourierSettlements(parsed.courierSettlements);
+        }
         if (Array.isArray(parsed.shipments)) {
           setSharedShipments(
-            parsed.shipments.map((shipment) =>
-              shipment.custodyType === "courier" &&
-              shipment.custody.en === "Delivered to recipient"
-                ? {
-                    ...shipment,
-                    custodyType: "recipient" as const,
-                    courier: null,
-                  }
-                : shipment,
-            ),
+            parsed.shipments.map((shipment) => {
+              const deliveredDemo =
+                shipment.id === "TS-12857" &&
+                shipment.status.en === "Delivered" &&
+                !(shipment.statusHistory?.length);
+              return {
+                ...shipment,
+                ...(shipment.custodyType === "courier" &&
+                shipment.custody.en === "Delivered to recipient"
+                  ? {
+                      custodyType: "recipient" as const,
+                      courier: null,
+                    }
+                  : {}),
+                ...(deliveredDemo
+                  ? {
+                      statusPolicyId: "status-delivered",
+                      statusHistory: shipments.find(
+                        (record) => record.id === "TS-12857",
+                      )?.statusHistory,
+                    }
+                  : {}),
+              };
+            }),
           );
         }
       }
@@ -12033,12 +13394,16 @@ export default function Home() {
         shipmentFields: sharedShipmentFields,
         shipmentSettings: sharedShipmentSettings,
         shipments: sharedShipments,
+        courierDebts: sharedCourierDebts,
+        courierSettlements: sharedCourierSettlements,
       }),
     );
   }, [
     controlCenterReady,
     sharedGovernorates,
+    sharedCourierDebts,
     sharedCourierPlans,
+    sharedCourierSettlements,
     sharedPriceLists,
     sharedShipmentFields,
     sharedShipmentSettings,
@@ -12070,11 +13435,31 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
+      ) : screen === "courierAccount" ? (
+        <CourierAccountScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          courierPlans={sharedCourierPlans}
+          governorates={sharedGovernorates}
+          debts={sharedCourierDebts}
+          settlements={sharedCourierSettlements}
+          onShipmentsChange={setSharedShipments}
+          onDebtsChange={setSharedCourierDebts}
+          onSettlementsChange={setSharedCourierSettlements}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
       ) : screen === "courierPrint" ? (
         <CourierPrintScreen
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          debts={sharedCourierDebts}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
