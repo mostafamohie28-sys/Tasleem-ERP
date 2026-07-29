@@ -71,6 +71,7 @@ type Screen =
   | "priceLists"
   | "courierRates"
   | "shipmentPolicies"
+  | "incompleteShipments"
   | "addShipment"
   | "confirmation"
   | "assignment"
@@ -688,9 +689,12 @@ const shipments: Shipment[] = [
     courier: null,
     amount: 460,
     deliveryDate: { ar: "غدًا", en: "Tomorrow" },
-    required: { ar: "هاتف أساسي", en: "Primary phone" },
+    required: { ar: "تصحيح رقم الهاتف", en: "Correct primary phone" },
     requiredType: "incomplete",
-    lastEvent: { ar: "أضيفت عبر Excel منذ ساعة", en: "Imported from Excel 1h ago" },
+    lastEvent: {
+      ar: "اكتُشف أن الهاتف غير صالح أثناء المراجعة",
+      en: "Phone was found invalid during review",
+    },
     confirmation: { ar: "غير مستخدم", en: "Not used" },
     pieces: 3,
     shippingFee: 70,
@@ -2923,7 +2927,10 @@ const shipmentFieldPoliciesData: ShipmentFieldPolicy[] = [
   },
   {
     id: "field-recipient-shipping-charge",
-    name: { ar: "الشحن المحصل من المستلم", en: "Recipient shipping charge" },
+    name: {
+      ar: "مصاريف الشحن التي يدفعها المستلم",
+      en: "Shipping fee paid by recipient",
+    },
     code: "RECIPIENT_SHIPPING_CHARGE",
     group: "financial",
     description: {
@@ -3673,6 +3680,14 @@ function Sidebar({
       items: [
         { label: t.shipments, icon: Boxes, screen: "shipments" as const },
         {
+          label:
+            lang === "ar"
+              ? "استكمال بيانات الشحنات"
+              : "Complete shipment data",
+          icon: CircleAlert,
+          screen: "incompleteShipments" as const,
+        },
+        {
           label: t.confirmation,
           icon: ClipboardCheck,
           screen: "confirmation" as const,
@@ -4041,7 +4056,7 @@ function ShipmentDrawer({
                 <strong>{money.format(shipmentCompanyShippingFee(shipment))}</strong>
               </div>
               <div>
-                <small>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</small>
+                <small>{lang === "ar" ? "شحن دفعه المستلم" : "Shipping paid by recipient"}</small>
                 <strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong>
               </div>
               <div>
@@ -5930,6 +5945,9 @@ function SenderEditor({
       : [],
   );
   const [policySearch, setPolicySearch] = useState("");
+  const [shippingPolicyPreviewFee, setShippingPolicyPreviewFee] = useState(70);
+  const [shippingPolicyPreviewManual, setShippingPolicyPreviewManual] =
+    useState(100);
   const [editingPolicyField, setEditingPolicyField] =
     useState<ShipmentFieldPolicy | null>(null);
   const [isNewPolicyField, setIsNewPolicyField] = useState(false);
@@ -6135,6 +6153,15 @@ function SenderEditor({
       </button>
     );
   }
+
+  const shippingPolicyPreviewCharge = calculateRecipientShippingCharge(
+    shippingPolicyPreviewFee,
+    "recipient",
+    policySettings,
+    String(shippingPolicyPreviewManual),
+  );
+  const shippingPolicyPreviewDifference =
+    shippingPolicyPreviewCharge - shippingPolicyPreviewFee;
 
   return (
     <>
@@ -6824,51 +6851,301 @@ function SenderEditor({
                             <ChevronDown size={15} />
                           </span>
                         </label>
-                        <label className="select-field">
-                          <span className="policy-setting-label">
-                            {lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}
-                            {settingSourceButton("shippingChargeMode")}
-                          </span>
-                          <span className="select-wrap">
-                            <select
-                              value={policySettings.shippingChargeMode}
-                              onChange={(event) =>
-                                updateSenderPolicySetting(
-                                  "shippingChargeMode",
-                                  event.target.value as ShipmentDataSettings["shippingChargeMode"],
-                                )
-                              }
-                            >
-                              <option value="company_price">{lang === "ar" ? "يساوي سعر الشركة" : "Same as company fee"}</option>
-                              <option value="company_plus">{lang === "ar" ? "سعر الشركة + زيادة" : "Company fee + markup"}</option>
-                              <option value="fixed">{lang === "ar" ? "مبلغ ثابت" : "Fixed amount"}</option>
-                              <option value="manual">{lang === "ar" ? "يدوي لكل شحنة" : "Manual per shipment"}</option>
-                            </select>
-                            <ChevronDown size={15} />
-                          </span>
-                        </label>
-                        {(policySettings.shippingChargeMode === "company_plus" ||
-                          policySettings.shippingChargeMode === "fixed") && (
-                          <label className="field">
-                            <span className="policy-setting-label">
-                              {lang === "ar" ? "قيمة الشحن أو الزيادة" : "Charge or markup value"}
-                              {settingSourceButton("shippingChargeValue")}
+                        <article className="sender-shipping-charge-policy">
+                          <div className="sender-shipping-charge-policy__heading">
+                            <span>
+                              <strong>
+                                {lang === "ar"
+                                  ? "مصاريف الشحن التي يدفعها المستلم"
+                                  : "Shipping fee paid by the recipient"}
+                              </strong>
+                              <small>
+                                {lang === "ar"
+                                  ? "هذا المبلغ منفصل عن سعر شحن الشركة الموجود في قائمة الأسعار، والفرق بينهما يدخل في حساب الراسل."
+                                  : "This amount is separate from the company shipping fee in the price list; their difference flows into the sender account."}
+                              </small>
                             </span>
-                            <span className="field__control">
-                              <input
-                                type="number"
-                                min="0"
-                                value={policySettings.shippingChargeValue}
-                                onChange={(event) =>
+                            <span className="sender-shipping-charge-policy__sources">
+                              {settingSourceButton("shippingChargeMode")}
+                              {(policySettings.shippingChargeMode ===
+                                "company_plus" ||
+                                policySettings.shippingChargeMode ===
+                                  "fixed") &&
+                                settingSourceButton("shippingChargeValue")}
+                            </span>
+                          </div>
+
+                          <div className="shipping-charge-mode-grid">
+                            {(
+                              [
+                                {
+                                  id: "company_price",
+                                  title: {
+                                    ar: "يساوي سعر الشركة",
+                                    en: "Equals company fee",
+                                  },
+                                  hint: {
+                                    ar: "لا زيادة ولا عجز على حساب الراسل.",
+                                    en: "No markup or shortfall for the sender.",
+                                  },
+                                },
+                                {
+                                  id: "company_plus",
+                                  title: {
+                                    ar: "سعر الشركة + زيادة",
+                                    en: "Company fee + markup",
+                                  },
+                                  hint: {
+                                    ar: "الزيادة تضاف إلى مستحق الراسل.",
+                                    en: "The markup is added to sender dues.",
+                                  },
+                                },
+                                {
+                                  id: "fixed",
+                                  title: {
+                                    ar: "مبلغ ثابت للمستلم",
+                                    en: "Fixed recipient amount",
+                                  },
+                                  hint: {
+                                    ar: "نفس المبلغ للمستلم مهما اختلف سعر الشركة.",
+                                    en: "Same recipient amount despite company fee changes.",
+                                  },
+                                },
+                                {
+                                  id: "manual",
+                                  title: {
+                                    ar: "يدوي لكل شحنة",
+                                    en: "Manual per shipment",
+                                  },
+                                  hint: {
+                                    ar: "يحدده الموظف وقت تسجيل الشحنة مع حفظ أثره.",
+                                    en: "Entered per shipment with an audit trail.",
+                                  },
+                                },
+                              ] as {
+                                id: ShippingChargeMode;
+                                title: Localized;
+                                hint: Localized;
+                              }[]
+                            ).map((mode) => (
+                              <button
+                                className={
+                                  policySettings.shippingChargeMode === mode.id
+                                    ? "active"
+                                    : ""
+                                }
+                                type="button"
+                                key={mode.id}
+                                onClick={() =>
                                   updateSenderPolicySetting(
-                                    "shippingChargeValue",
-                                    Math.max(0, Number(event.target.value) || 0),
+                                    "shippingChargeMode",
+                                    mode.id,
                                   )
                                 }
-                              />
-                            </span>
-                          </label>
-                        )}
+                              >
+                                <i>
+                                  {policySettings.shippingChargeMode ===
+                                    mode.id && <Check size={12} />}
+                                </i>
+                                <span>
+                                  <strong>{mode.title[lang]}</strong>
+                                  <small>{mode.hint[lang]}</small>
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+
+                          {(policySettings.shippingChargeMode ===
+                            "company_plus" ||
+                            policySettings.shippingChargeMode === "fixed") && (
+                            <label className="shipping-charge-value">
+                              <span>
+                                <strong>
+                                  {policySettings.shippingChargeMode ===
+                                  "company_plus"
+                                    ? lang === "ar"
+                                      ? "قيمة الزيادة الخاصة بالراسل"
+                                      : "Sender markup value"
+                                    : lang === "ar"
+                                      ? "المبلغ الثابت الذي يدفعه المستلم"
+                                      : "Fixed amount paid by recipient"}
+                                </strong>
+                                <small>
+                                  {policySettings.shippingChargeMode ===
+                                  "company_plus"
+                                    ? lang === "ar"
+                                      ? "تضاف فوق سعر الشركة وتظهر ضمن مستحقات الراسل."
+                                      : "Added above company fee and included in sender dues."
+                                    : lang === "ar"
+                                      ? "يُقارن بسعر الشركة لكل شحنة ويُرحل الفرق للراسل."
+                                      : "Compared with company fee per shipment; the difference is posted to the sender."}
+                                </small>
+                              </span>
+                              <span className="shipping-charge-value__input">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={policySettings.shippingChargeValue}
+                                  onChange={(event) =>
+                                    updateSenderPolicySetting(
+                                      "shippingChargeValue",
+                                      Math.max(
+                                        0,
+                                        Number(event.target.value) || 0,
+                                      ),
+                                    )
+                                  }
+                                />
+                                <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                              </span>
+                            </label>
+                          )}
+
+                          <div className="shipping-charge-preview">
+                            <div className="shipping-charge-preview__heading">
+                              <span>
+                                <Calculator size={17} />
+                                <span>
+                                  <strong>
+                                    {lang === "ar"
+                                      ? "معاينة مالية قبل الحفظ"
+                                      : "Financial preview before saving"}
+                                  </strong>
+                                  <small>
+                                    {lang === "ar"
+                                      ? "سعر الشركة الفعلي يختلف حسب المنطقة والحالة وقائمة أسعار الراسل."
+                                      : "The actual company fee varies by area, status and sender price list."}
+                                  </small>
+                                </span>
+                              </span>
+                            </div>
+                            <div className="shipping-charge-preview__inputs">
+                              <label>
+                                <span>
+                                  {lang === "ar"
+                                    ? "سعر الشركة في المثال"
+                                    : "Example company fee"}
+                                </span>
+                                <span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    value={shippingPolicyPreviewFee}
+                                    onChange={(event) =>
+                                      setShippingPolicyPreviewFee(
+                                        Math.max(
+                                          0,
+                                          Number(event.target.value) || 0,
+                                        ),
+                                      )
+                                    }
+                                  />
+                                  <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                                </span>
+                              </label>
+                              {policySettings.shippingChargeMode ===
+                                "manual" && (
+                                <label>
+                                  <span>
+                                    {lang === "ar"
+                                      ? "مبلغ يدوي في المثال"
+                                      : "Example manual amount"}
+                                  </span>
+                                  <span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      value={shippingPolicyPreviewManual}
+                                      onChange={(event) =>
+                                        setShippingPolicyPreviewManual(
+                                          Math.max(
+                                            0,
+                                            Number(event.target.value) || 0,
+                                          ),
+                                        )
+                                      }
+                                    />
+                                    <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                                  </span>
+                                </label>
+                              )}
+                            </div>
+                            <div className="shipping-charge-preview__result">
+                              <article>
+                                <small>
+                                  {lang === "ar"
+                                    ? "مستحق الشركة من الشحن"
+                                    : "Company shipping due"}
+                                </small>
+                                <strong>
+                                  {shippingPolicyPreviewFee.toLocaleString(
+                                    lang === "ar" ? "ar-EG" : "en-EG",
+                                  )}{" "}
+                                  {lang === "ar" ? "ج.م" : "EGP"}
+                                </strong>
+                              </article>
+                              <article>
+                                <small>
+                                  {lang === "ar"
+                                    ? "يدفع المستلم للشحن"
+                                    : "Recipient pays for shipping"}
+                                </small>
+                                <strong>
+                                  {shippingPolicyPreviewCharge.toLocaleString(
+                                    lang === "ar" ? "ar-EG" : "en-EG",
+                                  )}{" "}
+                                  {lang === "ar" ? "ج.م" : "EGP"}
+                                </strong>
+                              </article>
+                              <article
+                                className={
+                                  shippingPolicyPreviewDifference > 0
+                                    ? "positive"
+                                    : shippingPolicyPreviewDifference < 0
+                                      ? "negative"
+                                      : ""
+                                }
+                              >
+                                <small>
+                                  {shippingPolicyPreviewDifference > 0
+                                    ? lang === "ar"
+                                      ? "زيادة مستحقة للراسل"
+                                      : "Sender markup due"
+                                    : shippingPolicyPreviewDifference < 0
+                                      ? lang === "ar"
+                                        ? "فرق يتحمله الراسل"
+                                        : "Shortfall borne by sender"
+                                      : lang === "ar"
+                                        ? "فرق حساب الراسل"
+                                        : "Sender difference"}
+                                </small>
+                                <strong>
+                                  {Math.abs(
+                                    shippingPolicyPreviewDifference,
+                                  ).toLocaleString(
+                                    lang === "ar" ? "ar-EG" : "en-EG",
+                                  )}{" "}
+                                  {lang === "ar" ? "ج.م" : "EGP"}
+                                </strong>
+                              </article>
+                            </div>
+                            <p className="shipping-charge-preview__formula">
+                              <ShieldCheck size={14} />
+                              {lang === "ar"
+                                ? "مستحق الراسل = قيمة الطلب + شحن المستلم − سعر شحن الشركة − أي خصومات أخرى."
+                                : "Sender due = order value + recipient shipping − company shipping fee − other deductions."}
+                            </p>
+                            {policySettings.defaultShippingPayer ===
+                              "sender" && (
+                              <p className="shipping-charge-preview__warning">
+                                <CircleAlert size={14} />
+                                {lang === "ar"
+                                  ? "متحمل الشحن الافتراضي هو الراسل؛ لذلك المستلم لن يدفع شحنًا إلا إذا سُمح للموظف بتغيير المتحمل في الشحنة."
+                                  : "The sender is the default payer, so the recipient pays no shipping unless staff are allowed to change the payer on the shipment."}
+                              </p>
+                            )}
+                          </div>
+                        </article>
                       </div>
                       <div className="sender-policy-toggles">
                         <button
@@ -11712,8 +11989,8 @@ function LegacyShipmentPoliciesScreen({
                 <div>
                   <strong>
                     {lang === "ar"
-                      ? "الشحن المحصل من المستلم"
-                      : "Recipient shipping charge"}
+                      ? "مصاريف الشحن التي يدفعها المستلم"
+                      : "Shipping fee paid by recipient"}
                   </strong>
                   <small>
                     {lang === "ar"
@@ -12458,7 +12735,10 @@ function SenderPolicy360Drawer({
                 )}
                 {policyFact({ ar: "تغيير المتحمل عند التسجيل", en: "Payer override on entry" }, yesNo(settings.shippingPayerOverride), "shippingPayerOverride")}
                 {policyFact(
-                  { ar: "الشحن المحصل من المستلم", en: "Recipient shipping charge" },
+                  {
+                    ar: "مصاريف الشحن التي يدفعها المستلم",
+                    en: "Shipping fee paid by recipient",
+                  },
                   settings.shippingChargeMode === "company_price"
                     ? lang === "ar"
                       ? "يساوي سعر الشركة"
@@ -13464,6 +13744,793 @@ function ShipmentPoliciesScreen({
             onOpenSenderPolicy(senderId);
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function IncompleteShipmentsScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  fields,
+  settings,
+  senderPolicies,
+  governorates,
+  onShipmentsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  fields: ShipmentFieldPolicy[];
+  settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
+  governorates: GovernorateRecord[];
+  onShipmentsChange: (records: Shipment[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [senderFilter, setSenderFilter] = useState("all");
+  const [routeFilter, setRouteFilter] = useState<
+    "all" | ShipmentDataSettings["incompleteRoute"]
+  >("all");
+  const [selectedShipment, setSelectedShipment] = useState<Shipment | null>(
+    null,
+  );
+  const [draftValues, setDraftValues] = useState<Record<string, string>>({});
+  const [toast, setToast] = useState("");
+
+  const incompleteShipments = shipmentRecords.filter(
+    (shipment) => shipment.requiredType === "incomplete",
+  );
+  const senders = Array.from(
+    new Map(
+      incompleteShipments.map((shipment) => [
+        shipment.sender.en,
+        shipment.sender,
+      ]),
+    ).values(),
+  );
+
+  function effectiveSettings(shipment: Shipment) {
+    return resolveSenderPolicySettings(
+      shipment.sender,
+      settings,
+      senderPolicies,
+    );
+  }
+
+  function effectiveFields(shipment: Shipment) {
+    return resolveSenderPolicyFields(
+      shipment.sender,
+      fields,
+      senderPolicies,
+    );
+  }
+
+  function explicitMissingCode(shipment: Shipment) {
+    const requirement = `${shipment.required.ar} ${shipment.required.en}`.toLowerCase();
+    if (
+      requirement.includes("هاتف") ||
+      requirement.includes("phone")
+    ) {
+      return "RECIPIENT_PHONE";
+    }
+    if (
+      requirement.includes("عنوان") ||
+      requirement.includes("address")
+    ) {
+      return "DELIVERY_ADDRESS";
+    }
+    if (
+      requirement.includes("منطقة") ||
+      requirement.includes("area")
+    ) {
+      return "AREA";
+    }
+    if (
+      requirement.includes("محافظة") ||
+      requirement.includes("governorate")
+    ) {
+      return "GOVERNORATE";
+    }
+    if (
+      requirement.includes("مرجع") ||
+      requirement.includes("reference")
+    ) {
+      return "SENDER_REFERENCE";
+    }
+    if (
+      requirement.includes("قطع") ||
+      requirement.includes("piece")
+    ) {
+      return "PIECE_COUNT";
+    }
+    if (
+      requirement.includes("اسم المستلم") ||
+      requirement.includes("recipient name")
+    ) {
+      return "RECIPIENT_NAME";
+    }
+    return "";
+  }
+
+  function currentFieldValue(shipment: Shipment, code: string) {
+    if (code === "RECIPIENT_PHONE") return shipment.phone;
+    if (code === "RECIPIENT_NAME") return shipment.recipient[lang];
+    if (code === "GOVERNORATE") {
+      return (
+        governorates.find(
+          (record) =>
+            record.name.en === shipment.governorate.en ||
+            record.name.ar === shipment.governorate.ar,
+        )?.id ?? ""
+      );
+    }
+    if (code === "AREA") {
+      return (
+        governorates
+          .flatMap((record) => record.areas)
+          .find(
+            (area) =>
+              area.name.en === shipment.area.en ||
+              area.name.ar === shipment.area.ar,
+          )?.id ?? ""
+      );
+    }
+    if (code === "DELIVERY_ADDRESS") return shipment.address[lang];
+    if (code === "SENDER") return shipment.sender[lang];
+    if (code === "SENDER_REFERENCE") return shipment.reference;
+    if (code === "PIECE_COUNT") return String(shipment.pieces || "");
+    if (code === "SHIPMENT_PRICE") return String(shipment.amount || "");
+    if (code === "SHIPPING_FEE") return String(shipment.shippingFee || "");
+    if (code === "RECIPIENT_SHIPPING_CHARGE") {
+      return String(shipmentRecipientShippingCharge(shipment) || "");
+    }
+    if (code === "SHIPPING_PAYER") return shipment.shippingPayer;
+    if (code === "DELIVERY_DATE") return shipment.deliveryDate[lang];
+    return shipment.customValues?.[code] ?? "";
+  }
+
+  function missingFieldsFor(shipment: Shipment) {
+    const activeFields = effectiveFields(shipment).filter(
+      (field) =>
+        field.mode === "required_on_create" ||
+        field.mode === "required_before_assignment",
+    );
+    const explicitCode = explicitMissingCode(shipment);
+    const missing = activeFields.filter(
+      (field) =>
+        field.code === explicitCode ||
+        !String(currentFieldValue(shipment, field.code)).trim(),
+    );
+    if (missing.length) return missing;
+    const explicitField = effectiveFields(shipment).find(
+      (field) => field.code === explicitCode,
+    );
+    return explicitField ? [explicitField] : [];
+  }
+
+  const filteredShipments = incompleteShipments.filter((shipment) => {
+    const query = search.trim().toLowerCase();
+    const policySettings = effectiveSettings(shipment);
+    const matchesSearch =
+      !query ||
+      [
+        shipment.id,
+        shipment.reference,
+        shipment.recipient.ar,
+        shipment.recipient.en,
+        shipment.phone,
+        shipment.sender.ar,
+        shipment.sender.en,
+        shipment.required.ar,
+        shipment.required.en,
+      ].some((value) => value.toLowerCase().includes(query));
+    const matchesSender =
+      senderFilter === "all" || shipment.sender.en === senderFilter;
+    const matchesRoute =
+      routeFilter === "all" ||
+      policySettings.incompleteRoute === routeFilter;
+    return matchesSearch && matchesSender && matchesRoute;
+  });
+
+  function openCompletion(shipment: Shipment) {
+    const explicitCode = explicitMissingCode(shipment);
+    const values = Object.fromEntries(
+      missingFieldsFor(shipment).map((field) => [
+        field.code,
+        field.code === explicitCode
+          ? ""
+          : currentFieldValue(shipment, field.code),
+      ]),
+    );
+    setDraftValues(values);
+    setSelectedShipment(shipment);
+  }
+
+  function applyCompletion() {
+    if (!selectedShipment) return;
+    const missingFields = missingFieldsFor(selectedShipment);
+    const incomplete = missingFields.some(
+      (field) => !String(draftValues[field.code] ?? "").trim(),
+    );
+    if (incomplete) return;
+
+    const policySettings = effectiveSettings(selectedShipment);
+    const nextShipment: Shipment = {
+      ...selectedShipment,
+      customValues: {
+        ...(selectedShipment.customValues ?? {}),
+        ...draftValues,
+      },
+    };
+
+    missingFields.forEach((field) => {
+      const value = String(draftValues[field.code] ?? "").trim();
+      if (field.code === "RECIPIENT_PHONE") nextShipment.phone = value;
+      if (field.code === "RECIPIENT_NAME") {
+        nextShipment.recipient = { ar: value, en: value };
+      }
+      if (field.code === "DELIVERY_ADDRESS") {
+        nextShipment.address = { ar: value, en: value };
+      }
+      if (field.code === "SENDER_REFERENCE") nextShipment.reference = value;
+      if (field.code === "PIECE_COUNT") {
+        nextShipment.pieces = Math.max(1, Number(value) || 1);
+      }
+      if (field.code === "SHIPMENT_PRICE") {
+        nextShipment.amount = Math.max(0, Number(value) || 0);
+      }
+      if (field.code === "GOVERNORATE") {
+        const governorate = governorates.find((record) => record.id === value);
+        if (governorate) nextShipment.governorate = governorate.name;
+      }
+      if (field.code === "AREA") {
+        const parent = governorates.find((record) =>
+          record.areas.some((area) => area.id === value),
+        );
+        const area = parent?.areas.find((record) => record.id === value);
+        if (parent && area) {
+          nextShipment.governorate = parent.name;
+          nextShipment.area = area.name;
+        }
+      }
+    });
+
+    const confirmed =
+      nextShipment.confirmationCode === "confirmed" ||
+      nextShipment.confirmation.en.toLowerCase().includes("confirmed") ||
+      nextShipment.confirmation.ar.includes("تم التأكيد");
+    const confirmationNeeded =
+      policySettings.confirmationMode === "required_before_assignment" &&
+      !confirmed &&
+      !policySettings.allowAssignmentWithoutConfirmation;
+    nextShipment.requiredType = "attention";
+    nextShipment.required = confirmationNeeded
+      ? { ar: "اتصال بالمستلم", en: "Call recipient" }
+      : { ar: "إسناد لمندوب", en: "Assign courier" };
+    nextShipment.status = confirmationNeeded
+      ? { ar: "بانتظار التأكيد", en: "Awaiting confirmation" }
+      : { ar: "جاهزة للإسناد", en: "Ready for assignment" };
+    nextShipment.statusTone = "blue";
+    nextShipment.lastEvent = {
+      ar: "استُكملت البيانات الآن",
+      en: "Data completed just now",
+    };
+
+    onShipmentsChange(
+      shipmentRecords.map((shipment) =>
+        shipment.id === nextShipment.id ? nextShipment : shipment,
+      ),
+    );
+    setSelectedShipment(null);
+    setToast(
+      lang === "ar"
+        ? `تم استكمال بيانات ${nextShipment.id}`
+        : `${nextShipment.id} data completed`,
+    );
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  const warehouseCount = incompleteShipments.filter(
+    (shipment) => shipment.custodyType === "warehouse",
+  ).length;
+  const beforeWarehouseCount = incompleteShipments.filter(
+    (shipment) =>
+      effectiveSettings(shipment).incompleteRoute ===
+      "complete_before_warehouse",
+  ).length;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="incompleteShipments"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><CircleAlert size={20} /></span>
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "استكمال بيانات الشحنات"
+                  : "Complete shipment data"}
+              </strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content incomplete-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>
+                  {lang === "ar"
+                    ? "استكمال بيانات الشحنات"
+                    : "Complete shipment data"}
+                </h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "استكمل البيانات المطلوبة حسب سياسة كل راسل قبل انتقال الشحنة للخطوة التالية."
+                  : "Complete required data according to each sender policy before the shipment moves forward."}
+              </p>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("shipmentPolicies")}
+            >
+              <SlidersHorizontal size={17} />
+              {lang === "ar" ? "مراجعة سياسات الرسل" : "Review sender policies"}
+            </button>
+          </div>
+
+          <section className="incomplete-metrics">
+            <article>
+              <span className="status-summary-icon status-summary-icon--red">
+                <CircleAlert size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "تحتاج استكمال" : "Need completion"}</small>
+                <strong>{incompleteShipments.length}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue">
+                <Warehouse size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "موجودة بالمخزن" : "In warehouse"}</small>
+                <strong>{warehouseCount}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange">
+                <LockKeyhole size={18} />
+              </span>
+              <div>
+                <small>
+                  {lang === "ar"
+                    ? "استكمال قبل الاعتماد المخزني"
+                    : "Complete before warehouse acceptance"}
+                </small>
+                <strong>{beforeWarehouseCount}</strong>
+              </div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--green">
+                <ShieldCheck size={18} />
+              </span>
+              <div>
+                <small>{lang === "ar" ? "مصدر القرار" : "Policy source"}</small>
+                <strong>{lang === "ar" ? "سياسة الراسل" : "Sender policy"}</strong>
+              </div>
+            </article>
+          </section>
+
+          <div className="status-control-note incomplete-control-note">
+            <ShieldCheck size={18} />
+            <span>
+              {lang === "ar"
+                ? "هذه الصفحة لا تنشئ شحنة جديدة ولا تغيّر الحيازة أو الحالة من نفسها؛ هي تستكمل بيانات شحنة موجودة فعلًا ثم تفتح لها الخطوة التالية المسموحة."
+                : "This page neither creates a new shipment nor changes custody or status on its own. It completes an existing shipment’s data, then unlocks its next allowed step."}
+            </span>
+          </div>
+
+          <section className="incomplete-panel">
+            <div className="incomplete-toolbar">
+              <label className="shipment-search">
+                <Search size={17} />
+                <input
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder={
+                    lang === "ar"
+                      ? "ابحث برقم الشحنة أو الهاتف أو الراسل أو البيان الناقص..."
+                      : "Search shipment, phone, sender or missing data..."
+                  }
+                />
+                {search && (
+                  <button type="button" onClick={() => setSearch("")}>
+                    <X size={15} />
+                  </button>
+                )}
+              </label>
+              <label className="select-wrap">
+                <select
+                  value={senderFilter}
+                  onChange={(event) => setSenderFilter(event.target.value)}
+                >
+                  <option value="all">
+                    {lang === "ar" ? "كل الرسل" : "All senders"}
+                  </option>
+                  {senders.map((sender) => (
+                    <option key={sender.en} value={sender.en}>
+                      {sender[lang]}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={15} />
+              </label>
+              <label className="select-wrap">
+                <select
+                  value={routeFilter}
+                  onChange={(event) =>
+                    setRouteFilter(
+                      event.target.value as
+                        | "all"
+                        | ShipmentDataSettings["incompleteRoute"],
+                    )
+                  }
+                >
+                  <option value="all">
+                    {lang === "ar" ? "كل مسارات الاستكمال" : "All completion routes"}
+                  </option>
+                  <option value="warehouse_and_queue">
+                    {lang === "ar"
+                      ? "المخزن + قائمة الاستكمال"
+                      : "Warehouse + completion queue"}
+                  </option>
+                  <option value="complete_before_warehouse">
+                    {lang === "ar"
+                      ? "الاستكمال قبل الاعتماد المخزني"
+                      : "Complete before warehouse acceptance"}
+                  </option>
+                </select>
+                <ChevronDown size={15} />
+              </label>
+            </div>
+
+            <div className="incomplete-list">
+              <div className="incomplete-list__head">
+                <span>{lang === "ar" ? "الشحنة" : "Shipment"}</span>
+                <span>{lang === "ar" ? "المستلم والراسل" : "Recipient & sender"}</span>
+                <span>{lang === "ar" ? "البيانات المطلوبة" : "Required data"}</span>
+                <span>{lang === "ar" ? "الحيازة الحالية" : "Current custody"}</span>
+                <span>{lang === "ar" ? "مسار السياسة" : "Policy route"}</span>
+                <span>{lang === "ar" ? "آخر حركة" : "Last event"}</span>
+                <span>{lang === "ar" ? "الإجراء" : "Action"}</span>
+              </div>
+              {filteredShipments.map((shipment) => {
+                const missingFields = missingFieldsFor(shipment);
+                const route = effectiveSettings(shipment).incompleteRoute;
+                return (
+                  <article className="incomplete-row" key={shipment.id}>
+                    <span className="shipment-cell">
+                      <strong>{shipment.id}</strong>
+                      <small dir="ltr">{shipment.reference}</small>
+                    </span>
+                    <span className="incomplete-party">
+                      <strong>{shipment.recipient[lang]}</strong>
+                      <small>{shipment.sender[lang]}</small>
+                    </span>
+                    <span className="incomplete-fields">
+                      {missingFields.map((field) => (
+                        <em key={field.code}>{field.name[lang]}</em>
+                      ))}
+                    </span>
+                    <span className="custody-cell">
+                      <Warehouse size={15} />
+                      <span className="custody-cell__copy">
+                        <strong>{shipment.custody[lang]}</strong>
+                        <small>{lang === "ar" ? "غير مسند" : "Unassigned"}</small>
+                      </span>
+                    </span>
+                    <span className="incomplete-route">
+                      <strong>
+                        {route === "warehouse_and_queue"
+                          ? lang === "ar"
+                            ? "المخزن + الاستكمال"
+                            : "Warehouse + completion"
+                          : lang === "ar"
+                            ? "الاستكمال أولًا"
+                            : "Completion first"}
+                      </strong>
+                      <small>{lang === "ar" ? "حسب سياسة الراسل" : "Per sender policy"}</small>
+                    </span>
+                    <span className="incomplete-last-event">
+                      {shipment.lastEvent[lang]}
+                    </span>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={() => openCompletion(shipment)}
+                    >
+                      <Pencil size={15} />
+                      {lang === "ar" ? "استكمال" : "Complete"}
+                    </button>
+                  </article>
+                );
+              })}
+              {filteredShipments.length === 0 && (
+                <div className="status-empty">
+                  <Check size={24} />
+                  <span>
+                    {lang === "ar"
+                      ? "لا توجد شحنات تحتاج استكمالًا ضمن الفلاتر الحالية"
+                      : "No shipments need completion under the current filters"}
+                  </span>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {selectedShipment && (
+        <>
+          <button
+            className="drawer-backdrop"
+            type="button"
+            onClick={() => setSelectedShipment(null)}
+            aria-label={t.close}
+          />
+          <aside className="policy-editor incomplete-editor">
+            <div className="drawer__header policy-editor__header">
+              <div>
+                <span className="shipment-field-editor__badge">
+                  <Pencil size={19} />
+                </span>
+                <span>
+                  <small>
+                    {lang === "ar" ? "استكمال بيانات الشحنة" : "Complete shipment data"}
+                  </small>
+                  <strong>{selectedShipment.id}</strong>
+                </span>
+              </div>
+              <button
+                className="square-button square-button--soft"
+                type="button"
+                onClick={() => setSelectedShipment(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="policy-editor__body">
+              <section className="incomplete-editor__summary">
+                <span>
+                  <small>{lang === "ar" ? "الراسل" : "Sender"}</small>
+                  <strong>{selectedShipment.sender[lang]}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "المستلم" : "Recipient"}</small>
+                  <strong>{selectedShipment.recipient[lang]}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "الحيازة" : "Custody"}</small>
+                  <strong>{selectedShipment.custody[lang]}</strong>
+                </span>
+              </section>
+
+              <section className="policy-form-section">
+                <div className="policy-form-section__title">
+                  <span><CircleAlert size={16} /></span>
+                  <div>
+                    <strong>
+                      {lang === "ar"
+                        ? "البيانات المطلوبة الآن"
+                        : "Data required now"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "تعرض حسب السياسة الفعلية المنشورة لهذا الراسل."
+                        : "Shown from this sender’s effective published policy."}
+                    </small>
+                  </div>
+                </div>
+                <div className="incomplete-editor__fields">
+                  {missingFieldsFor(selectedShipment).map((field) => {
+                    if (field.code === "GOVERNORATE") {
+                      return (
+                        <label className="select-field" key={field.code}>
+                          <span>{field.name[lang]}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={draftValues[field.code] ?? ""}
+                              onChange={(event) =>
+                                setDraftValues((current) => ({
+                                  ...current,
+                                  [field.code]: event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">
+                                {lang === "ar" ? "اختر المحافظة" : "Select governorate"}
+                              </option>
+                              {governorates.map((governorate) => (
+                                <option key={governorate.id} value={governorate.id}>
+                                  {governorate.name[lang]}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown size={15} />
+                          </span>
+                        </label>
+                      );
+                    }
+                    if (field.code === "AREA") {
+                      return (
+                        <label className="select-field" key={field.code}>
+                          <span>{field.name[lang]}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={draftValues[field.code] ?? ""}
+                              onChange={(event) =>
+                                setDraftValues((current) => ({
+                                  ...current,
+                                  [field.code]: event.target.value,
+                                }))
+                              }
+                            >
+                              <option value="">
+                                {lang === "ar" ? "اختر المنطقة" : "Select area"}
+                              </option>
+                              {governorates.flatMap((governorate) =>
+                                governorate.areas.map((area) => (
+                                  <option key={area.id} value={area.id}>
+                                    {area.name[lang]} · {governorate.name[lang]}
+                                  </option>
+                                )),
+                              )}
+                            </select>
+                            <ChevronDown size={15} />
+                          </span>
+                        </label>
+                      );
+                    }
+                    return (
+                      <label className="field" key={field.code}>
+                        <span>
+                          {field.name[lang]} <b className="required-star">*</b>
+                        </span>
+                        <span className="field__control">
+                          <input
+                            type={
+                              field.dataType === "number" ||
+                              field.dataType === "money"
+                                ? "number"
+                                : field.dataType === "phone"
+                                  ? "tel"
+                                  : field.dataType === "date"
+                                    ? "date"
+                                    : "text"
+                            }
+                            min={
+                              field.code === "PIECE_COUNT" ? "1" : undefined
+                            }
+                            value={draftValues[field.code] ?? ""}
+                            onChange={(event) =>
+                              setDraftValues((current) => ({
+                                ...current,
+                                [field.code]: event.target.value,
+                              }))
+                            }
+                            placeholder={field.description[lang]}
+                          />
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section className="incomplete-editor__impact">
+                <ShieldCheck size={18} />
+                <div>
+                  <strong>
+                    {lang === "ar" ? "أثر الحفظ" : "Save impact"}
+                  </strong>
+                  <p>
+                    {lang === "ar"
+                      ? "سيتم حفظ البيانات مع بقاء الحيازة كما هي. بعدها ستظهر الشحنة للتأكيد أو الإسناد وفق سياسة الراسل، ولن تُسجل حالة شحنة جديدة."
+                      : "Data will be saved while custody stays unchanged. The shipment will then appear for confirmation or assignment according to sender policy, without recording a new shipment status."}
+                  </p>
+                </div>
+              </section>
+            </div>
+
+            <div className="drawer__footer drawer__footer--split">
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setSelectedShipment(null)}
+              >
+                {lang === "ar" ? "إلغاء" : "Cancel"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                disabled={missingFieldsFor(selectedShipment).some(
+                  (field) => !String(draftValues[field.code] ?? "").trim(),
+                )}
+                onClick={applyCompletion}
+              >
+                <Check size={16} />
+                {lang === "ar" ? "حفظ الاستكمال" : "Save completion"}
+              </button>
+            </div>
+          </aside>
+        </>
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
       )}
     </div>
   );
@@ -16630,7 +17697,7 @@ function SenderSettlementLineDrawer({
             <strong>{money.format(line.shippingCharge)}</strong>
           </article>
           <article>
-            <small>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</small>
+            <small>{lang === "ar" ? "شحن دفعه المستلم" : "Shipping paid by recipient"}</small>
             <strong>{money.format(line.recipientShippingCharge)}</strong>
           </article>
           <article>
@@ -19612,7 +20679,7 @@ function CourierAccountScreen({
                     </em>
                   </span>
                   <span>
-                    <small>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</small>
+                    <small>{lang === "ar" ? "شحن دفعه المستلم" : "Shipping paid by recipient"}</small>
                     <strong>{money.format(shipmentRecipientShippingCharge(selectedItem.shipment))}</strong>
                   </span>
                   <span>
@@ -22080,8 +23147,8 @@ function AddShipmentScreen({
                       <label className="entry-field entry-price-input">
                         <span>
                           {fieldLabel("RECIPIENT_SHIPPING_CHARGE", {
-                            ar: "الشحن المحصل من المستلم",
-                            en: "Recipient shipping charge",
+                            ar: "مصاريف الشحن التي يدفعها المستلم",
+                            en: "Shipping fee paid by recipient",
                           })}
                         </span>
                         <span className="entry-input">
@@ -23349,6 +24416,19 @@ export default function Home() {
                       )?.statusHistory,
                     }
                   : {}),
+                ...(shipment.id === "TS-12860" &&
+                shipment.requiredType === "incomplete"
+                  ? {
+                      required: {
+                        ar: "تصحيح رقم الهاتف",
+                        en: "Correct primary phone",
+                      },
+                      lastEvent: {
+                        ar: "اكتُشف أن الهاتف غير صالح أثناء المراجعة",
+                        en: "Phone was found invalid during review",
+                      },
+                    }
+                  : {}),
               };
             });
           const missingDemoShipments = shipments.filter(
@@ -23772,6 +24852,23 @@ export default function Home() {
           couriers={sharedCouriers}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
+          onShipmentsChange={setSharedShipments}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "incompleteShipments" ? (
+        <IncompleteShipmentsScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          fields={sharedShipmentFields}
+          settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
+          governorates={sharedGovernorates}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
