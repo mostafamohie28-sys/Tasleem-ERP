@@ -3009,8 +3009,8 @@ function calculateRecipientShippingCharge(
 
 const shipmentPolicyCopy = {
   ar: {
-    title: "سياسات بيانات الشحنات",
-    subtitle: "تحكم في الحقول ومسار البيانات الناقصة قبل بناء شاشة إضافة الشحنة.",
+    title: "مراجعة سياسات بيانات الشحنات",
+    subtitle: "راجع السياسة الفعلية المطبقة على كل راسل؛ التعديل يتم من ملف الراسل نفسه.",
     addField: "إضافة حقل مخصص",
     requiredCreate: "مطلوب عند التسجيل",
     optional: "اختياري",
@@ -3084,8 +3084,8 @@ const shipmentPolicyCopy = {
     demo: "تغييرات تجريبية داخل نموذج التصميم فقط",
   },
   en: {
-    title: "Shipment data policies",
-    subtitle: "Control fields and incomplete-data routing before building shipment entry.",
+    title: "Shipment data policy review",
+    subtitle: "Review the effective policy for each sender; editing lives inside the sender profile.",
     addField: "Add custom field",
     requiredCreate: "Required on entry",
     optional: "Optional",
@@ -3539,7 +3539,7 @@ function Sidebar({
           screen: "courierRates" as const,
         },
         {
-          label: lang === "ar" ? "سياسات بيانات الشحنات" : "Shipment data policies",
+          label: lang === "ar" ? "مراجعة سياسات الشحنات" : "Shipment policy review",
           icon: ClipboardCheck,
           screen: "shipmentPolicies" as const,
         },
@@ -5643,6 +5643,9 @@ function SenderEditor({
   isNew,
   lang,
   appliedPriceList,
+  companyFields,
+  companySettings,
+  senderPolicy,
   onClose,
   onSave,
 }: {
@@ -5650,14 +5653,95 @@ function SenderEditor({
   isNew: boolean;
   lang: Lang;
   appliedPriceList: PriceListRecord | null;
+  companyFields: ShipmentFieldPolicy[];
+  companySettings: ShipmentDataSettings;
+  senderPolicy: SenderShipmentPolicy | null;
   onClose: () => void;
-  onSave: (sender: SenderRecord) => void;
+  onSave: (
+    sender: SenderRecord,
+    policy: SenderShipmentPolicy | null,
+  ) => void;
 }) {
   const [draft, setDraft] = useState(() => normalizeSenderRecord(sender));
+  const [activeTab, setActiveTab] = useState<"profile" | "policy">("profile");
+  const [policyMode, setPolicyMode] = useState<"company" | "custom">(
+    senderPolicy ? "custom" : "company",
+  );
+  const [policyFields, setPolicyFields] = useState<ShipmentFieldPolicy[]>(
+    () =>
+      (senderPolicy?.fields ?? companyFields).map((field) => ({
+        ...normalizeShipmentField(field),
+        name: { ...field.name },
+        description: { ...field.description },
+        placements: [...(field.placements ?? [])],
+      })),
+  );
+  const [policySettings, setPolicySettings] = useState(
+    normalizeShipmentDataSettings(senderPolicy?.settings ?? companySettings),
+  );
+  const [policySearch, setPolicySearch] = useState("");
+  const [editingPolicyField, setEditingPolicyField] =
+    useState<ShipmentFieldPolicy | null>(null);
+  const [isNewPolicyField, setIsNewPolicyField] = useState(false);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave(draft);
+    onSave(
+      draft,
+      policyMode === "custom"
+        ? {
+            sender: draft.name,
+            fields: policyFields.map(normalizeShipmentField),
+            settings: normalizeShipmentDataSettings(policySettings),
+          }
+        : null,
+    );
+  }
+
+  function choosePolicyMode(mode: "company" | "custom") {
+    if (mode === "custom" && policyMode === "company") {
+      setPolicyFields(
+        companyFields.map((field) => ({
+          ...normalizeShipmentField(field),
+          name: { ...field.name },
+          description: { ...field.description },
+          placements: [...(field.placements ?? [])],
+        })),
+      );
+      setPolicySettings(normalizeShipmentDataSettings(companySettings));
+    }
+    setPolicyMode(mode);
+  }
+
+  function updateSenderPolicySetting<K extends keyof ShipmentDataSettings>(
+    key: K,
+    value: ShipmentDataSettings[K],
+  ) {
+    setPolicySettings((current) => ({ ...current, [key]: value }));
+  }
+
+  function setSenderFieldMode(id: string, mode: ShipmentFieldMode) {
+    setPolicyFields((current) =>
+      current.map((field) => (field.id === id ? { ...field, mode } : field)),
+    );
+  }
+
+  function toggleSenderFieldExcel(id: string) {
+    setPolicyFields((current) =>
+      current.map((field) =>
+        field.id === id ? { ...field, inExcel: !field.inExcel } : field,
+      ),
+    );
+  }
+
+  function saveSenderPolicyField(field: ShipmentFieldPolicy) {
+    setPolicyFields((current) =>
+      current.some((item) => item.id === field.id)
+        ? current.map((item) => (item.id === field.id ? field : item))
+        : [...current, field],
+    );
+    setEditingPolicyField(null);
+    setIsNewPolicyField(false);
   }
 
   return (
@@ -5702,6 +5786,36 @@ function SenderEditor({
           </div>
 
           <div className="policy-editor__body">
+            <div className="sender-editor-tabs">
+              <button
+                className={activeTab === "profile" ? "active" : ""}
+                type="button"
+                onClick={() => setActiveTab("profile")}
+              >
+                <UsersRound size={16} />
+                {lang === "ar" ? "بيانات الراسل" : "Sender profile"}
+              </button>
+              <button
+                className={activeTab === "policy" ? "active" : ""}
+                type="button"
+                onClick={() => setActiveTab("policy")}
+              >
+                <SlidersHorizontal size={16} />
+                {lang === "ar" ? "سياسة الشحن" : "Shipment policy"}
+                <em>
+                  {policyMode === "custom"
+                    ? lang === "ar"
+                      ? "مخصصة"
+                      : "Custom"
+                    : lang === "ar"
+                      ? "سياسة الشركة"
+                      : "Company"}
+                </em>
+              </button>
+            </div>
+
+            {activeTab === "profile" ? (
+              <div className="sender-editor-tab-panel">
             <section className="policy-form-section">
               <div className="policy-form-section__title">
                 <span><UsersRound size={16} /></span>
@@ -6089,6 +6203,348 @@ function SenderEditor({
                 />
               </span>
             </label>
+              </div>
+            ) : (
+              <div className="sender-editor-tab-panel sender-policy-editor-panel">
+                <section className="sender-policy-source">
+                  <div>
+                    <span className="workflow-policy-icon workflow-policy-icon--blue">
+                      <SlidersHorizontal size={18} />
+                    </span>
+                    <span>
+                      <strong>
+                        {lang === "ar" ? "مصدر سياسة الراسل" : "Sender policy source"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "يمكنه استخدام سياسة الشركة أو نسخة مستقلة تخصه وحده."
+                          : "Use the company policy or an independent policy for this sender only."}
+                      </small>
+                    </span>
+                  </div>
+                  <div className="sender-policy-source__choices">
+                    <button
+                      className={policyMode === "company" ? "active" : ""}
+                      type="button"
+                      onClick={() => choosePolicyMode("company")}
+                    >
+                      <ShieldCheck size={16} />
+                      {lang === "ar" ? "سياسة الشركة" : "Company policy"}
+                    </button>
+                    <button
+                      className={policyMode === "custom" ? "active" : ""}
+                      type="button"
+                      onClick={() => choosePolicyMode("custom")}
+                    >
+                      <SlidersHorizontal size={16} />
+                      {lang === "ar" ? "سياسة مخصصة" : "Custom policy"}
+                    </button>
+                  </div>
+                </section>
+
+                {policyMode === "company" ? (
+                  <section className="sender-policy-inherited">
+                    <ShieldCheck size={24} />
+                    <div>
+                      <strong>
+                        {lang === "ar"
+                          ? "هذا الراسل يستخدم سياسة الشركة"
+                          : "This sender uses the company policy"}
+                      </strong>
+                      <p>
+                        {lang === "ar"
+                          ? "الإعدادات التالية تُقرأ من أساس الشركة تلقائيًا. اختر «سياسة مخصصة» لنسخها وتعديلها لهذا الراسل فقط."
+                          : "The following settings are inherited automatically. Choose Custom policy to copy and edit them for this sender only."}
+                      </p>
+                      <div>
+                        <span>
+                          {companyFields.filter((field) => field.mode === "required_on_create").length}{" "}
+                          {lang === "ar" ? "مطلوب عند التسجيل" : "required on entry"}
+                        </span>
+                        <span>
+                          {companyFields.filter((field) => field.mode === "required_before_assignment").length}{" "}
+                          {lang === "ar" ? "مطلوب قبل الإسناد" : "required before assignment"}
+                        </span>
+                        <span>
+                          {companySettings.confirmationMode === "required_before_assignment"
+                            ? lang === "ar"
+                              ? "التأكيد إلزامي"
+                              : "Confirmation required"
+                            : companySettings.confirmationMode === "optional"
+                              ? lang === "ar"
+                                ? "التأكيد اختياري"
+                                : "Confirmation optional"
+                              : lang === "ar"
+                                ? "التأكيد غير مستخدم"
+                                : "Confirmation off"}
+                        </span>
+                      </div>
+                    </div>
+                  </section>
+                ) : (
+                  <>
+                    <section className="policy-form-section">
+                      <div className="policy-form-section__title">
+                        <span><ClipboardCheck size={16} /></span>
+                        <div>
+                          <strong>
+                            {lang === "ar"
+                              ? "سياسات الدخول والتشغيل"
+                              : "Entry and operating policies"}
+                          </strong>
+                          <small>
+                            {lang === "ar"
+                              ? "كل اختيار هنا يخص هذا الراسل فقط."
+                              : "Every choice here applies only to this sender."}
+                          </small>
+                        </div>
+                      </div>
+                      <div className="sender-policy-settings-grid">
+                        <label className="select-field">
+                          <span>{lang === "ar" ? "تأكيد الطلب مع المستلم" : "Recipient confirmation"}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={policySettings.confirmationMode}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "confirmationMode",
+                                  event.target.value as ShipmentDataSettings["confirmationMode"],
+                                )
+                              }
+                            >
+                              <option value="off">{lang === "ar" ? "غير مستخدم" : "Off"}</option>
+                              <option value="optional">{lang === "ar" ? "اختياري" : "Optional"}</option>
+                              <option value="required_before_assignment">
+                                {lang === "ar" ? "إلزامي قبل الإسناد" : "Required before assignment"}
+                              </option>
+                            </select>
+                            <ChevronDown size={15} />
+                          </span>
+                        </label>
+                        <label className="select-field">
+                          <span>{lang === "ar" ? "مسار البيانات الناقصة" : "Incomplete-data route"}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={policySettings.incompleteRoute}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "incompleteRoute",
+                                  event.target.value as ShipmentDataSettings["incompleteRoute"],
+                                )
+                              }
+                            >
+                              <option value="warehouse_and_queue">
+                                {lang === "ar" ? "تدخل المخزن وتظهر في الاستكمال" : "Warehouse + completion queue"}
+                              </option>
+                              <option value="complete_before_warehouse">
+                                {lang === "ar" ? "الاستكمال قبل دخول المخزن" : "Complete before warehouse"}
+                              </option>
+                            </select>
+                            <ChevronDown size={15} />
+                          </span>
+                        </label>
+                        <label className="select-field">
+                          <span>{lang === "ar" ? "متحمل الشحن الافتراضي" : "Default shipping payer"}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={policySettings.defaultShippingPayer}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "defaultShippingPayer",
+                                  event.target.value as ShipmentDataSettings["defaultShippingPayer"],
+                                )
+                              }
+                            >
+                              <option value="recipient">{lang === "ar" ? "المستلم" : "Recipient"}</option>
+                              <option value="sender">{lang === "ar" ? "الراسل" : "Sender"}</option>
+                            </select>
+                            <ChevronDown size={15} />
+                          </span>
+                        </label>
+                        <label className="select-field">
+                          <span>{lang === "ar" ? "الشحن المحصل من المستلم" : "Recipient shipping charge"}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={policySettings.shippingChargeMode}
+                              onChange={(event) =>
+                                updateSenderPolicySetting(
+                                  "shippingChargeMode",
+                                  event.target.value as ShipmentDataSettings["shippingChargeMode"],
+                                )
+                              }
+                            >
+                              <option value="company_price">{lang === "ar" ? "يساوي سعر الشركة" : "Same as company fee"}</option>
+                              <option value="company_plus">{lang === "ar" ? "سعر الشركة + زيادة" : "Company fee + markup"}</option>
+                              <option value="fixed">{lang === "ar" ? "مبلغ ثابت" : "Fixed amount"}</option>
+                              <option value="manual">{lang === "ar" ? "يدوي لكل شحنة" : "Manual per shipment"}</option>
+                            </select>
+                            <ChevronDown size={15} />
+                          </span>
+                        </label>
+                        {(policySettings.shippingChargeMode === "company_plus" ||
+                          policySettings.shippingChargeMode === "fixed") && (
+                          <label className="field">
+                            <span>{lang === "ar" ? "قيمة الشحن أو الزيادة" : "Charge or markup value"}</span>
+                            <span className="field__control">
+                              <input
+                                type="number"
+                                min="0"
+                                value={policySettings.shippingChargeValue}
+                                onChange={(event) =>
+                                  updateSenderPolicySetting(
+                                    "shippingChargeValue",
+                                    Math.max(0, Number(event.target.value) || 0),
+                                  )
+                                }
+                              />
+                            </span>
+                          </label>
+                        )}
+                      </div>
+                      <div className="sender-policy-toggles">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={policySettings.phoneLookupEnabled}
+                          onClick={() =>
+                            updateSenderPolicySetting(
+                              "phoneLookupEnabled",
+                              !policySettings.phoneLookupEnabled,
+                            )
+                          }
+                        >
+                          <span>
+                            <strong>{lang === "ar" ? "استدعاء المستلم برقم الهاتف" : "Recipient phone lookup"}</strong>
+                            <small>{lang === "ar" ? "يستدعي الاسم والعناوين المحفوظة." : "Loads saved names and addresses."}</small>
+                          </span>
+                          <i className={policySettings.phoneLookupEnabled ? "switch switch--on" : "switch"}><b /></i>
+                        </button>
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={policySettings.shippingPayerOverride}
+                          onClick={() =>
+                            updateSenderPolicySetting(
+                              "shippingPayerOverride",
+                              !policySettings.shippingPayerOverride,
+                            )
+                          }
+                        >
+                          <span>
+                            <strong>{lang === "ar" ? "السماح بتغيير متحمل الشحن" : "Allow payer override"}</strong>
+                            <small>{lang === "ar" ? "يسمح للموظف بتغيير الاختيار وقت التسجيل." : "Allows changing it during entry."}</small>
+                          </span>
+                          <i className={policySettings.shippingPayerOverride ? "switch switch--on" : "switch"}><b /></i>
+                        </button>
+                      </div>
+                    </section>
+
+                    <section className="policy-form-section sender-policy-fields">
+                      <div className="policy-form-section__title sender-policy-fields__heading">
+                        <span><Columns3 size={16} /></span>
+                        <div>
+                          <strong>{lang === "ar" ? "حقول شحنات هذا الراسل" : "This sender's shipment fields"}</strong>
+                          <small>{lang === "ar" ? "حدد الحفظ والإسناد والظهور في Excel لكل حقل." : "Control entry, assignment and Excel for every field."}</small>
+                        </div>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => {
+                            setIsNewPolicyField(true);
+                            setEditingPolicyField({
+                              id: `sender-custom-field-${Date.now()}`,
+                              name: { ar: "", en: "" },
+                              code: "",
+                              group: "shipment",
+                              description: { ar: "", en: "" },
+                              mode: "optional",
+                              custom: true,
+                              inExcel: true,
+                              order: policyFields.length + 1,
+                              dataType: "short_text",
+                              placements: ["entry", "details"],
+                              searchable: false,
+                              role: "information",
+                              financialEffect: "none",
+                            });
+                          }}
+                        >
+                          <Plus size={15} />
+                          {lang === "ar" ? "حقل مخصص" : "Custom field"}
+                        </button>
+                      </div>
+                      <label className="shipment-search sender-policy-field-search">
+                        <Search size={16} />
+                        <input
+                          value={policySearch}
+                          onChange={(event) => setPolicySearch(event.target.value)}
+                          placeholder={lang === "ar" ? "ابحث عن حقل..." : "Search fields..."}
+                        />
+                      </label>
+                      <div className="sender-policy-field-list">
+                        {policyFields
+                          .filter((field) => {
+                            const query = policySearch.trim().toLowerCase();
+                            return (
+                              !query ||
+                              [field.name.ar, field.name.en, field.code].some((value) =>
+                                value.toLowerCase().includes(query),
+                              )
+                            );
+                          })
+                          .sort((a, b) => a.order - b.order)
+                          .map((field) => (
+                            <article key={field.id}>
+                              <div>
+                                <strong>{field.name[lang]}</strong>
+                                <small dir="ltr">{field.code}</small>
+                              </div>
+                              <label className="select-wrap">
+                                <select
+                                  value={field.mode}
+                                  onChange={(event) =>
+                                    setSenderFieldMode(
+                                      field.id,
+                                      event.target.value as ShipmentFieldMode,
+                                    )
+                                  }
+                                >
+                                  <option value="required_on_create">{lang === "ar" ? "مطلوب عند التسجيل" : "Required on entry"}</option>
+                                  <option value="optional">{lang === "ar" ? "اختياري" : "Optional"}</option>
+                                  <option value="required_before_assignment">{lang === "ar" ? "مطلوب قبل الإسناد" : "Required before assignment"}</option>
+                                  <option value="hidden">{lang === "ar" ? "مخفي وغير مستخدم" : "Hidden"}</option>
+                                </select>
+                                <ChevronDown size={14} />
+                              </label>
+                              <button
+                                className="field-excel-toggle"
+                                type="button"
+                                role="switch"
+                                aria-checked={field.inExcel}
+                                onClick={() => toggleSenderFieldExcel(field.id)}
+                              >
+                                <i className={field.inExcel ? "switch switch--on" : "switch"}><b /></i>
+                                <small>{lang === "ar" ? "Excel" : "Excel"}</small>
+                              </button>
+                              <button
+                                className="status-edit-button"
+                                type="button"
+                                onClick={() => {
+                                  setIsNewPolicyField(false);
+                                  setEditingPolicyField(field);
+                                }}
+                                aria-label={lang === "ar" ? "تفاصيل الحقل" : "Field details"}
+                              >
+                                <Pencil size={15} />
+                              </button>
+                            </article>
+                          ))}
+                      </div>
+                    </section>
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="drawer__footer drawer__footer--split">
@@ -6102,6 +6558,19 @@ function SenderEditor({
           </div>
         </form>
       </aside>
+      {editingPolicyField && (
+        <ShipmentFieldEditor
+          key={editingPolicyField.id}
+          field={editingPolicyField}
+          isNew={isNewPolicyField}
+          lang={lang}
+          onClose={() => {
+            setEditingPolicyField(null);
+            setIsNewPolicyField(false);
+          }}
+          onSave={saveSenderPolicyField}
+        />
+      )}
     </>
   );
 }
@@ -6113,6 +6582,8 @@ function SendersScreen({
   priceLists,
   shipmentRecords,
   senderPolicies,
+  companyFields,
+  companySettings,
   onRecordsChange,
   onPriceListsChange,
   onSenderPoliciesChange,
@@ -6127,6 +6598,8 @@ function SendersScreen({
   priceLists: PriceListRecord[];
   shipmentRecords: Shipment[];
   senderPolicies: SenderShipmentPolicy[];
+  companyFields: ShipmentFieldPolicy[];
+  companySettings: ShipmentDataSettings;
   onRecordsChange: (
     updater: (current: SenderRecord[]) => SenderRecord[],
   ) => void;
@@ -6212,7 +6685,10 @@ function SendersScreen({
     });
   }
 
-  function saveSender(next: SenderRecord) {
+  function saveSender(
+    next: SenderRecord,
+    nextPolicy: SenderShipmentPolicy | null,
+  ) {
     next = normalizeSenderRecord(next);
     const previous = records.find((record) => record.id === next.id);
     onRecordsChange((current) =>
@@ -6232,16 +6708,21 @@ function SendersScreen({
         })),
       );
     }
-    if (previous) {
-      onSenderPoliciesChange((current) =>
-        current.map((policy) =>
-          policy.sender.en === previous.name.en ||
-          policy.sender.ar === previous.name.ar
-            ? { ...policy, sender: next.name }
-            : policy,
-        ),
+    onSenderPoliciesChange((current) => {
+      const remaining = current.filter(
+        (policy) =>
+          !(
+            policy.sender.en === next.name.en ||
+            policy.sender.ar === next.name.ar ||
+            (previous &&
+              (policy.sender.en === previous.name.en ||
+                policy.sender.ar === previous.name.ar))
+          ),
       );
-    }
+      return nextPolicy
+        ? [...remaining, { ...nextPolicy, sender: next.name }]
+        : remaining;
+    });
     setEditing(null);
     setIsNew(false);
     setToast(
@@ -6502,6 +6983,11 @@ function SendersScreen({
           isNew={isNew}
           lang={lang}
           appliedPriceList={linkedPriceList(editing)}
+          companyFields={companyFields}
+          companySettings={companySettings}
+          senderPolicy={
+            findSenderShipmentPolicy(editing.name, senderPolicies) ?? null
+          }
           onClose={() => {
             setEditing(null);
             setIsNew(false);
@@ -9402,7 +9888,7 @@ function ShipmentPoliciesScreen({
     scopedPolicy?.settings ?? companySettingsDraft,
   );
   const inheritedSenderScope = Boolean(scopedSender && !scopedPolicy);
-  const scopeControlsDisabled = inheritedSenderScope;
+  const scopeControlsDisabled = true;
   const visiblePolicySenders = senders.filter((sender) => {
     const normalized = scopeSearch.trim().toLowerCase();
     return (
@@ -9657,29 +10143,17 @@ function ShipmentPoliciesScreen({
               <p>{s.subtitle}</p>
             </div>
             <div className="shipment-policy-actions">
-              {dirty && (
-                <span className="unsaved-chip">
-                  <CircleAlert size={14} />
-                  {s.unsaved}
-                </span>
-              )}
-              <button
-                className="secondary-button"
-                type="button"
-                disabled={scopeControlsDisabled}
-                onClick={openNew}
-              >
-                <Plus size={17} />
-                {s.addField}
-              </button>
+              <span className="policy-review-badge">
+                <Eye size={16} />
+                {lang === "ar" ? "مراجعة فقط" : "Review only"}
+              </span>
               <button
                 className="primary-button"
                 type="button"
-                disabled={!dirty}
-                onClick={savePolicies}
+                onClick={() => onNavigate("senders")}
               >
-                <Check size={17} />
-                {s.savePolicies}
+                <UsersRound size={17} />
+                {lang === "ar" ? "فتح ملفات الرسل" : "Open sender profiles"}
               </button>
             </div>
           </div>
@@ -9738,28 +10212,16 @@ function ShipmentPoliciesScreen({
                       ? "سياسة مخصصة"
                       : "Custom policy"}
                 </span>
-                {inheritedSenderScope ? (
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={customizeSenderScope}
-                  >
-                    <SlidersHorizontal size={16} />
-                    {lang === "ar"
-                      ? "تخصيص لهذا الراسل"
-                      : "Customize this sender"}
-                  </button>
-                ) : (
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={resetSenderScope}
-                  >
-                    {lang === "ar"
-                      ? "الرجوع لسياسة الشركة"
-                      : "Return to company policy"}
-                  </button>
-                )}
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => onNavigate("senders")}
+                >
+                  <SlidersHorizontal size={16} />
+                  {lang === "ar"
+                    ? "تعديلها من ملف الراسل"
+                    : "Edit in sender profile"}
+                </button>
               </div>
             )}
             <div className="sender-policy-registry">
@@ -10133,7 +10595,7 @@ function ShipmentPoliciesScreen({
               <button
                 className="workflow-toggle-card"
                 type="button"
-                disabled={Boolean(scopedSender)}
+                disabled={scopeControlsDisabled}
                 role="switch"
                 aria-checked={companySettingsDraft.trustsEnabled}
                 onClick={() =>
@@ -20453,6 +20915,8 @@ export default function Home() {
           priceLists={sharedPriceLists}
           shipmentRecords={sharedShipments}
           senderPolicies={sharedSenderPolicies}
+          companyFields={sharedShipmentFields}
+          companySettings={sharedShipmentSettings}
           onRecordsChange={setSharedSenders}
           onPriceListsChange={setSharedPriceLists}
           onSenderPoliciesChange={setSharedSenderPolicies}
