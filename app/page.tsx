@@ -88,6 +88,7 @@ type Screen =
   | "senderAccount"
   | "senderAccountHistory"
   | "senders"
+  | "recipients"
   | "couriers"
   | "treasury";
 type Scenario =
@@ -181,6 +182,61 @@ type SenderRecord = {
   createdAt: Localized;
 };
 
+type RecipientIndicator =
+  | "trusted"
+  | "new"
+  | "extra_confirmation"
+  | "high_returns"
+  | "blocked";
+
+type RecipientAddress = {
+  id: string;
+  label: Localized;
+  address: Localized;
+  governorateId: string;
+  areaId: string;
+  primary: boolean;
+  createdAt: Localized;
+};
+
+type RecipientExperience = {
+  id: string;
+  shipmentId: string;
+  reference: string;
+  sender: Localized;
+  result: "delivered" | "partial" | "returned" | "cancelled" | "pending";
+  confirmation: "confirmed" | "no_answer" | "later" | "not_recorded";
+  addressId: string;
+  timestamp: Localized;
+  archived: boolean;
+};
+
+type RecipientNote = {
+  id: string;
+  text: string;
+  author: Localized;
+  timestamp: Localized;
+};
+
+type RecipientSenderView = {
+  sender: Localized;
+  indicator: RecipientIndicator;
+  reason: string;
+  updatedAt: Localized;
+};
+
+type RecipientRecord = {
+  id: string;
+  name: Localized;
+  phones: string[];
+  addresses: RecipientAddress[];
+  archivedExperiences: RecipientExperience[];
+  senderViews: RecipientSenderView[];
+  notes: RecipientNote[];
+  createdAt: Localized;
+  updatedAt: Localized;
+};
+
 type CourierRecord = {
   id: string;
   code: string;
@@ -197,6 +253,7 @@ type CourierRecord = {
 
 type Shipment = {
   id: string;
+  recipientProfileId?: string;
   reference: string;
   recipient: Localized;
   phone: string;
@@ -691,6 +748,7 @@ const copy = {
 const shipments: Shipment[] = [
   {
     id: "TS-12864",
+    recipientProfileId: "recipient-mohamed-adel",
     reference: "LM-4481",
     recipient: { ar: "محمد عادل", en: "Mohamed Adel" },
     phone: "010 •••• 4281",
@@ -718,6 +776,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12863",
+    recipientProfileId: "recipient-sara-mahmoud",
     reference: "NW-9012",
     recipient: { ar: "سارة محمود", en: "Sara Mahmoud" },
     phone: "011 •••• 9034",
@@ -746,6 +805,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12860",
+    recipientProfileId: "recipient-omar-khaled",
     reference: "HB-2214",
     recipient: { ar: "عمر خالد", en: "Omar Khaled" },
     phone: "012 •••• 1176",
@@ -776,6 +836,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12857",
+    recipientProfileId: "recipient-mariam-sameh",
     reference: "OR-5712",
     recipient: { ar: "مريم سامح", en: "Mariam Sameh" },
     phone: "010 •••• 7754",
@@ -824,6 +885,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12854",
+    recipientProfileId: "recipient-youssef-sherif",
     reference: "BR-3338",
     recipient: { ar: "يوسف شريف", en: "Youssef Sherif" },
     phone: "015 •••• 4418",
@@ -851,6 +913,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12851",
+    recipientProfileId: "recipient-nada-wael",
     reference: "AV-1190",
     recipient: { ar: "ندى وائل", en: "Nada Wael" },
     phone: "011 •••• 2911",
@@ -878,6 +941,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12846",
+    recipientProfileId: "recipient-hana-mostafa",
     reference: "OR-5624",
     recipient: { ar: "هنا مصطفى", en: "Hana Mostafa" },
     phone: "010 •••• 2846",
@@ -926,6 +990,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12839",
+    recipientProfileId: "recipient-ali-hesham",
     reference: "OR-5589",
     recipient: { ar: "علي هشام", en: "Ali Hesham" },
     phone: "012 •••• 6839",
@@ -974,6 +1039,7 @@ const shipments: Shipment[] = [
   },
   {
     id: "TS-12831",
+    recipientProfileId: "recipient-dina-fouad",
     reference: "OR-5517",
     recipient: { ar: "دينا فؤاد", en: "Dina Fouad" },
     phone: "011 •••• 5131",
@@ -1021,6 +1087,328 @@ const shipments: Shipment[] = [
       ar: "٣٤ شارع عباس العقاد، مدينة نصر، القاهرة",
       en: "34 Abbas El Akkad St., Nasr City, Cairo",
     },
+  },
+];
+
+function normalizePhone(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function recipientAddress(
+  id: string,
+  ar: string,
+  en: string,
+  governorateId: string,
+  areaId: string,
+  primary = true,
+): RecipientAddress {
+  return {
+    id,
+    label: {
+      ar: primary ? "العنوان الأساسي" : "عنوان إضافي",
+      en: primary ? "Primary address" : "Additional address",
+    },
+    address: { ar, en },
+    governorateId,
+    areaId,
+    primary,
+    createdAt: { ar: "سجل محفوظ", en: "Saved record" },
+  };
+}
+
+function archivedRecipientExperience(
+  id: string,
+  shipmentId: string,
+  reference: string,
+  sender: Localized,
+  result: RecipientExperience["result"],
+  confirmation: RecipientExperience["confirmation"],
+  timestamp: Localized,
+  addressId: string,
+): RecipientExperience {
+  return {
+    id,
+    shipmentId,
+    reference,
+    sender,
+    result,
+    confirmation,
+    timestamp,
+    addressId,
+    archived: true,
+  };
+}
+
+const recipientRecordsData: RecipientRecord[] = [
+  {
+    id: "recipient-mohamed-adel",
+    name: { ar: "محمد عادل", en: "Mohamed Adel" },
+    phones: ["01001234281", "01222555140"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-mohamed-home",
+        "١٢ شارع الطيران، مدينة نصر، القاهرة",
+        "12 El Tayaran St., Nasr City, Cairo",
+        "gov-cairo",
+        "area-nasr-city",
+      ),
+      recipientAddress(
+        "recipient-address-mohamed-work",
+        "ميدان روكسي، مصر الجديدة، القاهرة",
+        "Roxy Square, Heliopolis, Cairo",
+        "gov-cairo",
+        "area-heliopolis",
+        false,
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-ma-1", "TS-12110", "LM-3912", { ar: "متجر لمسة", en: "Lamsa Store" }, "delivered", "confirmed", { ar: "18 يوليو، 4:20 م", en: "18 Jul, 4:20 PM" }, "recipient-address-mohamed-home"),
+      archivedRecipientExperience("rx-ma-2", "TS-11942", "LM-3740", { ar: "متجر لمسة", en: "Lamsa Store" }, "delivered", "confirmed", { ar: "6 يوليو، 2:05 م", en: "6 Jul, 2:05 PM" }, "recipient-address-mohamed-work"),
+      archivedRecipientExperience("rx-ma-3", "TS-11684", "NW-8421", { ar: "نواة", en: "Nawa" }, "partial", "confirmed", { ar: "21 يونيو، 7:10 م", en: "21 Jun, 7:10 PM" }, "recipient-address-mohamed-home"),
+      archivedRecipientExperience("rx-ma-4", "TS-11328", "LM-3316", { ar: "متجر لمسة", en: "Lamsa Store" }, "delivered", "confirmed", { ar: "2 يونيو، 1:45 م", en: "2 Jun, 1:45 PM" }, "recipient-address-mohamed-home"),
+      archivedRecipientExperience("rx-ma-5", "TS-10873", "LM-2984", { ar: "متجر لمسة", en: "Lamsa Store" }, "delivered", "not_recorded", { ar: "12 مايو، 5:30 م", en: "12 May, 5:30 PM" }, "recipient-address-mohamed-home"),
+    ],
+    senderViews: [
+      {
+        sender: { ar: "متجر لمسة", en: "Lamsa Store" },
+        indicator: "trusted",
+        reason: "تجارب ناجحة متكررة مع الراسل وعناوين مستقرة.",
+        updatedAt: { ar: "28 يوليو، 11:00 ص", en: "28 Jul, 11:00 AM" },
+      },
+    ],
+    notes: [
+      {
+        id: "recipient-note-ma-1",
+        text: "يفضل الاتصال قبل الوصول بنصف ساعة.",
+        author: { ar: "سارة مصطفى", en: "Sara Mostafa" },
+        timestamp: { ar: "18 يوليو، 4:30 م", en: "18 Jul, 4:30 PM" },
+      },
+    ],
+    createdAt: { ar: "12 مايو 2026", en: "12 May 2026" },
+    updatedAt: { ar: "منذ 18 دقيقة", en: "18 minutes ago" },
+  },
+  {
+    id: "recipient-sara-mahmoud",
+    name: { ar: "سارة محمود", en: "Sara Mahmoud" },
+    phones: ["01105559034"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-sara-home",
+        "٨ شارع مصدق، الدقي، الجيزة",
+        "8 Mossadak St., Dokki, Giza",
+        "gov-giza",
+        "area-dokki",
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-sm-1", "TS-12072", "NW-8720", { ar: "نواة", en: "Nawa" }, "delivered", "confirmed", { ar: "16 يوليو، 6:00 م", en: "16 Jul, 6:00 PM" }, "recipient-address-sara-home"),
+      archivedRecipientExperience("rx-sm-2", "TS-11739", "NW-8154", { ar: "نواة", en: "Nawa" }, "returned", "later", { ar: "26 يونيو، 3:40 م", en: "26 Jun, 3:40 PM" }, "recipient-address-sara-home"),
+      archivedRecipientExperience("rx-sm-3", "TS-11209", "BR-2901", { ar: "بريق", en: "Bareeq" }, "delivered", "confirmed", { ar: "28 مايو، 2:30 م", en: "28 May, 2:30 PM" }, "recipient-address-sara-home"),
+      archivedRecipientExperience("rx-sm-4", "TS-10982", "NW-7551", { ar: "نواة", en: "Nawa" }, "delivered", "not_recorded", { ar: "17 مايو، 5:15 م", en: "17 May, 5:15 PM" }, "recipient-address-sara-home"),
+    ],
+    senderViews: [],
+    notes: [],
+    createdAt: { ar: "17 مايو 2026", en: "17 May 2026" },
+    updatedAt: { ar: "اليوم، 10:42 ص", en: "Today, 10:42 AM" },
+  },
+  {
+    id: "recipient-omar-khaled",
+    name: { ar: "عمر خالد", en: "Omar Khaled" },
+    phones: ["01224441176"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-omar-home",
+        "شارع المشير أحمد إسماعيل، سيدي جابر، الإسكندرية",
+        "El Mosheer Ahmed Ismail St., Sidi Gaber, Alexandria",
+        "gov-alexandria",
+        "area-sidi-gaber",
+      ),
+    ],
+    archivedExperiences: [],
+    senderViews: [],
+    notes: [],
+    createdAt: { ar: "اليوم", en: "Today" },
+    updatedAt: { ar: "منذ ساعة", en: "One hour ago" },
+  },
+  {
+    id: "recipient-mariam-sameh",
+    name: { ar: "مريم سامح", en: "Mariam Sameh" },
+    phones: ["01006667754"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-mariam-home",
+        "٢١ شارع النصر، المعادي، القاهرة",
+        "21 El Nasr St., Maadi, Cairo",
+        "gov-cairo",
+        "area-maadi",
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-ms-1", "TS-12130", "OR-5510", { ar: "أوركيد", en: "Orchid" }, "delivered", "confirmed", { ar: "19 يوليو، 1:00 م", en: "19 Jul, 1:00 PM" }, "recipient-address-mariam-home"),
+      archivedRecipientExperience("rx-ms-2", "TS-11802", "OR-5231", { ar: "أوركيد", en: "Orchid" }, "delivered", "confirmed", { ar: "30 يونيو، 6:15 م", en: "30 Jun, 6:15 PM" }, "recipient-address-mariam-home"),
+      archivedRecipientExperience("rx-ms-3", "TS-11477", "LM-3460", { ar: "متجر لمسة", en: "Lamsa Store" }, "delivered", "confirmed", { ar: "10 يونيو، 4:40 م", en: "10 Jun, 4:40 PM" }, "recipient-address-mariam-home"),
+      archivedRecipientExperience("rx-ms-4", "TS-11128", "OR-4912", { ar: "أوركيد", en: "Orchid" }, "cancelled", "later", { ar: "24 مايو، 12:30 م", en: "24 May, 12:30 PM" }, "recipient-address-mariam-home"),
+      archivedRecipientExperience("rx-ms-5", "TS-10620", "OR-4520", { ar: "أوركيد", en: "Orchid" }, "delivered", "not_recorded", { ar: "28 أبريل، 3:10 م", en: "28 Apr, 3:10 PM" }, "recipient-address-mariam-home"),
+    ],
+    senderViews: [
+      {
+        sender: { ar: "أوركيد", en: "Orchid" },
+        indicator: "trusted",
+        reason: "نسبة تسليم مرتفعة وحداثة تعامل جيدة.",
+        updatedAt: { ar: "28 يوليو، 12:20 م", en: "28 Jul, 12:20 PM" },
+      },
+    ],
+    notes: [],
+    createdAt: { ar: "28 أبريل 2026", en: "28 Apr 2026" },
+    updatedAt: { ar: "منذ 9 دقائق", en: "9 minutes ago" },
+  },
+  {
+    id: "recipient-youssef-sherif",
+    name: { ar: "يوسف شريف", en: "Youssef Sherif" },
+    phones: ["01506664418"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-youssef-home",
+        "شارع سعد زغلول، الزقازيق، الشرقية",
+        "Saad Zaghloul St., Zagazig, Sharqia",
+        "gov-sharqia",
+        "area-zagazig",
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-ys-1", "TS-11740", "BR-3010", { ar: "بريق", en: "Bareeq" }, "delivered", "confirmed", { ar: "27 يونيو، 5:20 م", en: "27 Jun, 5:20 PM" }, "recipient-address-youssef-home"),
+      archivedRecipientExperience("rx-ys-2", "TS-11304", "BR-2688", { ar: "بريق", en: "Bareeq" }, "returned", "no_answer", { ar: "1 يونيو، 7:00 م", en: "1 Jun, 7:00 PM" }, "recipient-address-youssef-home"),
+    ],
+    senderViews: [
+      {
+        sender: { ar: "بريق", en: "Bareeq" },
+        indicator: "extra_confirmation",
+        reason: "محاولة سابقة بلا رد والطلب الحالي مؤجل.",
+        updatedAt: { ar: "28 يوليو، 9:30 ص", en: "28 Jul, 9:30 AM" },
+      },
+    ],
+    notes: [],
+    createdAt: { ar: "1 يونيو 2026", en: "1 Jun 2026" },
+    updatedAt: { ar: "أمس", en: "Yesterday" },
+  },
+  {
+    id: "recipient-nada-wael",
+    name: { ar: "ندى وائل", en: "Nada Wael" },
+    phones: ["01108882911"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-nada-home",
+        "١٥ شارع شبرا، القاهرة",
+        "15 Shubra St., Cairo",
+        "gov-cairo",
+        "area-shubra",
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-nw-1", "TS-11902", "AV-1015", { ar: "أڤينيو", en: "Avenue" }, "delivered", "no_answer", { ar: "3 يوليو، 5:45 م", en: "3 Jul, 5:45 PM" }, "recipient-address-nada-home"),
+      archivedRecipientExperience("rx-nw-2", "TS-11492", "AV-0841", { ar: "أڤينيو", en: "Avenue" }, "returned", "no_answer", { ar: "11 يونيو، 6:30 م", en: "11 Jun, 6:30 PM" }, "recipient-address-nada-home"),
+    ],
+    senderViews: [
+      {
+        sender: { ar: "أڤينيو", en: "Avenue" },
+        indicator: "extra_confirmation",
+        reason: "تكرار عدم الرد؛ يحتاج تأكيدًا أوضح قبل الإسناد.",
+        updatedAt: { ar: "28 يوليو، 11:10 ص", en: "28 Jul, 11:10 AM" },
+      },
+    ],
+    notes: [],
+    createdAt: { ar: "11 يونيو 2026", en: "11 Jun 2026" },
+    updatedAt: { ar: "منذ ساعتين", en: "Two hours ago" },
+  },
+  {
+    id: "recipient-hana-mostafa",
+    name: { ar: "هنا مصطفى", en: "Hana Mostafa" },
+    phones: ["01007772846"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-hana-home",
+        "٩ شارع اللاسلكي، المعادي الجديدة، القاهرة",
+        "9 El Laselky St., New Maadi, Cairo",
+        "gov-cairo",
+        "area-maadi",
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-hm-1", "TS-11840", "OR-5310", { ar: "أوركيد", en: "Orchid" }, "partial", "confirmed", { ar: "2 يوليو، 6:10 م", en: "2 Jul, 6:10 PM" }, "recipient-address-hana-home"),
+      archivedRecipientExperience("rx-hm-2", "TS-11270", "OR-4822", { ar: "أوركيد", en: "Orchid" }, "delivered", "confirmed", { ar: "30 مايو، 4:05 م", en: "30 May, 4:05 PM" }, "recipient-address-hana-home"),
+      archivedRecipientExperience("rx-hm-3", "TS-10821", "LM-2860", { ar: "متجر لمسة", en: "Lamsa Store" }, "cancelled", "later", { ar: "9 مايو، 2:40 م", en: "9 May, 2:40 PM" }, "recipient-address-hana-home"),
+    ],
+    senderViews: [
+      {
+        sender: { ar: "أوركيد", en: "Orchid" },
+        indicator: "high_returns",
+        reason: "نتيجتان جزئيتان من ثلاث تجارب مع الراسل.",
+        updatedAt: { ar: "28 يوليو، 9:00 ص", en: "28 Jul, 9:00 AM" },
+      },
+    ],
+    notes: [],
+    createdAt: { ar: "9 مايو 2026", en: "9 May 2026" },
+    updatedAt: { ar: "اليوم", en: "Today" },
+  },
+  {
+    id: "recipient-ali-hesham",
+    name: { ar: "علي هشام", en: "Ali Hesham" },
+    phones: ["01203336839"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-ali-home",
+        "١٨ شارع الحجاز، مصر الجديدة، القاهرة",
+        "18 El Hegaz St., Heliopolis, Cairo",
+        "gov-cairo",
+        "area-heliopolis",
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-ah-1", "TS-11662", "OR-5102", { ar: "أوركيد", en: "Orchid" }, "cancelled", "confirmed", { ar: "20 يونيو، 4:10 م", en: "20 Jun, 4:10 PM" }, "recipient-address-ali-home"),
+      archivedRecipientExperience("rx-ah-2", "TS-11090", "OR-4720", { ar: "أوركيد", en: "Orchid" }, "returned", "no_answer", { ar: "22 مايو، 6:50 م", en: "22 May, 6:50 PM" }, "recipient-address-ali-home"),
+      archivedRecipientExperience("rx-ah-3", "TS-10542", "NW-6991", { ar: "نواة", en: "Nawa" }, "delivered", "confirmed", { ar: "22 أبريل، 3:20 م", en: "22 Apr, 3:20 PM" }, "recipient-address-ali-home"),
+    ],
+    senderViews: [
+      {
+        sender: { ar: "أوركيد", en: "Orchid" },
+        indicator: "blocked",
+        reason: "قرار يدوي من الراسل بعد ثلاث تجارب مرتجعة أو ملغاة.",
+        updatedAt: { ar: "28 يوليو، 8:30 ص", en: "28 Jul, 8:30 AM" },
+      },
+    ],
+    notes: [
+      {
+        id: "recipient-note-ah-1",
+        text: "التصنيف خاص بأوركيد فقط ولا يمنع الشحن من راسل آخر.",
+        author: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        timestamp: { ar: "28 يوليو، 8:30 ص", en: "28 Jul, 8:30 AM" },
+      },
+    ],
+    createdAt: { ar: "22 أبريل 2026", en: "22 Apr 2026" },
+    updatedAt: { ar: "اليوم", en: "Today" },
+  },
+  {
+    id: "recipient-dina-fouad",
+    name: { ar: "دينا فؤاد", en: "Dina Fouad" },
+    phones: ["01107775131"],
+    addresses: [
+      recipientAddress(
+        "recipient-address-dina-home",
+        "٣٤ شارع عباس العقاد، مدينة نصر، القاهرة",
+        "34 Abbas El Akkad St., Nasr City, Cairo",
+        "gov-cairo",
+        "area-nasr-city",
+      ),
+    ],
+    archivedExperiences: [
+      archivedRecipientExperience("rx-df-1", "TS-12102", "OR-5482", { ar: "أوركيد", en: "Orchid" }, "delivered", "confirmed", { ar: "18 يوليو، 3:50 م", en: "18 Jul, 3:50 PM" }, "recipient-address-dina-home"),
+      archivedRecipientExperience("rx-df-2", "TS-11608", "OR-5061", { ar: "أوركيد", en: "Orchid" }, "delivered", "confirmed", { ar: "17 يونيو، 2:40 م", en: "17 Jun, 2:40 PM" }, "recipient-address-dina-home"),
+      archivedRecipientExperience("rx-df-3", "TS-10940", "LM-3028", { ar: "متجر لمسة", en: "Lamsa Store" }, "delivered", "not_recorded", { ar: "15 مايو، 6:05 م", en: "15 May, 6:05 PM" }, "recipient-address-dina-home"),
+    ],
+    senderViews: [],
+    notes: [],
+    createdAt: { ar: "15 مايو 2026", en: "15 May 2026" },
+    updatedAt: { ar: "25 يوليو، 3:15 م", en: "25 Jul, 3:15 PM" },
   },
 ];
 
@@ -1847,47 +2235,6 @@ const senderEntryProfiles: SenderEntryProfile[] = availableSenders.map(
     shippingPayer: index === 1 || index === 3 ? "sender" : "recipient",
   }),
 );
-
-const savedRecipients = [
-  {
-    phone: "01001234281",
-    name: { ar: "محمد عادل", en: "Mohamed Adel" },
-    secondaryPhone: "01222555140",
-    addresses: [
-      {
-        governorateId: "gov-cairo",
-        areaId: "area-nasr-city",
-        label: {
-          ar: "المنزل — 12 شارع الطيران، مدينة نصر",
-          en: "Home — 12 El Tayaran St., Nasr City",
-        },
-      },
-      {
-        governorateId: "gov-cairo",
-        areaId: "area-heliopolis",
-        label: {
-          ar: "العمل — ميدان روكسي، مصر الجديدة",
-          en: "Work — Roxy Square, Heliopolis",
-        },
-      },
-    ],
-  },
-  {
-    phone: "01105559034",
-    name: { ar: "سارة محمود", en: "Sara Mahmoud" },
-    secondaryPhone: "",
-    addresses: [
-      {
-        governorateId: "gov-giza",
-        areaId: "area-dokki",
-        label: {
-          ar: "8 شارع مصدق، الدقي",
-          en: "8 Mossadak St., Dokki",
-        },
-      },
-    ],
-  },
-];
 
 const pricedStatusIds = [
   "status-delivered",
@@ -3870,6 +4217,11 @@ function Sidebar({
           label: t.senders,
           icon: UsersRound,
           screen: "senders" as const,
+        },
+        {
+          label: lang === "ar" ? "المستلمون" : "Recipients",
+          icon: UserRound,
+          screen: "recipients" as const,
         },
         {
           label: t.couriers,
@@ -17241,6 +17593,7 @@ function WarehouseScreen({
 }
 
 type ShipmentEntryDraft = {
+  recipientProfileId: string;
   phone: string;
   recipientName: string;
   secondaryPhone: string;
@@ -17276,6 +17629,7 @@ function makeShipmentEntryDraft(
   shippingPayer: "recipient" | "sender",
 ): ShipmentEntryDraft {
   return {
+    recipientProfileId: "",
     phone: "",
     recipientName: "",
     secondaryPhone: "",
@@ -25024,6 +25378,7 @@ function AddShipmentScreen({
   settings,
   senderPolicies,
   senders,
+  recipients,
   governorates,
   statuses,
   priceLists,
@@ -25041,6 +25396,7 @@ function AddShipmentScreen({
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
   senders: SenderRecord[];
+  recipients: RecipientRecord[];
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
   priceLists: PriceListRecord[];
@@ -25150,10 +25506,17 @@ function AddShipmentScreen({
   const availableAreas = (selectedGovernorate?.areas ?? []).filter(
     (area) => area.state === "active",
   );
-  const matchedRecipient =
+  const matchingRecipients =
     policySettings.phoneLookupEnabled && draft.phone.length >= 6
-      ? savedRecipients.find((recipient) => recipient.phone === draft.phone)
-      : undefined;
+      ? recipients.filter((recipient) =>
+          recipient.phones.some(
+            (phone) => normalizePhone(phone) === normalizePhone(draft.phone),
+          ),
+        )
+      : [];
+  const matchedRecipient =
+    recipients.find((recipient) => recipient.id === draft.recipientProfileId) ??
+    (matchingRecipients.length === 1 ? matchingRecipients[0] : undefined);
   const activeFields = policyFields
     .filter((field) => field.mode !== "hidden")
     .sort((a, b) => a.order - b.order);
@@ -25225,16 +25588,19 @@ function AddShipmentScreen({
     setSavedCount(0);
   }
 
-  function useSavedRecipient() {
-    if (!matchedRecipient) return;
-    const address = matchedRecipient.addresses[0];
+  function useSavedRecipient(recipient: RecipientRecord) {
+    const address =
+      recipient.addresses.find((candidate) => candidate.primary) ??
+      recipient.addresses[0];
+    if (!address) return;
     setDraft((current) => ({
       ...current,
-      recipientName: matchedRecipient.name[lang],
-      secondaryPhone: matchedRecipient.secondaryPhone,
+      recipientProfileId: recipient.id,
+      recipientName: recipient.name[lang],
+      secondaryPhone: recipient.phones[1] ?? "",
       governorateId: address.governorateId,
       areaId: address.areaId,
-      address: address.label[lang],
+      address: address.address[lang],
     }));
   }
 
@@ -25245,7 +25611,7 @@ function AddShipmentScreen({
       ...current,
       governorateId: nextAddress.governorateId,
       areaId: nextAddress.areaId,
-      address: nextAddress.label[lang],
+      address: nextAddress.address[lang],
     }));
   }
 
@@ -25400,6 +25766,7 @@ function AddShipmentScreen({
               : { ar: "لم يُسجل", en: "Not recorded" };
       return {
         id: `TS-${String(now + index).slice(-6)}`,
+        recipientProfileId: item.recipientProfileId || undefined,
         reference:
           item.senderReference ||
           `${selectedSender.en.slice(0, 2).toUpperCase()}-${String(now + index).slice(-4)}`,
@@ -25733,7 +26100,29 @@ function AddShipmentScreen({
                           <input
                             dir="ltr"
                             value={draft.phone}
-                            onChange={(event) => updateDraft("phone", event.target.value)}
+                            onChange={(event) => {
+                              const phone = event.target.value;
+                              setDraft((current) => ({
+                                ...current,
+                                phone,
+                                recipientProfileId:
+                                  current.recipientProfileId &&
+                                  recipients
+                                    .find(
+                                      (recipient) =>
+                                        recipient.id === current.recipientProfileId,
+                                    )
+                                    ?.phones.some(
+                                      (savedPhone) =>
+                                        normalizePhone(savedPhone) ===
+                                        normalizePhone(phone),
+                                    )
+                                    ? current.recipientProfileId
+                                    : "",
+                              }));
+                              setError("");
+                              setSavedCount(0);
+                            }}
                             placeholder="0100 000 0000"
                           />
                         </span>
@@ -25746,27 +26135,44 @@ function AddShipmentScreen({
                         )}
                       </label>
                     )}
-                    {matchedRecipient && (
-                      <button
-                        className="recipient-match"
-                        type="button"
-                        onClick={useSavedRecipient}
-                      >
-                        <span className="mini-avatar">
-                          {matchedRecipient.name[lang].slice(0, 1)}
-                        </span>
-                        <span>
-                          <strong>{matchedRecipient.name[lang]}</strong>
-                          <small>
-                            {matchedRecipient.addresses.length}{" "}
-                            {lang === "ar" ? "عنوان محفوظ" : "saved addresses"}
-                          </small>
-                        </span>
-                        <span className="recipient-match__action">
-                          <Check size={15} />
-                          {lang === "ar" ? "استخدام البيانات" : "Use details"}
-                        </span>
-                      </button>
+                    {matchingRecipients.length > 0 && (
+                      <div className="recipient-match-list">
+                        {matchingRecipients.length > 1 && (
+                          <p>
+                            <CircleAlert size={14} />
+                            {lang === "ar"
+                              ? "الرقم مرتبط بأكثر من ملف؛ اختر الشخص الصحيح ولا يوجد دمج تلقائي."
+                              : "This number matches multiple profiles; choose the correct person. No automatic merge."}
+                          </p>
+                        )}
+                        {matchingRecipients.map((recipient) => (
+                          <button
+                            className={
+                              draft.recipientProfileId === recipient.id
+                                ? "recipient-match recipient-match--selected"
+                                : "recipient-match"
+                            }
+                            type="button"
+                            key={recipient.id}
+                            onClick={() => useSavedRecipient(recipient)}
+                          >
+                            <span className="mini-avatar">
+                              {recipient.name[lang].slice(0, 1)}
+                            </span>
+                            <span>
+                              <strong>{recipient.name[lang]}</strong>
+                              <small>
+                                {recipient.addresses.length}{" "}
+                                {lang === "ar" ? "عنوان محفوظ" : "saved addresses"}
+                              </small>
+                            </span>
+                            <span className="recipient-match__action">
+                              <Check size={15} />
+                              {lang === "ar" ? "استخدام البيانات" : "Use details"}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
                     )}
                     {fieldVisible("RECIPIENT_NAME") && (
                       <label className="entry-field">
@@ -25812,11 +26218,11 @@ function AddShipmentScreen({
                       {matchedRecipient.addresses.map((address, index) => (
                         <button
                           type="button"
-                          key={`${address.areaId}-${index}`}
+                          key={address.id}
                           onClick={() => chooseSavedAddress(index)}
                         >
                           <MapPin size={14} />
-                          {address.label[lang]}
+                          {address.address[lang]}
                         </button>
                       ))}
                     </div>
@@ -26537,6 +26943,1017 @@ function AddShipmentScreen({
   );
 }
 
+type RecipientProfileTab = "overview" | "shipments" | "addresses";
+
+function recipientShipmentResult(
+  shipment: Shipment,
+): RecipientExperience["result"] {
+  if (
+    shipment.statusPolicyId === "status-delivered" ||
+    shipment.custodyType === "recipient"
+  ) {
+    return "delivered";
+  }
+  if (shipment.statusPolicyId === "status-partial") return "partial";
+  if (shipment.statusPolicyId === "status-cancelled") return "cancelled";
+  if (shipment.custodyType === "sender") return "returned";
+  return "pending";
+}
+
+function recipientShipmentConfirmation(
+  shipment: Shipment,
+): RecipientExperience["confirmation"] {
+  if (shipment.confirmationCode) return shipment.confirmationCode;
+  if (shipment.confirmation.en === "Confirmed") return "confirmed";
+  if (shipment.confirmation.en === "No answer") return "no_answer";
+  if (shipment.confirmation.en === "Contact later") return "later";
+  return "not_recorded";
+}
+
+function recipientIndicatorLabel(
+  indicator: RecipientIndicator,
+  lang: Lang,
+) {
+  const labels: Record<RecipientIndicator, Localized> = {
+    trusted: { ar: "موثوق", en: "Trusted" },
+    new: { ar: "جديد أو بيانات غير كافية", en: "New / insufficient data" },
+    extra_confirmation: {
+      ar: "يحتاج تأكيدًا إضافيًا",
+      en: "Needs extra confirmation",
+    },
+    high_returns: { ar: "مرتفع المرتجعات", en: "High returns" },
+    blocked: { ar: "محظور لدى هذا الراسل", en: "Blocked by this sender" },
+  };
+  return labels[indicator][lang];
+}
+
+function recipientResultLabel(
+  result: RecipientExperience["result"],
+  lang: Lang,
+) {
+  const labels: Record<RecipientExperience["result"], Localized> = {
+    delivered: { ar: "تم التسليم", en: "Delivered" },
+    partial: { ar: "تسليم جزئي", en: "Partial delivery" },
+    returned: { ar: "مرتجع", en: "Returned" },
+    cancelled: { ar: "ملغاة", en: "Cancelled" },
+    pending: { ar: "جارية", en: "In progress" },
+  };
+  return labels[result][lang];
+}
+
+function RecipientsScreen({
+  lang,
+  theme,
+  records,
+  shipmentRecords,
+  senders,
+  governorates,
+  initialRecipientId,
+  onInitialRecipientHandled,
+  onRecordsChange,
+  onOpenShipment,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  records: RecipientRecord[];
+  shipmentRecords: Shipment[];
+  senders: SenderRecord[];
+  governorates: GovernorateRecord[];
+  initialRecipientId?: string;
+  onInitialRecipientHandled?: () => void;
+  onRecordsChange: (
+    updater: (current: RecipientRecord[]) => RecipientRecord[],
+  ) => void;
+  onOpenShipment: (shipmentId: string) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [senderFilter, setSenderFilter] = useState("all");
+  const [indicatorFilter, setIndicatorFilter] = useState<
+    "all" | RecipientIndicator
+  >("all");
+  const [selectedId, setSelectedId] = useState("");
+  const [activeTab, setActiveTab] =
+    useState<RecipientProfileTab>("overview");
+  const [profileScope, setProfileScope] = useState("all");
+  const [indicatorDraft, setIndicatorDraft] =
+    useState<RecipientIndicator>("new");
+  const [indicatorReason, setIndicatorReason] = useState("");
+  const [noteDraft, setNoteDraft] = useState("");
+  const [addressEditorOpen, setAddressEditorOpen] = useState(false);
+  const [addressDraft, setAddressDraft] = useState({
+    label: "",
+    address: "",
+    governorateId: "",
+    areaId: "",
+  });
+  const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    if (!initialRecipientId) return;
+    if (!records.some((record) => record.id === initialRecipientId)) return;
+    setSelectedId(initialRecipientId);
+    setActiveTab("overview");
+    setProfileScope("all");
+    onInitialRecipientHandled?.();
+  }, [initialRecipientId, onInitialRecipientHandled, records]);
+
+  const selectedRecipient =
+    records.find((record) => record.id === selectedId) ?? null;
+
+  function experiencesFor(record: RecipientRecord) {
+    const current = shipmentRecords
+      .filter((shipment) => shipment.recipientProfileId === record.id)
+      .map<RecipientExperience>((shipment) => {
+        const addressId =
+          record.addresses.find(
+            (address) =>
+              address.address.ar.replace(/\s/g, "") ===
+                shipment.address.ar.replace(/\s/g, "") ||
+              address.address.en.replace(/\s/g, "").toLowerCase() ===
+                shipment.address.en.replace(/\s/g, "").toLowerCase(),
+          )?.id ??
+          record.addresses.find((address) => address.primary)?.id ??
+          record.addresses[0]?.id ??
+          "";
+        return {
+          id: `recipient-current-${shipment.id}`,
+          shipmentId: shipment.id,
+          reference: shipment.reference,
+          sender: shipment.sender,
+          result: recipientShipmentResult(shipment),
+          confirmation: recipientShipmentConfirmation(shipment),
+          addressId,
+          timestamp:
+            shipment.statusHistory?.[0]?.timestamp ?? shipment.deliveryDate,
+          archived: false,
+        };
+      });
+    return [...current, ...record.archivedExperiences];
+  }
+
+  function scopedExperiences(record: RecipientRecord, scope: string) {
+    const experiences = experiencesFor(record);
+    return scope === "all"
+      ? experiences
+      : experiences.filter((event) => event.sender.en === scope);
+  }
+
+  function statsFor(record: RecipientRecord, scope: string) {
+    const experiences = scopedExperiences(record, scope);
+    const completed = experiences.filter((event) => event.result !== "pending");
+    const delivered = completed.filter(
+      (event) => event.result === "delivered",
+    ).length;
+    const partial = completed.filter((event) => event.result === "partial").length;
+    const returned = completed.filter((event) =>
+      ["returned", "cancelled"].includes(event.result),
+    ).length;
+    const noAnswer = experiences.filter(
+      (event) => event.confirmation === "no_answer",
+    ).length;
+    const confirmed = experiences.filter(
+      (event) => event.confirmation === "confirmed",
+    ).length;
+    const successRate = completed.length
+      ? Math.round((delivered / completed.length) * 100)
+      : 0;
+    const returnRate = completed.length
+      ? Math.round((returned / completed.length) * 100)
+      : 0;
+    return {
+      experiences,
+      total: experiences.length,
+      completed: completed.length,
+      delivered,
+      partial,
+      returned,
+      noAnswer,
+      confirmed,
+      successRate,
+      returnRate,
+    };
+  }
+
+  function indicatorFor(record: RecipientRecord, scope: string) {
+    const manual =
+      scope === "all"
+        ? undefined
+        : record.senderViews.find((view) => view.sender.en === scope);
+    if (manual) {
+      return {
+        indicator: manual.indicator,
+        manual: true,
+        reason: manual.reason,
+        updatedAt: manual.updatedAt[lang],
+      };
+    }
+    const stats = statsFor(record, scope);
+    if (stats.completed < 3) {
+      return {
+        indicator: "new" as const,
+        manual: false,
+        reason:
+          lang === "ar"
+            ? `العينة المكتملة ${stats.completed} فقط؛ لا تكفي لحكم قوي.`
+            : `Only ${stats.completed} completed experience(s); the sample is too small.`,
+        updatedAt: record.updatedAt[lang],
+      };
+    }
+    if (stats.returnRate >= 40) {
+      return {
+        indicator: "high_returns" as const,
+        manual: false,
+        reason:
+          lang === "ar"
+            ? `${stats.returned} مرتجع أو ملغى من ${stats.completed} تجربة مكتملة.`
+            : `${stats.returned} returned/cancelled out of ${stats.completed} completed experiences.`,
+        updatedAt: record.updatedAt[lang],
+      };
+    }
+    if (stats.noAnswer >= 2) {
+      return {
+        indicator: "extra_confirmation" as const,
+        manual: false,
+        reason:
+          lang === "ar"
+            ? `سُجل عدم الرد ${stats.noAnswer} مرات في التاريخ المتاح.`
+            : `No answer was recorded ${stats.noAnswer} times in the available history.`,
+        updatedAt: record.updatedAt[lang],
+      };
+    }
+    if (stats.successRate >= 70) {
+      return {
+        indicator: "trusted" as const,
+        manual: false,
+        reason:
+          lang === "ar"
+            ? `تم تسليم ${stats.delivered} من ${stats.completed} تجربة مكتملة.`
+            : `${stats.delivered} of ${stats.completed} completed experiences were delivered.`,
+        updatedAt: record.updatedAt[lang],
+      };
+    }
+    return {
+      indicator: "extra_confirmation" as const,
+      manual: false,
+      reason:
+        lang === "ar"
+          ? "النتائج متباينة ويُفضّل تأكيد الطلب قبل الإسناد."
+          : "Results are mixed; confirmation before assignment is recommended.",
+      updatedAt: record.updatedAt[lang],
+    };
+  }
+
+  const visibleRecords = records.filter((record) => {
+    const normalized = search.trim().toLowerCase();
+    const matchesSearch =
+      !normalized ||
+      [
+        record.name.ar,
+        record.name.en,
+        record.id,
+        ...record.phones,
+        ...record.addresses.flatMap((address) => [
+          address.address.ar,
+          address.address.en,
+        ]),
+      ].some((value) => value.toLowerCase().includes(normalized));
+    const matchesSender =
+      senderFilter === "all" ||
+      experiencesFor(record).some((event) => event.sender.en === senderFilter);
+    const indicator = indicatorFor(record, senderFilter).indicator;
+    const matchesIndicator =
+      indicatorFilter === "all" || indicator === indicatorFilter;
+    return matchesSearch && matchesSender && matchesIndicator;
+  });
+
+  const allStats = records.map((record) => statsFor(record, "all"));
+  const trustedCount = records.filter(
+    (record) => indicatorFor(record, "all").indicator === "trusted",
+  ).length;
+  const reviewCount = records.filter((record) =>
+    ["extra_confirmation", "high_returns", "blocked"].includes(
+      indicatorFor(record, "all").indicator,
+    ),
+  ).length;
+  const newCount = records.filter(
+    (record) => indicatorFor(record, "all").indicator === "new",
+  ).length;
+  const totalExperiences = allStats.reduce(
+    (sum, stats) => sum + stats.total,
+    0,
+  );
+
+  const selectedStats = selectedRecipient
+    ? statsFor(selectedRecipient, profileScope)
+    : null;
+  const selectedIndicator = selectedRecipient
+    ? indicatorFor(selectedRecipient, profileScope)
+    : null;
+  const selectedExperiences = selectedRecipient
+    ? scopedExperiences(selectedRecipient, profileScope)
+    : [];
+  const selectedScopeSender =
+    senders.find((sender) => sender.name.en === profileScope)?.name ?? null;
+  const availableAreas = governorates
+    .find((governorate) => governorate.id === addressDraft.governorateId)
+    ?.areas.filter((area) => area.state === "active") ?? [];
+  const similarProfiles = selectedRecipient
+    ? records.filter(
+        (candidate) =>
+          candidate.id !== selectedRecipient.id &&
+          candidate.phones.some((phone) =>
+            selectedRecipient.phones.some(
+              (selectedPhone) =>
+                normalizePhone(phone) === normalizePhone(selectedPhone),
+            ),
+          ),
+      )
+    : [];
+
+  useEffect(() => {
+    if (!selectedRecipient || profileScope === "all") {
+      setIndicatorDraft("new");
+      setIndicatorReason("");
+      return;
+    }
+    const current = selectedRecipient.senderViews.find(
+      (view) => view.sender.en === profileScope,
+    );
+    setIndicatorDraft(current?.indicator ?? indicatorFor(selectedRecipient, profileScope).indicator);
+    setIndicatorReason(current?.reason ?? "");
+  }, [profileScope, selectedRecipient]);
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  function openProfile(id: string) {
+    setSelectedId(id);
+    setProfileScope("all");
+    setActiveTab("overview");
+  }
+
+  function closeProfile() {
+    setSelectedId("");
+    setProfileScope("all");
+    setActiveTab("overview");
+  }
+
+  function saveSenderIndicator() {
+    if (!selectedRecipient || !selectedScopeSender || !indicatorReason.trim()) {
+      showToast(
+        lang === "ar"
+          ? "اكتب سبب التصنيف حتى يظل القرار قابلًا للمراجعة"
+          : "Add a reason so the classification stays auditable",
+      );
+      return;
+    }
+    const timestamp: Localized = {
+      ar: new Date().toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: new Date().toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    onRecordsChange((current) =>
+      current.map((record) =>
+        record.id === selectedRecipient.id
+          ? {
+              ...record,
+              updatedAt: timestamp,
+              senderViews: [
+                {
+                  sender: selectedScopeSender,
+                  indicator: indicatorDraft,
+                  reason: indicatorReason.trim(),
+                  updatedAt: timestamp,
+                },
+                ...record.senderViews.filter(
+                  (view) => view.sender.en !== selectedScopeSender.en,
+                ),
+              ],
+            }
+          : record,
+      ),
+    );
+    showToast(
+      lang === "ar"
+        ? "تم حفظ تصنيف المستلم لهذا الراسل فقط"
+        : "Recipient classification saved for this sender only",
+    );
+  }
+
+  function addNote() {
+    if (!selectedRecipient || !noteDraft.trim()) return;
+    const timestamp: Localized = {
+      ar: new Date().toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: new Date().toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    onRecordsChange((current) =>
+      current.map((record) =>
+        record.id === selectedRecipient.id
+          ? {
+              ...record,
+              updatedAt: timestamp,
+              notes: [
+                {
+                  id: `recipient-note-${Date.now()}`,
+                  text: noteDraft.trim(),
+                  author: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                  timestamp,
+                },
+                ...record.notes,
+              ],
+            }
+          : record,
+      ),
+    );
+    setNoteDraft("");
+    showToast(lang === "ar" ? "تمت إضافة الملاحظة" : "Note added");
+  }
+
+  function addAddress() {
+    if (
+      !selectedRecipient ||
+      !addressDraft.address.trim() ||
+      !addressDraft.governorateId ||
+      !addressDraft.areaId
+    ) {
+      showToast(
+        lang === "ar"
+          ? "استكمل العنوان والمحافظة والمنطقة"
+          : "Complete address, governorate and area",
+      );
+      return;
+    }
+    const normalized = addressDraft.address.replace(/\s|[،,.]/g, "").toLowerCase();
+    if (
+      selectedRecipient.addresses.some(
+        (address) =>
+          address.address.ar.replace(/\s|[،,.]/g, "").toLowerCase() === normalized ||
+          address.address.en.replace(/\s|[،,.]/g, "").toLowerCase() === normalized,
+      )
+    ) {
+      showToast(
+        lang === "ar"
+          ? "العنوان موجود بالفعل ولم يُكرر"
+          : "This address already exists and was not duplicated",
+      );
+      return;
+    }
+    const timestamp: Localized = {
+      ar: new Date().toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: new Date().toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const nextAddress: RecipientAddress = {
+      id: `recipient-address-${Date.now()}`,
+      label: {
+        ar: addressDraft.label.trim() || "عنوان إضافي",
+        en: addressDraft.label.trim() || "Additional address",
+      },
+      address: {
+        ar: addressDraft.address.trim(),
+        en: addressDraft.address.trim(),
+      },
+      governorateId: addressDraft.governorateId,
+      areaId: addressDraft.areaId,
+      primary: selectedRecipient.addresses.length === 0,
+      createdAt: timestamp,
+    };
+    onRecordsChange((current) =>
+      current.map((record) =>
+        record.id === selectedRecipient.id
+          ? {
+              ...record,
+              updatedAt: timestamp,
+              addresses: [...record.addresses, nextAddress],
+            }
+          : record,
+      ),
+    );
+    setAddressDraft({
+      label: "",
+      address: "",
+      governorateId: "",
+      areaId: "",
+    });
+    setAddressEditorOpen(false);
+    showToast(
+      lang === "ar"
+        ? "تمت إضافة العنوان دون تغيير عناوين الشحنات القديمة"
+        : "Address added without changing old shipment snapshots",
+    );
+  }
+
+  function setPrimaryAddress(addressId: string) {
+    if (!selectedRecipient) return;
+    onRecordsChange((current) =>
+      current.map((record) =>
+        record.id === selectedRecipient.id
+          ? {
+              ...record,
+              addresses: record.addresses.map((address) => ({
+                ...address,
+                primary: address.id === addressId,
+              })),
+            }
+          : record,
+      ),
+    );
+    showToast(
+      lang === "ar" ? "تم تغيير العنوان الأساسي" : "Primary address updated",
+    );
+  }
+
+  const indicatorOptions: RecipientIndicator[] = [
+    "trusted",
+    "new",
+    "extra_confirmation",
+    "high_returns",
+    "blocked",
+  ];
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="recipients"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><UsersRound size={20} /></span>
+            <span>
+              <strong>{lang === "ar" ? "المستلمون" : "Recipients"}</strong>
+              <small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={
+                lang === "ar"
+                  ? "ابحث بالاسم أو الهاتف أو العنوان..."
+                  : "Search by name, phone or address..."
+              }
+            />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content recipients-page">
+          {!selectedRecipient ? (
+            <>
+              <div className="welcome-row page-heading-row">
+                <div>
+                  <div className="page-title-line">
+                    <h1>{lang === "ar" ? "المستلمون" : "Recipients"}</h1>
+                    <span className="demo-chip">
+                      {lang === "ar" ? "مؤشر تفسيري" : "Explainable indicator"}
+                    </span>
+                  </div>
+                  <p>
+                    {lang === "ar"
+                      ? "ملفات داخلية من الشحنات والاتصالات والنتائج، دون أحكام تلقائية أو دمج بالهاتف."
+                      : "Internal profiles from shipments, contacts and outcomes—without automatic judgement or phone-based merging."}
+                  </p>
+                </div>
+              </div>
+
+              <section className="recipient-principle">
+                <ShieldCheck size={20} />
+                <div>
+                  <strong>
+                    {lang === "ar"
+                      ? "المؤشر يساعد الموظف ولا يقرر بدلًا عنه"
+                      : "The indicator assists staff; it does not decide for them"}
+                  </strong>
+                  <span>
+                    {lang === "ar"
+                      ? "لا يلغي شحنة ولا يمنع الإسناد تلقائيًا، وتصنيف كل راسل لا يظهر لراسل آخر."
+                      : "It never cancels a shipment or blocks assignment automatically, and sender-specific views stay isolated."}
+                  </span>
+                </div>
+              </section>
+
+              <section className="recipient-metrics">
+                <article><span className="recipient-metric-icon"><UsersRound size={19} /></span><div><small>{lang === "ar" ? "ملفات المستلمين" : "Recipient profiles"}</small><strong>{records.length}</strong><em>{totalExperiences} {lang === "ar" ? "تجربة متاحة" : "available experiences"}</em></div></article>
+                <article><span className="recipient-metric-icon recipient-metric-icon--green"><Check size={19} /></span><div><small>{lang === "ar" ? "موثوق" : "Trusted"}</small><strong>{trustedCount}</strong><em>{lang === "ar" ? "وفق العينة الحالية" : "From the current sample"}</em></div></article>
+                <article><span className="recipient-metric-icon recipient-metric-icon--orange"><CircleAlert size={19} /></span><div><small>{lang === "ar" ? "تحتاج مراجعة" : "Need review"}</small><strong>{reviewCount}</strong><em>{lang === "ar" ? "تحذير قابل للشرح" : "Explainable warning"}</em></div></article>
+                <article><span className="recipient-metric-icon recipient-metric-icon--blue"><UserRound size={19} /></span><div><small>{lang === "ar" ? "بيانات غير كافية" : "Insufficient data"}</small><strong>{newCount}</strong><em>{lang === "ar" ? "ليست نتيجة سلبية" : "Not a negative result"}</em></div></article>
+              </section>
+
+              <section className="recipient-list-card">
+                <div className="recipient-list-toolbar">
+                  <label className="shipment-search">
+                    <Search size={17} />
+                    <input
+                      value={search}
+                      onChange={(event) => setSearch(event.target.value)}
+                      placeholder={
+                        lang === "ar"
+                          ? "اسم، هاتف، عنوان أو كود ملف..."
+                          : "Name, phone, address or profile code..."
+                      }
+                    />
+                  </label>
+                  <label className="select-wrap">
+                    <UsersRound size={16} />
+                    <select
+                      value={senderFilter}
+                      onChange={(event) => setSenderFilter(event.target.value)}
+                    >
+                      <option value="all">
+                        {lang === "ar" ? "كل الرسل" : "All senders"}
+                      </option>
+                      {senders.map((sender) => (
+                        <option key={sender.id} value={sender.name.en}>
+                          {sender.name[lang]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={15} />
+                  </label>
+                  <label className="select-wrap">
+                    <SlidersHorizontal size={16} />
+                    <select
+                      value={indicatorFilter}
+                      onChange={(event) =>
+                        setIndicatorFilter(
+                          event.target.value as "all" | RecipientIndicator,
+                        )
+                      }
+                    >
+                      <option value="all">
+                        {lang === "ar" ? "كل المؤشرات" : "All indicators"}
+                      </option>
+                      {indicatorOptions.map((indicator) => (
+                        <option key={indicator} value={indicator}>
+                          {recipientIndicatorLabel(indicator, lang)}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={15} />
+                  </label>
+                </div>
+
+                <div className="recipient-table">
+                  <div className="recipient-table__head">
+                    <span>{lang === "ar" ? "المستلم" : "Recipient"}</span>
+                    <span>{lang === "ar" ? "الشحنات" : "Shipments"}</span>
+                    <span>{lang === "ar" ? "التسليم" : "Delivery"}</span>
+                    <span>{lang === "ar" ? "المرتجع/الإلغاء" : "Return/cancel"}</span>
+                    <span>{lang === "ar" ? "المؤشر" : "Indicator"}</span>
+                    <span>{lang === "ar" ? "آخر تعامل" : "Last activity"}</span>
+                  </div>
+                  {visibleRecords.length ? (
+                    visibleRecords.map((record) => {
+                      const stats = statsFor(record, senderFilter);
+                      const indicator = indicatorFor(record, senderFilter);
+                      return (
+                        <button
+                          className="recipient-table__row"
+                          type="button"
+                          key={record.id}
+                          onClick={() => openProfile(record.id)}
+                        >
+                          <span className="recipient-list-person">
+                            <i>{record.name[lang].slice(0, 1)}</i>
+                            <span><strong>{record.name[lang]}</strong><small dir="ltr">{record.phones[0]}</small><em>{record.id}</em></span>
+                          </span>
+                          <span><strong>{stats.total}</strong><small>{stats.completed} {lang === "ar" ? "مكتملة" : "completed"}</small></span>
+                          <span className="recipient-rate-cell"><strong>{stats.successRate}%</strong><i><b style={{ width: `${stats.successRate}%` }} /></i><small>{stats.delivered} {lang === "ar" ? "مسلمة" : "delivered"}</small></span>
+                          <span><strong>{stats.returned}</strong><small>{stats.returnRate}%</small></span>
+                          <span><b className={`recipient-indicator recipient-indicator--${indicator.indicator}`}>{recipientIndicatorLabel(indicator.indicator, lang)}</b><small>{indicator.manual ? (lang === "ar" ? "قرار الراسل" : "Sender decision") : (lang === "ar" ? "محسوب تفسيريًا" : "Explainable result")}</small></span>
+                          <span><strong>{record.updatedAt[lang]}</strong><ChevronLeft size={17} /></span>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="recipient-empty">
+                      <Search size={28} />
+                      <strong>
+                        {lang === "ar"
+                          ? "لا توجد ملفات مطابقة"
+                          : "No matching profiles"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "غيّر البحث أو نطاق الراسل أو المؤشر."
+                          : "Change the search, sender scope or indicator."}
+                      </small>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </>
+          ) : (
+            <>
+              <section className="recipient-profile-hero">
+                <div className="recipient-profile-identity">
+                  <button type="button" onClick={closeProfile}>
+                    {lang === "ar" ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+                    {lang === "ar" ? "كل المستلمين" : "All recipients"}
+                  </button>
+                  <div>
+                    <span className="recipient-profile-avatar">
+                      {selectedRecipient.name[lang].slice(0, 1)}
+                    </span>
+                    <span>
+                      <small>{selectedRecipient.id}</small>
+                      <h1>{selectedRecipient.name[lang]}</h1>
+                      <b dir="ltr">{selectedRecipient.phones.join(" · ")}</b>
+                    </span>
+                  </div>
+                </div>
+                <label className="recipient-scope-select">
+                  <span>{lang === "ar" ? "نطاق القراءة" : "Viewing scope"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={profileScope}
+                      onChange={(event) => setProfileScope(event.target.value)}
+                    >
+                      <option value="all">
+                        {lang === "ar"
+                          ? "الصورة الداخلية لكل الرسل"
+                          : "Internal view across all senders"}
+                      </option>
+                      {Array.from(
+                        new Map(
+                          experiencesFor(selectedRecipient).map((event) => [
+                            event.sender.en,
+                            event.sender,
+                          ]),
+                        ).values(),
+                      ).map((sender) => (
+                        <option key={sender.en} value={sender.en}>
+                          {lang === "ar"
+                            ? `تاريخ ${sender.ar} فقط`
+                            : `${sender.en} history only`}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={15} />
+                  </span>
+                  <small>
+                    {profileScope === "all"
+                      ? lang === "ar"
+                        ? "هذا النطاق داخلي للشركة ولا يظهر للراسل."
+                        : "This company-wide scope is internal and hidden from senders."
+                      : lang === "ar"
+                        ? "الراسل يرى تجاربه وتصنيفه فقط."
+                        : "The sender sees only their experiences and classification."}
+                  </small>
+                </label>
+              </section>
+
+              <section className="recipient-profile-signal">
+                <span className={`recipient-profile-signal__icon recipient-profile-signal__icon--${selectedIndicator?.indicator}`}>
+                  {selectedIndicator?.indicator === "trusted" ? <ShieldCheck size={23} /> : <CircleAlert size={23} />}
+                </span>
+                <div>
+                  <small>{lang === "ar" ? "المؤشر الحالي" : "Current indicator"}</small>
+                  <strong>
+                    {selectedIndicator
+                      ? recipientIndicatorLabel(selectedIndicator.indicator, lang)
+                      : "—"}
+                  </strong>
+                  <p>{selectedIndicator?.reason}</p>
+                  <em>
+                    {selectedIndicator?.manual
+                      ? lang === "ar"
+                        ? "قرار يدوي موثق لهذا الراسل"
+                        : "Documented manual sender decision"
+                      : lang === "ar"
+                        ? "نتيجة تفسيرية من البيانات المتاحة"
+                        : "Explainable result from available data"}
+                    {" · "}
+                    {selectedIndicator?.updatedAt}
+                  </em>
+                </div>
+                <div className="recipient-sample">
+                  <span><small>{lang === "ar" ? "حجم العينة" : "Sample size"}</small><strong>{selectedStats?.total ?? 0}</strong></span>
+                  <span><small>{lang === "ar" ? "مكتملة" : "Completed"}</small><strong>{selectedStats?.completed ?? 0}</strong></span>
+                  <span><small>{lang === "ar" ? "نسبة التسليم" : "Delivery rate"}</small><strong>{selectedStats?.successRate ?? 0}%</strong></span>
+                </div>
+                <div className="recipient-advisory">
+                  <LockKeyhole size={16} />
+                  <span>
+                    {lang === "ar"
+                      ? "لا يغيّر حالة شحنة ولا يمنع الإسناد تلقائيًا."
+                      : "Does not change shipment status or block assignment automatically."}
+                  </span>
+                </div>
+              </section>
+
+              <nav className="recipient-profile-tabs">
+                {[
+                  { id: "overview" as const, label: lang === "ar" ? "النظرة العامة" : "Overview", icon: LayoutDashboard },
+                  { id: "shipments" as const, label: lang === "ar" ? "التجارب والشحنات" : "Experiences & shipments", icon: Boxes },
+                  { id: "addresses" as const, label: lang === "ar" ? "العناوين والملاحظات" : "Addresses & notes", icon: MapPin },
+                ].map((tab) => {
+                  const Icon = tab.icon;
+                  return (
+                    <button
+                      type="button"
+                      key={tab.id}
+                      className={activeTab === tab.id ? "recipient-profile-tab recipient-profile-tab--active" : "recipient-profile-tab"}
+                      onClick={() => setActiveTab(tab.id)}
+                    >
+                      <Icon size={18} />
+                      {tab.label}
+                    </button>
+                  );
+                })}
+              </nav>
+
+              {activeTab === "overview" && (
+                <div className="recipient-profile-layout">
+                  <section className="recipient-profile-panel recipient-profile-panel--wide">
+                    <div className="recipient-panel-title"><span><Calculator size={19} /></span><div><h2>{lang === "ar" ? "نتائج الفترة المتاحة" : "Available-period outcomes"}</h2><p>{lang === "ar" ? "كل رقم يمكن فتح مصدره من تبويب التجارب والشحنات." : "Every number can be traced to its source in Experiences & shipments."}</p></div></div>
+                    <div className="recipient-outcome-metrics">
+                      <article><small>{lang === "ar" ? "إجمالي التجارب" : "Total experiences"}</small><strong>{selectedStats?.total}</strong><span>{selectedStats?.completed} {lang === "ar" ? "مكتملة" : "completed"}</span></article>
+                      <article className="is-success"><small>{lang === "ar" ? "تم التسليم" : "Delivered"}</small><strong>{selectedStats?.delivered}</strong><span>{selectedStats?.successRate}%</span></article>
+                      <article><small>{lang === "ar" ? "تسليم جزئي" : "Partial"}</small><strong>{selectedStats?.partial}</strong><span>{lang === "ar" ? "يحتاج قراءة التفاصيل" : "Review details"}</span></article>
+                      <article className="is-danger"><small>{lang === "ar" ? "مرتجع أو إلغاء" : "Return or cancel"}</small><strong>{selectedStats?.returned}</strong><span>{selectedStats?.returnRate}%</span></article>
+                      <article className="is-warning"><small>{lang === "ar" ? "عدم الرد" : "No answer"}</small><strong>{selectedStats?.noAnswer}</strong><span>{selectedStats?.confirmed} {lang === "ar" ? "مؤكدة" : "confirmed"}</span></article>
+                    </div>
+                    <div className="recipient-outcome-bar">
+                      <i className="is-delivered" style={{ width: `${selectedStats?.successRate ?? 0}%` }} />
+                      <i className="is-returned" style={{ width: `${selectedStats?.returnRate ?? 0}%` }} />
+                    </div>
+                    <div className="recipient-outcome-legend"><span><i className="is-delivered" />{lang === "ar" ? "تسليم ناجح" : "Delivered"}</span><span><i className="is-returned" />{lang === "ar" ? "مرتجع أو إلغاء" : "Return/cancel"}</span><em>{lang === "ar" ? "الجاري لا يدخل نسبة النجاح حتى تظهر نتيجته." : "In-progress shipments are excluded until an outcome exists."}</em></div>
+                  </section>
+
+                  <section className="recipient-profile-panel">
+                    <div className="recipient-panel-title"><span><SlidersHorizontal size={19} /></span><div><h2>{lang === "ar" ? "تصنيف الراسل" : "Sender classification"}</h2><p>{lang === "ar" ? "قرار منفصل لكل راسل مع سبب وتاريخ." : "Independent per sender, with reason and timestamp."}</p></div></div>
+                    {profileScope === "all" ? (
+                      <div className="recipient-scope-required">
+                        <UsersRound size={24} />
+                        <strong>{lang === "ar" ? "اختر راسلًا من نطاق القراءة" : "Choose a sender scope"}</strong>
+                        <p>{lang === "ar" ? "لا يوجد تصنيف يدوي عام يجبر كل الرسل على القرار نفسه." : "There is no global manual label that forces the same decision on all senders."}</p>
+                      </div>
+                    ) : (
+                      <div className="recipient-indicator-editor">
+                        <label><span>{lang === "ar" ? "التصنيف لدى الراسل" : "Sender classification"}</span><select value={indicatorDraft} onChange={(event) => setIndicatorDraft(event.target.value as RecipientIndicator)}>{indicatorOptions.map((indicator) => <option key={indicator} value={indicator}>{recipientIndicatorLabel(indicator, lang)}</option>)}</select></label>
+                        <label><span>{lang === "ar" ? "السبب الإلزامي" : "Required reason"}</span><textarea value={indicatorReason} onChange={(event) => setIndicatorReason(event.target.value)} placeholder={lang === "ar" ? "لماذا اتُخذ هذا القرار؟" : "Why was this decision made?"} /></label>
+                        <button className="primary-button" type="button" onClick={saveSenderIndicator}><Save size={16} />{lang === "ar" ? "حفظ لهذا الراسل" : "Save for this sender"}</button>
+                      </div>
+                    )}
+                  </section>
+
+                  <section className="recipient-profile-panel">
+                    <div className="recipient-panel-title"><span><Link2 size={19} /></span><div><h2>{lang === "ar" ? "سلامة الهوية" : "Identity integrity"}</h2><p>{lang === "ar" ? "الهاتف يساعد البحث ولا يدمج الملفات." : "Phone helps search; it does not merge profiles."}</p></div></div>
+                    <div className="recipient-integrity">
+                      <span><small>{lang === "ar" ? "الهواتف" : "Phones"}</small><strong>{selectedRecipient.phones.length}</strong></span>
+                      <span><small>{lang === "ar" ? "العناوين" : "Addresses"}</small><strong>{selectedRecipient.addresses.length}</strong></span>
+                      <span><small>{lang === "ar" ? "ملفات بنفس الهاتف" : "Same-phone profiles"}</small><strong>{similarProfiles.length}</strong></span>
+                    </div>
+                    <div className={similarProfiles.length ? "recipient-match-review recipient-match-review--warning" : "recipient-match-review"}>
+                      <ShieldCheck size={17} />
+                      <span>{similarProfiles.length ? (lang === "ar" ? "توجد ملفات محتملة للمراجعة؛ لم يحدث دمج تلقائي." : "Potential profiles need review; no automatic merge occurred.") : (lang === "ar" ? "لا توجد ملفات أخرى تشترك في الهاتف المسجل." : "No other profile shares a saved phone.")}</span>
+                    </div>
+                  </section>
+
+                  <section className="recipient-profile-panel recipient-profile-panel--wide">
+                    <div className="recipient-panel-title"><span><Clock3 size={19} /></span><div><h2>{lang === "ar" ? "أحدث التجارب" : "Latest experiences"}</h2><p>{lang === "ar" ? "قراءة سريعة؛ المصدر الكامل في التبويب التالي." : "Quick view; full sources are in the next tab."}</p></div></div>
+                    <div className="recipient-latest">
+                      {selectedExperiences.slice(0, 4).map((event) => (
+                        <button type="button" key={event.id} onClick={() => event.archived ? setActiveTab("shipments") : onOpenShipment(event.shipmentId)}>
+                          <span className={`recipient-result-dot recipient-result-dot--${event.result}`} />
+                          <span><strong>{event.shipmentId}</strong><small>{event.sender[lang]} · {event.reference}</small></span>
+                          <b>{recipientResultLabel(event.result, lang)}</b>
+                          <time>{event.timestamp[lang]}</time>
+                          <ChevronLeft size={16} />
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+              )}
+
+              {activeTab === "shipments" && (
+                <section className="recipient-profile-panel recipient-experiences-panel">
+                  <div className="recipient-panel-title"><span><Boxes size={19} /></span><div><h2>{lang === "ar" ? "التجارب والشحنات" : "Experiences & shipments"}</h2><p>{lang === "ar" ? "السجل داخل نطاق الراسل المختار؛ السجل المؤرشف للقراءة فقط." : "History within the selected sender scope; archived records are read-only."}</p></div></div>
+                  <div className="recipient-experience-head"><span>{lang === "ar" ? "الشحنة" : "Shipment"}</span><span>{lang === "ar" ? "الراسل" : "Sender"}</span><span>{lang === "ar" ? "النتيجة" : "Outcome"}</span><span>{lang === "ar" ? "التأكيد" : "Confirmation"}</span><span>{lang === "ar" ? "التاريخ" : "Date"}</span><span>{lang === "ar" ? "المصدر" : "Source"}</span></div>
+                  <div className="recipient-experience-list">
+                    {selectedExperiences.map((event) => (
+                      <button type="button" key={event.id} disabled={event.archived} onClick={() => onOpenShipment(event.shipmentId)}>
+                        <span><strong>{event.shipmentId}</strong><small>{event.reference}</small></span>
+                        <span><strong>{event.sender[lang]}</strong></span>
+                        <span><b className={`recipient-result recipient-result--${event.result}`}>{recipientResultLabel(event.result, lang)}</b></span>
+                        <span>{event.confirmation === "confirmed" ? (lang === "ar" ? "تم التأكيد" : "Confirmed") : event.confirmation === "no_answer" ? (lang === "ar" ? "لم يرد" : "No answer") : event.confirmation === "later" ? (lang === "ar" ? "تواصل لاحقًا" : "Contact later") : (lang === "ar" ? "غير مسجل" : "Not recorded")}</span>
+                        <time>{event.timestamp[lang]}</time>
+                        <span>{event.archived ? (lang === "ar" ? "أرشيف محفوظ" : "Saved archive") : (lang === "ar" ? "فتح الشحنة 360°" : "Open shipment 360°")}{!event.archived && <ChevronLeft size={15} />}</span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {activeTab === "addresses" && (
+                <div className="recipient-profile-layout recipient-profile-layout--addresses">
+                  <section className="recipient-profile-panel">
+                    <div className="recipient-panel-title"><span><MapPin size={19} /></span><div><h2>{lang === "ar" ? "العناوين المحفوظة" : "Saved addresses"}</h2><p>{lang === "ar" ? "تحديث الملف لا يغيّر Snapshot شحنة قديمة." : "Profile updates never rewrite old shipment snapshots."}</p></div><button className="secondary-button" type="button" onClick={() => setAddressEditorOpen((value) => !value)}><Plus size={15} />{lang === "ar" ? "عنوان جديد" : "New address"}</button></div>
+                    {addressEditorOpen && (
+                      <div className="recipient-address-editor">
+                        <label><span>{lang === "ar" ? "اسم مختصر" : "Short label"}</span><input value={addressDraft.label} onChange={(event) => setAddressDraft((current) => ({ ...current, label: event.target.value }))} placeholder={lang === "ar" ? "المنزل، العمل..." : "Home, work..."} /></label>
+                        <label className="is-wide"><span>{lang === "ar" ? "العنوان التفصيلي" : "Detailed address"}</span><input value={addressDraft.address} onChange={(event) => setAddressDraft((current) => ({ ...current, address: event.target.value }))} /></label>
+                        <label><span>{lang === "ar" ? "المحافظة" : "Governorate"}</span><select value={addressDraft.governorateId} onChange={(event) => setAddressDraft((current) => ({ ...current, governorateId: event.target.value, areaId: "" }))}><option value="">{lang === "ar" ? "اختر" : "Select"}</option>{governorates.filter((governorate) => governorate.state === "active").map((governorate) => <option key={governorate.id} value={governorate.id}>{governorate.name[lang]}</option>)}</select></label>
+                        <label><span>{lang === "ar" ? "المنطقة" : "Area"}</span><select value={addressDraft.areaId} disabled={!addressDraft.governorateId} onChange={(event) => setAddressDraft((current) => ({ ...current, areaId: event.target.value }))}><option value="">{lang === "ar" ? "اختر" : "Select"}</option>{availableAreas.map((area) => <option key={area.id} value={area.id}>{area.name[lang]}</option>)}</select></label>
+                        <button className="primary-button" type="button" onClick={addAddress}><Save size={16} />{lang === "ar" ? "حفظ العنوان" : "Save address"}</button>
+                      </div>
+                    )}
+                    <div className="recipient-addresses">
+                      {selectedRecipient.addresses.map((address) => {
+                        const uses = experiencesFor(selectedRecipient).filter((event) => event.addressId === address.id).length;
+                        const governorate = governorates.find((record) => record.id === address.governorateId);
+                        const area = governorate?.areas.find((record) => record.id === address.areaId);
+                        return (
+                          <article key={address.id} className={address.primary ? "is-primary" : ""}>
+                            <span><MapPin size={19} /></span>
+                            <div><small>{address.label[lang]}</small><strong>{address.address[lang]}</strong><em>{area?.name[lang] ?? "—"} · {governorate?.name[lang] ?? "—"}</em></div>
+                            <div className="recipient-address-usage"><small>{lang === "ar" ? "مرات الاستخدام" : "Uses"}</small><strong>{uses}</strong></div>
+                            {address.primary ? <b><Check size={14} />{lang === "ar" ? "أساسي" : "Primary"}</b> : <button type="button" onClick={() => setPrimaryAddress(address.id)}>{lang === "ar" ? "اجعله أساسيًا" : "Make primary"}</button>}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+
+                  <section className="recipient-profile-panel">
+                    <div className="recipient-panel-title"><span><ClipboardCheck size={19} /></span><div><h2>{lang === "ar" ? "الملاحظات الداخلية" : "Internal notes"}</h2><p>{lang === "ar" ? "لا تغيّر المؤشر أو حالة أي شحنة." : "Notes do not change the indicator or any shipment status."}</p></div></div>
+                    <div className="recipient-note-entry"><textarea value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} placeholder={lang === "ar" ? "أضف معلومة تشغيلية واضحة..." : "Add a clear operational note..."} /><button className="primary-button" type="button" disabled={!noteDraft.trim()} onClick={addNote}><Plus size={15} />{lang === "ar" ? "إضافة الملاحظة" : "Add note"}</button></div>
+                    <div className="recipient-notes">
+                      {selectedRecipient.notes.length ? selectedRecipient.notes.map((note) => <article key={note.id}><span>{note.author[lang].slice(0, 1)}</span><div><p>{note.text}</p><small>{note.author[lang]} · {note.timestamp[lang]}</small></div></article>) : <div className="recipient-notes-empty"><ClipboardCheck size={25} /><strong>{lang === "ar" ? "لا توجد ملاحظات داخلية" : "No internal notes"}</strong></div>}
+                    </div>
+                  </section>
+                </div>
+              )}
+            </>
+          )}
+        </main>
+      </div>
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
+    </div>
+  );
+}
+
 type ShipmentFileTab = "summary" | "operations" | "finance" | "record";
 
 function Shipment360Screen({
@@ -26551,6 +27968,7 @@ function Shipment360Screen({
   onLang,
   onTheme,
   onNavigate,
+  onOpenRecipient,
   onBack,
   onLogout,
 }: {
@@ -26565,6 +27983,7 @@ function Shipment360Screen({
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onOpenRecipient: (recipientId: string) => void;
   onBack: () => void;
   onLogout: () => void;
 }) {
@@ -26992,6 +28411,18 @@ function Shipment360Screen({
                   <small dir="ltr">{shipment.phone}</small>
                   <small>{shipment.area[lang]}، {shipment.governorate[lang]}</small>
                 </div>
+                <button
+                  className="shipment360-recipient__open"
+                  type="button"
+                  disabled={!shipment.recipientProfileId}
+                  onClick={() =>
+                    shipment.recipientProfileId &&
+                    onOpenRecipient(shipment.recipientProfileId)
+                  }
+                >
+                  <UserRound size={15} />
+                  {lang === "ar" ? "ملف المستلم" : "Recipient file"}
+                </button>
               </div>
             </div>
 
@@ -27084,7 +28515,7 @@ function Shipment360Screen({
                   </div>
                 </div>
                 <div className="shipment360-facts">
-                  <div><small>{lang === "ar" ? "المستلم" : "Recipient"}</small><strong>{shipment.recipient[lang]}</strong><span dir="ltr">{shipment.phone}</span></div>
+                  <div><small>{lang === "ar" ? "المستلم" : "Recipient"}</small><strong>{shipment.recipient[lang]}</strong><span dir="ltr">{shipment.phone}</span>{shipment.recipientProfileId && <button className="shipment360-inline-link" type="button" onClick={() => onOpenRecipient(shipment.recipientProfileId!)}>{lang === "ar" ? "فتح ملف المستلم" : "Open recipient file"}</button>}</div>
                   <div><small>{lang === "ar" ? "الراسل" : "Sender"}</small><strong>{shipment.sender[lang]}</strong><span>{shipment.reference}</span></div>
                   <div className="shipment360-fact--wide"><small>{lang === "ar" ? "العنوان" : "Address"}</small><strong>{shipment.address[lang]}</strong><span>{shipment.area[lang]}، {shipment.governorate[lang]}</span></div>
                   <div><small>{lang === "ar" ? "موعد التسليم" : "Delivery date"}</small><strong>{shipment.deliveryDate[lang]}</strong></div>
@@ -27921,6 +29352,8 @@ export default function Home() {
   const [screen, setScreen] = useState<Screen>("login");
   const [sharedStatuses, setSharedStatuses] = useState(statusPolicies);
   const [sharedSenders, setSharedSenders] = useState(senderRecordsData);
+  const [sharedRecipients, setSharedRecipients] =
+    useState<RecipientRecord[]>(recipientRecordsData);
   const [sharedCouriers, setSharedCouriers] = useState(courierRecordsData);
   const [sharedGovernorates, setSharedGovernorates] = useState(governoratesData);
   const [sharedPriceLists, setSharedPriceLists] = useState(priceListsData);
@@ -27959,6 +29392,7 @@ export default function Home() {
   const [trustConversionTarget, setTrustConversionTarget] =
     useState<TrustRecord | null>(null);
   const [shipmentFileTargetId, setShipmentFileTargetId] = useState("");
+  const [recipientProfileTargetId, setRecipientProfileTargetId] = useState("");
   const [activeSenderDraftId, setActiveSenderDraftId] = useState("");
   const [senderProfileTarget, setSenderProfileTarget] = useState<{
     id: string;
@@ -27978,6 +29412,7 @@ export default function Home() {
         const parsed = JSON.parse(saved) as {
           statuses?: StatusPolicy[];
           senders?: SenderRecord[];
+          recipients?: RecipientRecord[];
           couriers?: CourierRecord[];
           governorates?: GovernorateRecord[];
           priceLists?: PriceListRecord[];
@@ -28007,6 +29442,25 @@ export default function Home() {
         }
         if (Array.isArray(parsed.senders) && parsed.senders.length > 0) {
           setSharedSenders(parsed.senders.map(normalizeSenderRecord));
+        }
+        if (Array.isArray(parsed.recipients) && parsed.recipients.length > 0) {
+          const normalizedRecipients = parsed.recipients.map((recipient) => ({
+            ...recipient,
+            addresses: recipient.addresses ?? [],
+            archivedExperiences: recipient.archivedExperiences ?? [],
+            senderViews: recipient.senderViews ?? [],
+            notes: recipient.notes ?? [],
+          }));
+          const missingDemoRecipients = recipientRecordsData.filter(
+            (demoRecipient) =>
+              !normalizedRecipients.some(
+                (savedRecipient) => savedRecipient.id === demoRecipient.id,
+              ),
+          );
+          setSharedRecipients([
+            ...normalizedRecipients,
+            ...missingDemoRecipients,
+          ]);
         }
         if (Array.isArray(parsed.couriers) && parsed.couriers.length > 0) {
           setSharedCouriers(parsed.couriers);
@@ -28125,12 +29579,20 @@ export default function Home() {
         }
         if (Array.isArray(parsed.shipments)) {
           const migratedShipments = parsed.shipments.map((shipment) => {
+              const recipientProfileId =
+                shipment.recipientProfileId ??
+                recipientRecordsData.find(
+                  (recipient) =>
+                    recipient.name.en === shipment.recipient.en ||
+                    recipient.name.ar === shipment.recipient.ar,
+                )?.id;
               const deliveredDemo =
                 shipment.id === "TS-12857" &&
                 shipment.status.en === "Delivered" &&
                 !(shipment.statusHistory?.length);
               return {
                 ...shipment,
+                recipientProfileId,
                 recipientShippingCharge:
                   shipment.recipientShippingCharge ??
                   (shipment.shippingPayer === "recipient"
@@ -28369,6 +29831,7 @@ export default function Home() {
       JSON.stringify({
         statuses: sharedStatuses,
         senders: sharedSenders,
+        recipients: sharedRecipients,
         couriers: sharedCouriers,
         governorates: sharedGovernorates,
         priceLists: sharedPriceLists,
@@ -28406,13 +29869,63 @@ export default function Home() {
     sharedShipments,
     sharedStatuses,
     sharedSenders,
+    sharedRecipients,
     sharedCouriers,
   ]);
 
   function saveShipmentRecords(records: Shipment[]) {
-    setSharedShipments((current) => [...records, ...current]);
+    const preparedRecords = records.map((record) => {
+      if (record.recipientProfileId) return record;
+      const newRecipientId = `recipient-${record.id.toLowerCase()}`;
+      const governorate = sharedGovernorates.find(
+        (candidate) =>
+          candidate.name.en === record.governorate.en ||
+          candidate.name.ar === record.governorate.ar,
+      );
+      const area = governorate?.areas.find(
+        (candidate) =>
+          candidate.name.en === record.area.en ||
+          candidate.name.ar === record.area.ar,
+      );
+      const timestamp: Localized = {
+        ar: new Date().toLocaleString("ar-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        en: new Date().toLocaleString("en-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+      };
+      setSharedRecipients((current) => [
+        {
+          id: newRecipientId,
+          name: record.recipient,
+          phones: [record.phone],
+          addresses: [
+            {
+              id: `recipient-address-${record.id.toLowerCase()}`,
+              label: { ar: "العنوان الأساسي", en: "Primary address" },
+              address: record.address,
+              governorateId: governorate?.id ?? "",
+              areaId: area?.id ?? "",
+              primary: true,
+              createdAt: timestamp,
+            },
+          ],
+          archivedExperiences: [],
+          senderViews: [],
+          notes: [],
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+        ...current,
+      ]);
+      return { ...record, recipientProfileId: newRecipientId };
+    });
+    setSharedShipments((current) => [...preparedRecords, ...current]);
     if (!trustConversionTarget || records.length !== 1) return;
-    const shipment = records[0];
+    const shipment = preparedRecords[0];
     const now = new Date();
     const timestamp: Localized = {
       ar: now.toLocaleString("ar-EG", {
@@ -28505,6 +30018,10 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onNavigate={setScreen}
+          onOpenRecipient={(recipientId) => {
+            setRecipientProfileTargetId(recipientId);
+            setScreen("recipients");
+          }}
           onBack={() => setScreen("shipments")}
           onLogout={() => setScreen("login")}
         />
@@ -28526,6 +30043,28 @@ export default function Home() {
           onRecordsChange={setSharedSenders}
           onPriceListsChange={setSharedPriceLists}
           onSenderPoliciesChange={setSharedSenderPolicies}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "recipients" ? (
+        <RecipientsScreen
+          lang={lang}
+          theme={theme}
+          records={sharedRecipients}
+          shipmentRecords={sharedShipments}
+          senders={sharedSenders}
+          governorates={sharedGovernorates}
+          initialRecipientId={recipientProfileTargetId || undefined}
+          onInitialRecipientHandled={() => setRecipientProfileTargetId("")}
+          onRecordsChange={setSharedRecipients}
+          onOpenShipment={(shipmentId) => {
+            setShipmentFileTargetId(shipmentId);
+            setScreen("shipment360");
+          }}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -28770,6 +30309,7 @@ export default function Home() {
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           senders={sharedSenders}
+          recipients={sharedRecipients}
           governorates={sharedGovernorates}
           statuses={sharedStatuses}
           priceLists={sharedPriceLists}
