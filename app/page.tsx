@@ -69,6 +69,7 @@ type Theme = "light" | "dark";
 type Screen =
   | "login"
   | "shipments"
+  | "shipment360"
   | "statuses"
   | "areas"
   | "priceLists"
@@ -4085,11 +4086,13 @@ function ShipmentDrawer({
   lang,
   onClose,
   onToast,
+  onOpenFull,
 }: {
   shipment: Shipment;
   lang: Lang;
   onClose: () => void;
   onToast: (message: string) => void;
+  onOpenFull: (shipmentId: string) => void;
 }) {
   const t = copy[lang];
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
@@ -4253,7 +4256,7 @@ function ShipmentDrawer({
           <button
             className="primary-button primary-button--wide"
             type="button"
-            onClick={() => onToast(t.handoff)}
+            onClick={() => onOpenFull(shipment.id)}
           >
             {t.openFull}
             {lang === "ar" ? (
@@ -4890,7 +4893,6 @@ function StatusesScreen({
 
   function openNew() {
     setIsNew(true);
-    setEditorInitialTab("profile");
     setEditing({
       id: `status-${Date.now()}`,
       name: { ar: "حالة جديدة", en: "New status" },
@@ -26535,6 +26537,797 @@ function AddShipmentScreen({
   );
 }
 
+type ShipmentFileTab = "summary" | "operations" | "finance" | "record";
+
+function Shipment360Screen({
+  lang,
+  theme,
+  shipment,
+  courierPlans,
+  governorates,
+  courierSettlements,
+  senderDrafts,
+  senderReceipts,
+  onLang,
+  onTheme,
+  onNavigate,
+  onBack,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipment: Shipment | null;
+  courierPlans: CourierRatePlan[];
+  governorates: GovernorateRecord[];
+  courierSettlements: CourierSettlement[];
+  senderDrafts: SenderSettlementDraft[];
+  senderReceipts: SenderSettlementReceipt[];
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onBack: () => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<ShipmentFileTab>("summary");
+  const [toast, setToast] = useState("");
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+
+  if (!shipment) {
+    return (
+      <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+        <Sidebar
+          lang={lang}
+          activeScreen="shipment360"
+          collapsed={collapsed}
+          mobileOpen={mobileOpen}
+          onCollapse={() => setCollapsed((value) => !value)}
+          onMobileClose={() => setMobileOpen(false)}
+          onNavigate={onNavigate}
+          onLogout={onLogout}
+        />
+        <div className="erp-main">
+          <header className="topbar">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+            >
+              <Menu size={20} />
+            </button>
+            <div className="workspace-name">
+              <span className="workspace-icon"><Boxes size={20} /></span>
+              <span>
+                <strong>{lang === "ar" ? "ملف الشحنة" : "Shipment file"}</strong>
+                <small>{lang === "ar" ? "مصدر الحقيقة الموحد" : "Unified source of truth"}</small>
+              </span>
+            </div>
+            <div className="topbar__actions">
+              <LanguageThemeControls
+                lang={lang}
+                theme={theme}
+                onLang={onLang}
+                onTheme={onTheme}
+                subtle
+              />
+            </div>
+          </header>
+          <main className="page-content shipment360-empty">
+            <PackageCheck size={34} />
+            <h1>{lang === "ar" ? "تعذر العثور على الشحنة" : "Shipment not found"}</h1>
+            <p>
+              {lang === "ar"
+                ? "قد تكون الشحنة حُذفت من بيانات النموذج أو لم تعد متاحة."
+                : "The shipment may no longer exist in the prototype data."}
+            </p>
+            <button className="primary-button" type="button" onClick={onBack}>
+              {lang === "ar" ? "العودة إلى الشحنات" : "Back to shipments"}
+            </button>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  const shipmentId = shipment.id;
+  const latestStatusEvent = shipment.statusHistory?.[0];
+  const collectedEvent = shipment.statusHistory?.find(
+    (event) => event.collectedAmount !== null,
+  );
+  const shipmentEventIds = (shipment.statusHistory ?? []).map((event) => event.id);
+  const courierSettlement = [...courierSettlements]
+    .reverse()
+    .find((settlement) =>
+      settlement.shipmentEventIds.some((id) => shipmentEventIds.includes(id)),
+    );
+  const senderDraft = [...senderDrafts]
+    .reverse()
+    .find((draft) =>
+      draft.shipmentEventIds.some((id) => shipmentEventIds.includes(id)),
+    );
+  const senderReceipt = [...senderReceipts]
+    .reverse()
+    .find(
+      (receipt) =>
+        receipt.shipmentSnapshots?.some(
+          (snapshot) => snapshot.shipmentId === shipment.id,
+        ) ||
+        receipt.shipmentEventIds.some((id) => shipmentEventIds.includes(id)),
+    );
+  const senderReceiptLine = senderReceipt?.shipmentSnapshots?.find(
+    (snapshot) => snapshot.shipmentId === shipment.id,
+  );
+  const recipientAdditions =
+    shipment.customFinancialSnapshot?.recipientAdditions ?? 0;
+  const senderDeductions =
+    shipment.customFinancialSnapshot?.senderDeductions ?? 0;
+  const companyCosts = shipment.customFinancialSnapshot?.companyCosts ?? 0;
+  const actualCollected = collectedEvent?.collectedAmount ?? null;
+
+  const areaRecord = governorates
+    .flatMap((governorate) =>
+      governorate.areas.map((area) => ({ governorate, area })),
+    )
+    .find(
+      ({ area }) =>
+        area.name.en === shipment.area.en || area.name.ar === shipment.area.ar,
+    );
+  const courierIdentity =
+    collectedEvent?.recordedBy ?? shipment.courier ?? null;
+  const courierPlan =
+    (courierIdentity &&
+      courierPlans.find(
+        (plan) =>
+          plan.state === "active" &&
+          plan.couriers.some(
+            (courier) =>
+              courier.en === courierIdentity.en ||
+              courier.ar === courierIdentity.ar,
+          ),
+      )) ||
+    courierPlans.find((plan) => plan.state === "active" && plan.isDefault);
+  const courierCommission =
+    latestStatusEvent &&
+    areaRecord &&
+    courierPlan &&
+    courierPlan.compensationType !== "salary"
+      ? courierPlan.rates[areaRecord.area.id]?.[
+          latestStatusEvent.statusPolicyId
+        ] ?? null
+      : null;
+
+  const custodyPlace =
+    shipment.custodyType === "warehouse" && shipment.warehouseLocation
+      ? warehouseLocationLabel(shipment.warehouseLocation)[lang]
+      : shipment.custody[lang];
+  const assignmentLabel = shipment.courier
+    ? shipment.courier[lang]
+    : lang === "ar"
+      ? "لا يوجد إسناد فعّال"
+      : "No active assignment";
+  const settlementState = senderReceipt
+    ? senderReceipt.state === "completed"
+      ? lang === "ar"
+        ? "تمت تسوية الراسل"
+        : "Sender settled"
+      : lang === "ar"
+        ? "تسوية جزئية للراسل"
+        : "Partial sender settlement"
+    : senderDraft
+      ? lang === "ar"
+        ? "محجوزة في مسودة حساب"
+        : "Reserved in account draft"
+      : collectedEvent?.senderSettlementStatus === "eligible"
+        ? lang === "ar"
+          ? "جاهزة لحساب الراسل"
+          : "Ready for sender account"
+        : lang === "ar"
+          ? "لم تدخل حساب الراسل"
+          : "Not in sender account";
+
+  const primaryAction =
+    shipment.requiredType === "incomplete"
+      ? {
+          label: lang === "ar" ? "استكمال البيانات" : "Complete data",
+          screen: "incompleteShipments" as const,
+          hint:
+            lang === "ar"
+              ? "بيانات ناقصة تمنع الخطوة التالية."
+              : "Missing data blocks the next step.",
+        }
+      : shipment.confirmationCode !== "confirmed" &&
+          shipment.requiredType === "attention"
+        ? {
+            label: lang === "ar" ? "فتح التأكيد والمتابعة" : "Open confirmation",
+            screen: "confirmation" as const,
+            hint:
+              lang === "ar"
+                ? "تحتاج الشحنة متابعة نتيجة التواصل."
+                : "The shipment needs a confirmation follow-up.",
+          }
+        : shipment.custodyType === "warehouse"
+          ? {
+              label: lang === "ar" ? "فتح التوزيع والإسناد" : "Open assignment",
+              screen: "assignment" as const,
+              hint:
+                lang === "ar"
+                  ? "الطرد داخل المخزن ولا يوجد إسناد فعّال."
+                  : "The parcel is in warehouse with no active assignment.",
+            }
+          : shipment.custodyType === "courier"
+            ? {
+                label: lang === "ar" ? "فتح شحنات المندوب" : "Open courier shipments",
+                screen: "courierShipments" as const,
+                hint:
+                  lang === "ar"
+                    ? "الطرد في حيازة المندوب فعليًا."
+                    : "The parcel is physically with the courier.",
+              }
+            : shipment.custodyType === "return_route"
+              ? {
+                  label: lang === "ar" ? "فتح حساب المندوب" : "Open courier account",
+                  screen: "courierAccount" as const,
+                  hint:
+                    lang === "ar"
+                      ? "المرتجع لم تستلمه الشركة فعليًا بعد."
+                      : "The company has not physically received the return yet.",
+                }
+              : shipment.custodyType === "recipient"
+                ? {
+                    label: lang === "ar" ? "فتح تجهيز حساب الراسل" : "Prepare sender account",
+                    screen: "senderAccountPrep" as const,
+                    hint:
+                      lang === "ar"
+                        ? "تم تسليم الطرد؛ راجع أهلية حساب الراسل."
+                        : "Parcel delivered; review sender-account eligibility.",
+                  }
+                : {
+                    label: lang === "ar" ? "فتح سجل حسابات الراسل" : "Open sender history",
+                    screen: "senderAccountHistory" as const,
+                    hint:
+                      lang === "ar"
+                        ? "الطرد في حيازة الراسل."
+                        : "The parcel is in sender custody.",
+                  };
+
+  const recordGroups = [
+    {
+      id: "statuses",
+      title: lang === "ar" ? "سجل الحالات" : "Status history",
+      icon: SlidersHorizontal,
+      events: (shipment.statusHistory ?? []).map((event) => ({
+        id: event.id,
+        title: event.status[lang],
+        details: [
+          event.reason,
+          event.note,
+          event.collectedAmount !== null
+            ? `${lang === "ar" ? "تحصيل" : "Collected"}: ${money.format(event.collectedAmount)}`
+            : "",
+          event.deliveredPieces !== null
+            ? `${lang === "ar" ? "مسلم" : "Delivered"}: ${event.deliveredPieces}`
+            : "",
+          event.returnedPieces !== null
+            ? `${lang === "ar" ? "مرتجع" : "Returned"}: ${event.returnedPieces}`
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+        actor: event.recordedBy[lang],
+        timestamp: event.timestamp[lang],
+      })),
+    },
+    {
+      id: "warehouse",
+      title: lang === "ar" ? "سجل الحيازة والمخزن" : "Custody & warehouse history",
+      icon: Warehouse,
+      events: (shipment.warehouseHistory ?? []).map((event) => ({
+        id: event.id,
+        title:
+          event.type === "entered"
+            ? lang === "ar"
+              ? "دخول المخزن"
+              : "Warehouse entry"
+            : event.type === "location_changed"
+              ? lang === "ar"
+                ? "تغيير مكان داخلي"
+                : "Internal location change"
+              : event.type === "handed_to_courier"
+                ? lang === "ar"
+                  ? "تسليم للمندوب"
+                  : "Handed to courier"
+                : event.type === "return_received"
+                  ? lang === "ar"
+                    ? "استلام مرتجع"
+                    : "Return received"
+                  : lang === "ar"
+                    ? "تسليم المرتجع للراسل"
+                    : "Return handed to sender",
+        details: `${event.from[lang]} ← ${event.to[lang]} · ${event.pieces} ${
+          lang === "ar" ? "قطعة" : "piece(s)"
+        }${event.note ? ` · ${event.note}` : ""}`,
+        actor: event.performedBy[lang],
+        timestamp: event.timestamp[lang],
+      })),
+    },
+    {
+      id: "confirmation",
+      title: lang === "ar" ? "سجل التأكيد والتواصل" : "Confirmation history",
+      icon: Phone,
+      events: (shipment.confirmationHistory ?? []).map((event) => ({
+        id: event.id,
+        title:
+          event.result === "confirmed"
+            ? lang === "ar"
+              ? "تم تأكيد الطلب"
+              : "Order confirmed"
+            : event.result === "no_answer"
+              ? lang === "ar"
+                ? "لم يرد"
+                : "No answer"
+              : lang === "ar"
+                ? "تواصل لاحقًا"
+                : "Contact later",
+        details: [event.note, event.nextContact].filter(Boolean).join(" · "),
+        actor: lang === "ar" ? "خدمة العملاء" : "Customer service",
+        timestamp: event.timestamp[lang],
+      })),
+    },
+  ];
+
+  const tabs: { id: ShipmentFileTab; label: string; icon: typeof Boxes }[] = [
+    { id: "summary", label: lang === "ar" ? "الملخص" : "Summary", icon: Boxes },
+    {
+      id: "operations",
+      label: lang === "ar" ? "التشغيل" : "Operations",
+      icon: Truck,
+    },
+    { id: "finance", label: lang === "ar" ? "المال" : "Finance", icon: Banknote },
+    {
+      id: "record",
+      label: lang === "ar" ? "السجل والمستندات" : "Record & documents",
+      icon: ReceiptText,
+    },
+  ];
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  async function copyShipmentNumber() {
+    try {
+      await navigator.clipboard.writeText(shipmentId);
+    } catch {
+      // The visible confirmation remains sufficient in the prototype.
+    }
+    showToast(lang === "ar" ? "تم نسخ رقم الشحنة" : "Shipment number copied");
+  }
+
+  return (
+    <div className={`erp-shell shipment360-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="shipment360"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="workspace-name">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open menu"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><PackageCheck size={20} /></span>
+            <span>
+              <strong>{lang === "ar" ? "ملف الشحنة" : "Shipment file"}</strong>
+              <small>{lang === "ar" ? "مصدر الحقيقة الموحد" : "Unified source of truth"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              readOnly
+              value={shipment.id}
+              aria-label={lang === "ar" ? "رقم الشحنة الحالية" : "Current shipment number"}
+            />
+            <kbd>360°</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content shipment360-page">
+          <section className="shipment360-hero">
+            <div className="shipment360-hero__identity">
+              <button className="shipment360-back" type="button" onClick={onBack}>
+                {lang === "ar" ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+                {lang === "ar" ? "الشحنات" : "Shipments"}
+              </button>
+              <div className="shipment360-number">
+                <span><Barcode size={22} /></span>
+                <div>
+                  <small>{lang === "ar" ? "رقم الشحنة" : "Shipment number"}</small>
+                  <h1>{shipment.id}</h1>
+                  <b>{shipment.reference}</b>
+                </div>
+                <button
+                  className="square-button square-button--soft"
+                  type="button"
+                  onClick={copyShipmentNumber}
+                  aria-label={lang === "ar" ? "نسخ رقم الشحنة" : "Copy shipment number"}
+                >
+                  <Copy size={17} />
+                </button>
+              </div>
+              <div className="shipment360-recipient">
+                <span className="mini-avatar">{shipment.recipient[lang].slice(0, 1)}</span>
+                <div>
+                  <strong>{shipment.recipient[lang]}</strong>
+                  <small dir="ltr">{shipment.phone}</small>
+                  <small>{shipment.area[lang]}، {shipment.governorate[lang]}</small>
+                </div>
+              </div>
+            </div>
+
+            <div className="shipment360-truths">
+              <article>
+                <span className="shipment360-truths__icon shipment360-truths__icon--status">
+                  <SlidersHorizontal size={18} />
+                </span>
+                <small>{lang === "ar" ? "حالة الشحنة" : "Shipment status"}</small>
+                <strong>{shipment.status[lang]}</strong>
+                <em>{latestStatusEvent?.timestamp[lang] ?? shipment.lastEvent[lang]}</em>
+              </article>
+              <article>
+                <span className="shipment360-truths__icon shipment360-truths__icon--custody">
+                  <Warehouse size={18} />
+                </span>
+                <small>{lang === "ar" ? "الحيازة الفعلية" : "Physical custody"}</small>
+                <strong>{custodyPlace}</strong>
+                <em>{shipment.custody[lang]}</em>
+              </article>
+              <article>
+                <span className="shipment360-truths__icon shipment360-truths__icon--assignment">
+                  <Truck size={18} />
+                </span>
+                <small>{lang === "ar" ? "الإسناد الحالي" : "Current assignment"}</small>
+                <strong>{assignmentLabel}</strong>
+                <em>{shipment.assignedAt?.[lang] ?? (lang === "ar" ? "لا يوجد وقت إسناد" : "No assignment time")}</em>
+              </article>
+              <article>
+                <span className="shipment360-truths__icon shipment360-truths__icon--money">
+                  <Banknote size={18} />
+                </span>
+                <small>{lang === "ar" ? "الوضع المالي" : "Financial position"}</small>
+                <strong>{settlementState}</strong>
+                <em>
+                  {actualCollected === null
+                    ? lang === "ar"
+                      ? "لا يوجد تحصيل فعلي"
+                      : "No actual collection"
+                    : `${lang === "ar" ? "محصل" : "Collected"} ${money.format(actualCollected)}`}
+                </em>
+              </article>
+            </div>
+          </section>
+
+          <section className={`shipment360-next shipment360-next--${shipment.requiredType}`}>
+            <span className="shipment360-next__icon">
+              {shipment.requiredType === "none" ? <Check size={21} /> : <CircleAlert size={21} />}
+            </span>
+            <div>
+              <small>{lang === "ar" ? "مطلوب الآن" : "Required now"}</small>
+              <strong>{shipment.required[lang]}</strong>
+              <p>{primaryAction.hint}</p>
+            </div>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => onNavigate(primaryAction.screen)}
+            >
+              {primaryAction.label}
+              {lang === "ar" ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+            </button>
+          </section>
+
+          <nav className="shipment360-tabs" aria-label={lang === "ar" ? "تبويبات ملف الشحنة" : "Shipment file tabs"}>
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={activeTab === tab.id ? "shipment360-tab shipment360-tab--active" : "shipment360-tab"}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  <Icon size={18} />
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          {activeTab === "summary" && (
+            <div className="shipment360-layout">
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><UsersRound size={19} /></span>
+                  <div>
+                    <h2>{lang === "ar" ? "الأطراف والتوصيل" : "Parties & delivery"}</h2>
+                    <p>{lang === "ar" ? "بيانات الشحنة كما حُفظت للتشغيل." : "Shipment data saved for operations."}</p>
+                  </div>
+                </div>
+                <div className="shipment360-facts">
+                  <div><small>{lang === "ar" ? "المستلم" : "Recipient"}</small><strong>{shipment.recipient[lang]}</strong><span dir="ltr">{shipment.phone}</span></div>
+                  <div><small>{lang === "ar" ? "الراسل" : "Sender"}</small><strong>{shipment.sender[lang]}</strong><span>{shipment.reference}</span></div>
+                  <div className="shipment360-fact--wide"><small>{lang === "ar" ? "العنوان" : "Address"}</small><strong>{shipment.address[lang]}</strong><span>{shipment.area[lang]}، {shipment.governorate[lang]}</span></div>
+                  <div><small>{lang === "ar" ? "موعد التسليم" : "Delivery date"}</small><strong>{shipment.deliveryDate[lang]}</strong></div>
+                  <div><small>{lang === "ar" ? "عدد القطع" : "Pieces"}</small><strong>{shipment.pieces} {lang === "ar" ? "قطعة" : "piece(s)"}</strong></div>
+                </div>
+              </section>
+
+              <section className="shipment360-panel">
+                <div className="shipment360-panel__title">
+                  <span><Phone size={19} /></span>
+                  <div>
+                    <h2>{lang === "ar" ? "التأكيد" : "Confirmation"}</h2>
+                    <p>{lang === "ar" ? "حقيقة مستقلة عن حالة الشحنة." : "Independent from shipment status."}</p>
+                  </div>
+                </div>
+                <div className="shipment360-summary-card">
+                  <small>{lang === "ar" ? "النتيجة الحالية" : "Current result"}</small>
+                  <strong>{shipment.confirmation[lang]}</strong>
+                  <span>
+                    {(shipment.confirmationHistory ?? []).length}{" "}
+                    {lang === "ar" ? "محاولة مسجلة" : "recorded attempt(s)"}
+                  </span>
+                </div>
+              </section>
+
+              <section className="shipment360-panel">
+                <div className="shipment360-panel__title">
+                  <span><Banknote size={19} /></span>
+                  <div>
+                    <h2>{lang === "ar" ? "ملخص التحصيل" : "Collection summary"}</h2>
+                    <p>{lang === "ar" ? "متوقع وليس نقدًا فعليًا إلا بعد التسجيل." : "Expected, not actual cash until recorded."}</p>
+                  </div>
+                </div>
+                <div className="shipment360-summary-money">
+                  <span><small>{lang === "ar" ? "سعر الشحنة" : "Order value"}</small><strong>{money.format(shipment.amount)}</strong></span>
+                  <span><small>{lang === "ar" ? "شحن المستلم" : "Recipient shipping"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong></span>
+                  <span className="shipment360-summary-money__total"><small>{lang === "ar" ? "المطلوب من المستلم" : "Due from recipient"}</small><strong>{money.format(shipmentTotalToCollect(shipment))}</strong></span>
+                </div>
+              </section>
+
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><ClipboardCheck size={19} /></span>
+                  <div>
+                    <h2>{lang === "ar" ? "الملاحظات والبيانات الإضافية" : "Notes & extra data"}</h2>
+                    <p>{lang === "ar" ? "لا تغيّر الحالة أو الحيازة أو المال." : "Does not change status, custody or money."}</p>
+                  </div>
+                </div>
+                <div className="shipment360-notes">
+                  <div>
+                    <small>{lang === "ar" ? "آخر حدث ظاهر" : "Last visible event"}</small>
+                    <strong>{shipment.lastEvent[lang]}</strong>
+                  </div>
+                  <div>
+                    <small>{lang === "ar" ? "حقول مخصصة" : "Custom fields"}</small>
+                    {Object.keys(shipment.customValues ?? {}).length ? (
+                      <ul>
+                        {Object.entries(shipment.customValues ?? {}).map(([key, value]) => (
+                          <li key={key}><span>{key}</span><b>{value || "—"}</b></li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <strong>{lang === "ar" ? "لا توجد قيم مخصصة" : "No custom values"}</strong>
+                    )}
+                  </div>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeTab === "operations" && (
+            <div className="shipment360-layout shipment360-layout--operations">
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><GitBranch size={19} /></span>
+                  <div>
+                    <h2>{lang === "ar" ? "الحقائق التشغيلية" : "Operational facts"}</h2>
+                    <p>{lang === "ar" ? "كل حقيقة لها مصدرها ولا تُستنتج من اسم الحالة." : "Each fact has its own source; none is inferred from the status name."}</p>
+                  </div>
+                </div>
+                <div className="shipment360-operation-grid">
+                  <article><span><SlidersHorizontal size={18} /></span><small>{lang === "ar" ? "الحالة" : "Status"}</small><strong>{shipment.status[lang]}</strong><p>{latestStatusEvent ? `${latestStatusEvent.recordedBy[lang]} · ${latestStatusEvent.timestamp[lang]}` : shipment.lastEvent[lang]}</p></article>
+                  <article><span><Warehouse size={18} /></span><small>{lang === "ar" ? "الحيازة" : "Custody"}</small><strong>{custodyPlace}</strong><p>{shipment.custody[lang]}</p></article>
+                  <article><span><Truck size={18} /></span><small>{lang === "ar" ? "الإسناد" : "Assignment"}</small><strong>{assignmentLabel}</strong><p>{shipment.assignedAt?.[lang] ?? (lang === "ar" ? "لا توجد مهمة فعالة" : "No active task")}</p></article>
+                  <article><span><Boxes size={18} /></span><small>{lang === "ar" ? "القطع" : "Pieces"}</small><strong>{shipment.pieces} {lang === "ar" ? "قطعة أصلية" : "original piece(s)"}</strong><p>{collectedEvent?.deliveredPieces !== null && collectedEvent?.deliveredPieces !== undefined ? `${collectedEvent.deliveredPieces} ${lang === "ar" ? "مسلم" : "delivered"}` : lang === "ar" ? "لا توجد نتيجة قطع مالية" : "No financial piece outcome"}</p></article>
+                </div>
+              </section>
+
+              <section className="shipment360-panel">
+                <div className="shipment360-panel__title">
+                  <span><MapPin size={19} /></span>
+                  <div><h2>{lang === "ar" ? "المكان الفعلي" : "Physical location"}</h2><p>{lang === "ar" ? "آخر مكان معروف للطرد." : "Last known parcel location."}</p></div>
+                </div>
+                <div className="shipment360-location">
+                  <span><Warehouse size={22} /></span>
+                  <strong>{custodyPlace}</strong>
+                  <small>{shipment.custodyType === "warehouse" ? (lang === "ar" ? "داخل الشركة" : "Inside company") : (lang === "ar" ? "خارج المخزن" : "Outside warehouse")}</small>
+                </div>
+              </section>
+
+              <section className="shipment360-panel">
+                <div className="shipment360-panel__title">
+                  <span><PackageCheck size={19} /></span>
+                  <div><h2>{lang === "ar" ? "مصير القطع" : "Piece outcome"}</h2><p>{lang === "ar" ? "من آخر واقعة حالة مسجلة." : "From the latest recorded status event."}</p></div>
+                </div>
+                <div className="shipment360-piece-grid">
+                  <span><small>{lang === "ar" ? "الأصل" : "Original"}</small><strong>{shipment.pieces}</strong></span>
+                  <span><small>{lang === "ar" ? "المسلم" : "Delivered"}</small><strong>{collectedEvent?.deliveredPieces ?? "—"}</strong></span>
+                  <span><small>{lang === "ar" ? "المرتجع" : "Returned"}</small><strong>{collectedEvent?.returnedPieces ?? "—"}</strong></span>
+                </div>
+              </section>
+
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><CircleAlert size={19} /></span>
+                  <div><h2>{lang === "ar" ? "الإجراء المسموح الآن" : "Allowed action now"}</h2><p>{lang === "ar" ? "يفتح الصفحة المتخصصة ولا يكرر العملية هنا." : "Opens the specialist page; the operation is not duplicated here."}</p></div>
+                </div>
+                <div className="shipment360-action-row">
+                  <div><strong>{shipment.required[lang]}</strong><span>{primaryAction.hint}</span></div>
+                  <button className="primary-button" type="button" onClick={() => onNavigate(primaryAction.screen)}>{primaryAction.label}{lang === "ar" ? <ChevronLeft size={17} /> : <ChevronRight size={17} />}</button>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeTab === "finance" && (
+            <div className="shipment360-layout shipment360-layout--finance">
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><Calculator size={19} /></span>
+                  <div><h2>{lang === "ar" ? "المطلوب من المستلم" : "Due from recipient"}</h2><p>{lang === "ar" ? "تفكيك المبلغ المتوقع كما حُفظ مع الشحنة." : "Expected amount broken down from the saved snapshot."}</p></div>
+                </div>
+                <div className="shipment360-finance-equation">
+                  <span><small>{lang === "ar" ? "سعر الشحنة" : "Order value"}</small><strong>{money.format(shipment.amount)}</strong></span>
+                  <b>+</b>
+                  <span><small>{lang === "ar" ? "شحن المستلم" : "Recipient shipping"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong></span>
+                  {recipientAdditions > 0 && <><b>+</b><span><small>{lang === "ar" ? "إضافات" : "Additions"}</small><strong>{money.format(recipientAdditions)}</strong></span></>}
+                  <b>=</b>
+                  <span className="shipment360-finance-equation__total"><small>{lang === "ar" ? "الإجمالي" : "Total"}</small><strong>{money.format(shipmentTotalToCollect(shipment))}</strong></span>
+                </div>
+              </section>
+
+              <section className="shipment360-panel">
+                <div className="shipment360-panel__title">
+                  <span><HandCoins size={19} /></span>
+                  <div><h2>{lang === "ar" ? "حساب الراسل" : "Sender account"}</h2><p>{lang === "ar" ? "ليس هو ربح الشركة." : "This is not company profit."}</p></div>
+                </div>
+                <div className="shipment360-ledger">
+                  <span><small>{lang === "ar" ? "سعر الشحنة" : "Order value"}</small><strong>{money.format(shipment.amount)}</strong></span>
+                  <span><small>{lang === "ar" ? "فرق شحن المستلم" : "Recipient shipping difference"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment) - shipmentCompanyShippingFee(shipment))}</strong></span>
+                  <span><small>{lang === "ar" ? "خصومات الراسل" : "Sender deductions"}</small><strong>- {money.format(senderDeductions)}</strong></span>
+                  <span className="shipment360-ledger__total"><small>{lang === "ar" ? "مستحق الراسل المتوقع" : "Expected sender due"}</small><strong>{money.format(senderReceiptLine?.senderDue ?? shipmentSenderBaseDue(shipment))}</strong></span>
+                </div>
+                <div className="shipment360-source-note"><ShieldCheck size={16} /><span>{settlementState}{senderReceipt ? ` · ${senderReceipt.id}` : senderDraft ? ` · ${senderDraft.id}` : ""}</span></div>
+              </section>
+
+              <section className="shipment360-panel">
+                <div className="shipment360-panel__title">
+                  <span><Landmark size={19} /></span>
+                  <div><h2>{lang === "ar" ? "حساب الشركة" : "Company account"}</h2><p>{lang === "ar" ? "إيراد الشحن منفصل عن أموال الراسل." : "Shipping revenue is separate from sender funds."}</p></div>
+                </div>
+                <div className="shipment360-ledger">
+                  <span><small>{lang === "ar" ? "إيراد شحن الشركة" : "Company shipping revenue"}</small><strong>{money.format(shipmentCompanyShippingFee(shipment))}</strong></span>
+                  <span><small>{lang === "ar" ? "عمولة المندوب" : "Courier commission"}</small><strong>{courierCommission === null ? "—" : `- ${money.format(courierCommission)}`}</strong></span>
+                  <span><small>{lang === "ar" ? "تكاليف أخرى" : "Other costs"}</small><strong>- {money.format(companyCosts)}</strong></span>
+                  <span className="shipment360-ledger__total"><small>{lang === "ar" ? "مساهمة قبل المصروفات العامة" : "Contribution before overhead"}</small><strong>{courierCommission === null ? (lang === "ar" ? "غير مكتملة" : "Incomplete") : money.format(shipmentCompanyShippingFee(shipment) - courierCommission - companyCosts)}</strong></span>
+                </div>
+                <div className="shipment360-source-note"><Calculator size={16} /><span>{courierPlan ? `${courierPlan.name[lang]} · v${courierPlan.version}` : (lang === "ar" ? "لا توجد خطة عمولة مطابقة" : "No matching commission plan")}</span></div>
+              </section>
+
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><GitBranch size={19} /></span>
+                  <div><h2>{lang === "ar" ? "رحلة الأموال" : "Money journey"}</h2><p>{lang === "ar" ? "المتوقع لا يُعرض كأنه نقد مستلم." : "Expected amounts are never shown as received cash."}</p></div>
+                </div>
+                <div className="shipment360-money-journey">
+                  <article className={actualCollected !== null ? "is-done" : ""}><span>1</span><div><small>{lang === "ar" ? "تحصيل من المستلم" : "Recipient collection"}</small><strong>{actualCollected === null ? (lang === "ar" ? "لم يُسجل" : "Not recorded") : money.format(actualCollected)}</strong><p>{collectedEvent?.timestamp[lang] ?? "—"}</p></div></article>
+                  <i />
+                  <article className={courierSettlement ? "is-done" : ""}><span>2</span><div><small>{lang === "ar" ? "تسوية المندوب والخزنة" : "Courier & treasury settlement"}</small><strong>{courierSettlement?.id ?? (lang === "ar" ? "لم تتم" : "Not completed")}</strong><p>{courierSettlement?.timestamp[lang] ?? "—"}</p></div></article>
+                  <i />
+                  <article className={senderReceipt ? "is-done" : ""}><span>3</span><div><small>{lang === "ar" ? "حساب الراسل" : "Sender account"}</small><strong>{senderReceipt?.id ?? (senderDraft ? (lang === "ar" ? "مسودة مفتوحة" : "Open draft") : (lang === "ar" ? "لم تتم" : "Not completed"))}</strong><p>{senderReceipt?.timestamp[lang] ?? senderDraft?.updatedAt[lang] ?? "—"}</p></div></article>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {activeTab === "record" && (
+            <div className="shipment360-layout shipment360-layout--record">
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><Clock3 size={19} /></span>
+                  <div><h2>{lang === "ar" ? "السجل غير القابل للمحو" : "Append-only record"}</h2><p>{lang === "ar" ? "كل مصدر يحتفظ بأحداثه؛ التصحيح ينشئ حدثًا جديدًا." : "Each source keeps its events; corrections create new events."}</p></div>
+                </div>
+                <div className="shipment360-record-groups">
+                  {recordGroups.map((group) => {
+                    const Icon = group.icon;
+                    return (
+                      <section key={group.id}>
+                        <header><span><Icon size={17} /></span><strong>{group.title}</strong><b>{group.events.length}</b></header>
+                        {group.events.length ? (
+                          <div className="shipment360-events">
+                            {group.events.map((event) => (
+                              <article key={event.id}>
+                                <i />
+                                <div><strong>{event.title}</strong><p>{event.details || (lang === "ar" ? "لا توجد تفاصيل إضافية" : "No extra details")}</p><small>{event.actor}</small></div>
+                                <time>{event.timestamp}</time>
+                              </article>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="shipment360-no-events">{lang === "ar" ? "لا توجد أحداث مسجلة من هذا المصدر." : "No events recorded from this source."}</p>
+                        )}
+                      </section>
+                    );
+                  })}
+                  <section>
+                    <header><span><PackagePlus size={17} /></span><strong>{lang === "ar" ? "إنشاء الشحنة" : "Shipment creation"}</strong><b>1</b></header>
+                    <div className="shipment360-events"><article><i /><div><strong>{lang === "ar" ? "تم تسجيل الشحنة" : "Shipment registered"}</strong><p>{lang === "ar" ? `المرجع ${shipment.reference}` : `Reference ${shipment.reference}`}</p><small>{lang === "ar" ? "موظف التسجيل" : "Registration user"}</small></div><time>{lang === "ar" ? "بداية السجل" : "Record start"}</time></article></div>
+                  </section>
+                </div>
+              </section>
+
+              <section className="shipment360-panel shipment360-panel--wide">
+                <div className="shipment360-panel__title">
+                  <span><ReceiptText size={19} /></span>
+                  <div><h2>{lang === "ar" ? "المستندات المرتبطة" : "Linked documents"}</h2><p>{lang === "ar" ? "تعرض مستندات حقيقية أو قابلة للتوليد فقط." : "Only real or generatable documents are shown."}</p></div>
+                </div>
+                <div className="shipment360-documents">
+                  <article><span><Barcode size={21} /></span><div><strong>{lang === "ar" ? "باركود الشحنة" : "Shipment barcode"}</strong><small>{shipment.id}</small></div><b className="document-state document-state--ready">{lang === "ar" ? "قابل للتوليد" : "Generatable"}</b><button type="button" onClick={() => showToast(lang === "ar" ? "ستفتح الطباعة المتخصصة في النسخة التشغيلية" : "Specialized printing will open in production")}>{lang === "ar" ? "معاينة" : "Preview"}</button></article>
+                  <article><span><Printer size={21} /></span><div><strong>{lang === "ar" ? "كشف شحنات المندوب" : "Courier shipment sheet"}</strong><small>{shipment.courier?.[lang] ?? (lang === "ar" ? "لا يوجد إسناد" : "No assignment")}</small></div><b className={shipment.courier ? "document-state document-state--ready" : "document-state"}>{shipment.courier ? (lang === "ar" ? "متاح من صفحة الطباعة" : "Available in print page") : (lang === "ar" ? "غير متاح" : "Unavailable")}</b><button type="button" disabled={!shipment.courier} onClick={() => onNavigate("courierPrint")}>{lang === "ar" ? "فتح" : "Open"}</button></article>
+                  <article><span><ReceiptText size={21} /></span><div><strong>{lang === "ar" ? "إيصال تسوية المندوب" : "Courier settlement receipt"}</strong><small>{courierSettlement?.id ?? "—"}</small></div><b className={courierSettlement ? "document-state document-state--ready" : "document-state"}>{courierSettlement ? (lang === "ar" ? "مثبت" : "Posted") : (lang === "ar" ? "لم ينشأ" : "Not created")}</b><button type="button" disabled={!courierSettlement} onClick={() => onNavigate("courierAccount")}>{lang === "ar" ? "فتح المصدر" : "Open source"}</button></article>
+                  <article><span><HandCoins size={21} /></span><div><strong>{lang === "ar" ? "إيصال حساب الراسل" : "Sender account receipt"}</strong><small>{senderReceipt?.id ?? "—"}</small></div><b className={senderReceipt ? "document-state document-state--ready" : "document-state"}>{senderReceipt ? (lang === "ar" ? "مثبت" : "Posted") : (lang === "ar" ? "لم ينشأ" : "Not created")}</b><button type="button" disabled={!senderReceipt} onClick={() => onNavigate("senderAccountHistory")}>{lang === "ar" ? "فتح المصدر" : "Open source"}</button></article>
+                </div>
+              </section>
+            </div>
+          )}
+        </main>
+      </div>
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
+    </div>
+  );
+}
+
 function ShipmentsScreen({
   lang,
   theme,
@@ -26542,6 +27335,7 @@ function ShipmentsScreen({
   onLang,
   onTheme,
   onNavigate,
+  onOpenShipment,
   onLogout,
 }: {
   lang: Lang;
@@ -26550,6 +27344,7 @@ function ShipmentsScreen({
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onOpenShipment: (shipmentId: string) => void;
   onLogout: () => void;
 }) {
   const t = copy[lang];
@@ -27096,6 +27891,7 @@ function ShipmentsScreen({
           lang={lang}
           onClose={() => setSelectedShipment(null)}
           onToast={showToast}
+          onOpenFull={onOpenShipment}
         />
       )}
       {filtersOpen && (
@@ -27162,6 +27958,7 @@ export default function Home() {
     useState<TrustPolicy>(trustPolicyDefault);
   const [trustConversionTarget, setTrustConversionTarget] =
     useState<TrustRecord | null>(null);
+  const [shipmentFileTargetId, setShipmentFileTargetId] = useState("");
   const [activeSenderDraftId, setActiveSenderDraftId] = useState("");
   const [senderProfileTarget, setSenderProfileTarget] = useState<{
     id: string;
@@ -27683,6 +28480,32 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onNavigate={setScreen}
+          onOpenShipment={(shipmentId) => {
+            setShipmentFileTargetId(shipmentId);
+            setScreen("shipment360");
+          }}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "shipment360" ? (
+        <Shipment360Screen
+          lang={lang}
+          theme={theme}
+          shipment={
+            sharedShipments.find(
+              (shipment) => shipment.id === shipmentFileTargetId,
+            ) ?? null
+          }
+          courierPlans={sharedCourierPlans}
+          governorates={sharedGovernorates}
+          courierSettlements={sharedCourierSettlements}
+          senderDrafts={sharedSenderDrafts}
+          senderReceipts={sharedSenderReceipts}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onBack={() => setScreen("shipments")}
           onLogout={() => setScreen("login")}
         />
       ) : screen === "senders" ? (
