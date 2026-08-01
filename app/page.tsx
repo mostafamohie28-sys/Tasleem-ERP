@@ -90,7 +90,9 @@ type Screen =
   | "senders"
   | "recipients"
   | "couriers"
-  | "treasury";
+  | "treasury"
+  | "alerts"
+  | "companyPolicy";
 type Scenario =
   | "ready"
   | "loading"
@@ -318,7 +320,14 @@ type Shipment = {
   recipientShippingSource?: "company" | "custom";
   recipientShippingAreaId?: string;
   sourceTrustId?: string;
+  /** Collection instruction saved by the registration employee. */
   shippingPayer: "recipient" | "sender";
+  /** Final accounting classification confirmed during courier settlement. */
+  finalShippingPayer?: "recipient" | "sender";
+  finalShippingPayerSource?: "registered" | "accountant_correction";
+  finalShippingPayerReason?: string;
+  finalShippingPayerBy?: Localized;
+  finalShippingPayerAt?: Localized;
   customValues?: Record<string, string>;
   customFinancialSnapshot?: {
     recipientAdditions: number;
@@ -334,11 +343,27 @@ function shipmentCompanyShippingFee(shipment: Shipment) {
   return shipment.shippingFee;
 }
 
-function shipmentRecipientShippingCharge(shipment: Shipment) {
+function shipmentRecipientShippingRate(shipment: Shipment) {
   return (
     shipment.recipientShippingCharge ??
-    (shipment.shippingPayer === "recipient" ? shipment.shippingFee : 0)
+    shipment.shippingFee
   );
+}
+
+function shipmentRecipientShippingCharge(shipment: Shipment) {
+  return shipment.shippingPayer === "recipient"
+    ? shipmentRecipientShippingRate(shipment)
+    : 0;
+}
+
+function shipmentFinalShippingPayer(shipment: Shipment) {
+  return shipment.finalShippingPayer ?? shipment.shippingPayer;
+}
+
+function shipmentAccountingRecipientShippingCharge(shipment: Shipment) {
+  return shipmentFinalShippingPayer(shipment) === "recipient"
+    ? shipmentRecipientShippingRate(shipment)
+    : 0;
 }
 
 function shipmentTotalToCollect(shipment: Shipment) {
@@ -352,7 +377,7 @@ function shipmentTotalToCollect(shipment: Shipment) {
 function shipmentSenderBaseDue(shipment: Shipment) {
   return (
     shipment.amount +
-    shipmentRecipientShippingCharge(shipment) -
+    shipmentAccountingRecipientShippingCharge(shipment) -
     shipmentCompanyShippingFee(shipment) -
     (shipment.customFinancialSnapshot?.senderDeductions ?? 0)
   );
@@ -388,6 +413,12 @@ type CourierSettlement = {
   actualCash: number;
   difference: number;
   adjustmentReason: string;
+  shippingPayerDecisions?: {
+    shipmentId: string;
+    registeredPayer: "recipient" | "sender";
+    finalPayer: "recipient" | "sender";
+    reason: string;
+  }[];
   timestamp: Localized;
 };
 
@@ -4199,6 +4230,11 @@ function Sidebar({
           screen: "treasury" as const,
         },
         {
+          label: lang === "ar" ? "التنبيهات والاختلافات" : "Alerts & discrepancies",
+          icon: Bell,
+          screen: "alerts" as const,
+        },
+        {
           label: t.warehouse,
           icon: Warehouse,
           screen: "warehouse" as const,
@@ -4452,6 +4488,13 @@ function ShipmentDrawer({
     currency: "EGP",
     maximumFractionDigits: 0,
   });
+  const collectionEvent = [...(shipment.statusHistory ?? [])]
+    .reverse()
+    .find((event) => event.collectedAmount !== null);
+  const accountingFinal = Boolean(shipment.finalShippingPayer);
+  const payerChanged =
+    accountingFinal &&
+    shipment.finalShippingPayer !== shipment.shippingPayer;
 
   async function copyShipment() {
     try {
@@ -4480,7 +4523,10 @@ function ShipmentDrawer({
                 <Copy size={15} />
               </button>
             </div>
-            <span className="reference">{shipment.reference}</span>
+            <span className="reference">
+              {shipment.reference ||
+                (lang === "ar" ? "مرجع الراسل غير مسجل" : "Sender reference not recorded")}
+            </span>
           </div>
           <button
             className="square-button"
@@ -4521,10 +4567,61 @@ function ShipmentDrawer({
           </section>
 
           <section className="detail-section">
-            <h3>{t.financial}</h3>
+            <div className="detail-section__heading">
+              <h3>
+                {accountingFinal
+                  ? lang === "ar"
+                    ? "الحساب المالي المعتمد"
+                    : "Approved financial treatment"
+                  : lang === "ar"
+                    ? "التوقع المالي عند التسجيل"
+                    : "Financial expectation at registration"}
+              </h3>
+              <span className={accountingFinal ? "policy-scope-chip policy-scope-chip--custom" : "policy-scope-chip"}>
+                {accountingFinal
+                  ? lang === "ar"
+                    ? "معتمد من الحسابات"
+                    : "Accounting approved"
+                  : lang === "ar"
+                    ? "غير نهائي"
+                    : "Not final"}
+              </span>
+            </div>
+            {payerChanged && (
+              <div className="financial-decision-alert">
+                <CircleAlert size={17} />
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "غيّر محاسب التشغيل متحمّل الشحن"
+                      : "Operations accounting changed the shipping payer"}
+                  </strong>
+                  <small>
+                    {shipment.shippingPayer === "recipient"
+                      ? lang === "ar"
+                        ? "المسجل: المستلم"
+                        : "Registered: recipient"
+                      : lang === "ar"
+                        ? "المسجل: الراسل"
+                        : "Registered: sender"}
+                    {" ← "}
+                    {shipment.finalShippingPayer === "recipient"
+                      ? lang === "ar"
+                        ? "المعتمد: المستلم"
+                        : "Approved: recipient"
+                      : lang === "ar"
+                        ? "المعتمد: الراسل"
+                        : "Approved: sender"}
+                    {shipment.finalShippingPayerReason
+                      ? ` · ${shipment.finalShippingPayerReason}`
+                      : ""}
+                  </small>
+                </span>
+              </div>
+            )}
             <div className="money-grid">
               <div>
-                <small>{t.codAllowed}</small>
+                <small>{lang === "ar" ? "قيمة الطلب" : "Order value"}</small>
                 <strong>{money.format(shipment.amount)}</strong>
               </div>
               <div>
@@ -4532,25 +4629,65 @@ function ShipmentDrawer({
                 <strong>{money.format(shipmentCompanyShippingFee(shipment))}</strong>
               </div>
               <div>
-                <small>{lang === "ar" ? "شحن دفعه المستلم" : "Shipping paid by recipient"}</small>
-                <strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong>
+                <small>
+                  {accountingFinal
+                    ? lang === "ar"
+                      ? "شحن المستلم المعتمد"
+                      : "Approved recipient shipping"
+                    : lang === "ar"
+                      ? "شحن مطلوب من المستلم"
+                      : "Shipping requested from recipient"}
+                </small>
+                <strong>
+                  {money.format(
+                    accountingFinal
+                      ? shipmentAccountingRecipientShippingCharge(shipment)
+                      : shipmentRecipientShippingCharge(shipment),
+                  )}
+                </strong>
               </div>
               <div>
-                <small>{t.totalDue}</small>
+                <small>
+                  {lang === "ar"
+                    ? "المطلوب تحصيله عند التسجيل"
+                    : "Expected collection at registration"}
+                </small>
                 <strong>
                   {money.format(shipmentTotalToCollect(shipment))}
                 </strong>
               </div>
+              {collectionEvent && (
+                <div>
+                  <small>{lang === "ar" ? "المحصل فعليًا" : "Actually collected"}</small>
+                  <strong>{money.format(collectionEvent.collectedAmount ?? 0)}</strong>
+                </div>
+              )}
               <div>
-                <small>{t.senderDue}</small>
+                <small>
+                  {accountingFinal
+                    ? lang === "ar"
+                      ? "مستحق الراسل المعتمد"
+                      : "Approved sender due"
+                    : lang === "ar"
+                      ? "مستحق الراسل المتوقع"
+                      : "Expected sender due"}
+                </small>
                 <strong>
                   {money.format(shipmentSenderBaseDue(shipment))}
                 </strong>
               </div>
               <div>
-                <small>{t.shippingPayer}</small>
+                <small>
+                  {accountingFinal
+                    ? lang === "ar"
+                      ? "متحمل الشحن المعتمد"
+                      : "Approved shipping payer"
+                    : lang === "ar"
+                      ? "تعليمات التحصيل المسجلة"
+                      : "Registered collection instruction"}
+                </small>
                 <strong>
-                  {shipment.shippingPayer === "recipient"
+                  {shipmentFinalShippingPayer(shipment) === "recipient"
                     ? t.payerRecipient
                     : t.payerSender}
                 </strong>
@@ -8867,6 +9004,16 @@ function SendersScreen({
             </div>
             <div className="page-heading-actions">
               <button
+                className="primary-button"
+                type="button"
+                onClick={() => onNavigate("companyPolicy")}
+              >
+                <Settings2 size={17} />
+                {lang === "ar"
+                  ? "تعديل سياسة الشركة"
+                  : "Edit company policy"}
+              </button>
+              <button
                 className="secondary-button"
                 type="button"
                 onClick={() => onNavigate("shipmentPolicies")}
@@ -9883,20 +10030,22 @@ function PriceListEditor({
                   </span>
                 </label>
                 <label className="field">
-                  <span>{p.code}</span>
+                  <span>
+                    {lang === "ar" ? "معرّف النظام (تلقائي)" : "System ID (automatic)"}
+                  </span>
                   <span className="field__control">
                     <input
                       dir="ltr"
                       value={draft.code}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          code: event.target.value.toUpperCase().replace(/\s+/g, "-"),
-                        }))
-                      }
-                      required
+                      readOnly
+                      aria-readonly="true"
                     />
                   </span>
+                  <small>
+                    {lang === "ar"
+                      ? "ينشئه النظام للحفظ والبحث ولا يحتاج منك إدخاله."
+                      : "Generated by the system for storage and search."}
+                  </small>
                 </label>
                 <label className="select-field">
                   <span>{p.publishState}</span>
@@ -10143,7 +10292,7 @@ function PriceListsScreen({
     setEditing({
       id: `price-${Date.now()}`,
       name: { ar: "", en: "" },
-      code: "",
+      code: `PL-${String(priceLists.length + 1).padStart(4, "0")}`,
       state: "draft",
       isDefault: false,
       senders: [],
@@ -12215,7 +12364,7 @@ function LegacyShipmentPoliciesScreen({
     scopedPolicy?.settings ?? companySettingsDraft,
   );
   const inheritedSenderScope = Boolean(scopedSender && !scopedPolicy);
-  const scopeControlsDisabled = true;
+  const scopeControlsDisabled = Boolean(scopedSender);
   const visiblePolicySenders = senders.filter((sender) => {
     const normalized = scopeSearch.trim().toLowerCase();
     return (
@@ -12464,18 +12613,64 @@ function LegacyShipmentPoliciesScreen({
           <div className="welcome-row page-heading-row">
             <div>
               <div className="page-title-line">
-                <h1>{s.title}</h1>
+                <h1>
+                  {scopedSender
+                    ? lang === "ar"
+                      ? "مراجعة سياسة الراسل"
+                      : "Review sender policy"
+                    : lang === "ar"
+                      ? "سياسة الشركة الافتراضية"
+                      : "Company default policy"}
+                </h1>
                 <span className="demo-chip">{t.demoData}</span>
               </div>
-              <p>{s.subtitle}</p>
+              <p>
+                {scopedSender
+                  ? lang === "ar"
+                    ? "اعرض السياسة الفعلية هنا، وعدّل تخصيصها من ملف الراسل."
+                    : "Review the effective policy here; edit overrides from the sender profile."
+                  : lang === "ar"
+                    ? "حدّد الافتراضات العامة التي يرثها كل راسل ما لم يخصص بندًا داخل ملفه."
+                    : "Define the company defaults every sender inherits unless overridden in their profile."}
+              </p>
             </div>
             <div className="shipment-policy-actions">
-              <span className="policy-review-badge">
-                <Eye size={16} />
-                {lang === "ar" ? "مراجعة فقط" : "Review only"}
-              </span>
+              {scopedSender ? (
+                <span className="policy-review-badge">
+                  <Eye size={16} />
+                  {lang === "ar"
+                    ? "سياسة الراسل للقراءة فقط"
+                    : "Sender policy is read only"}
+                </span>
+              ) : (
+                <>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={openNew}
+                  >
+                    <Plus size={17} />
+                    {s.addField}
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={!dirty}
+                    onClick={savePolicies}
+                  >
+                    <Save size={17} />
+                    {lang === "ar"
+                      ? dirty
+                        ? "حفظ سياسة الشركة"
+                        : "السياسة محفوظة"
+                      : dirty
+                        ? "Save company policy"
+                        : "Policy saved"}
+                  </button>
+                </>
+              )}
               <button
-                className="primary-button"
+                className="secondary-button"
                 type="button"
                 onClick={() => onNavigate("senders")}
               >
@@ -12712,6 +12907,59 @@ function LegacyShipmentPoliciesScreen({
               </span>
             </div>
             <div className="shipment-workflow-grid">
+              {(
+                [
+                  {
+                    key: "manualEntryEnabled",
+                    ar: "التسجيل اليدوي",
+                    en: "Manual entry",
+                    hintAr: "إضافة شحنة واحدة أو مجموعة يدوية.",
+                    hintEn: "Single-shipment and manual batch intake.",
+                    icon: PackagePlus,
+                  },
+                  {
+                    key: "batchEntryEnabled",
+                    ar: "المجموعة اليدوية",
+                    en: "Manual batch",
+                    hintAr: "تجهيز عدة شحنات لنفس الراسل ثم حفظها معًا.",
+                    hintEn: "Prepare multiple shipments for one sender and save together.",
+                    icon: Boxes,
+                  },
+                  {
+                    key: "excelImportEnabled",
+                    ar: "استيراد Excel",
+                    en: "Excel import",
+                    hintAr: "الملف كله ينجح أو يرفض دون حفظ جزئي.",
+                    hintEn: "The whole file succeeds or fails without partial save.",
+                    icon: FileSpreadsheet,
+                  },
+                ] as const
+              ).map((channel) => {
+                const Icon = channel.icon;
+                const enabled = draftSettings[channel.key];
+                return (
+                  <button
+                    className="workflow-toggle-card"
+                    type="button"
+                    key={channel.key}
+                    disabled={scopeControlsDisabled}
+                    role="switch"
+                    aria-checked={enabled}
+                    onClick={() => updateSetting(channel.key, !enabled)}
+                  >
+                    <span className="workflow-policy-icon workflow-policy-icon--blue">
+                      <Icon size={17} />
+                    </span>
+                    <span>
+                      <strong>{lang === "ar" ? channel.ar : channel.en}</strong>
+                      <small>{lang === "ar" ? channel.hintAr : channel.hintEn}</small>
+                    </span>
+                    <i className={enabled ? "switch switch--on" : "switch"}>
+                      <b />
+                    </i>
+                  </button>
+                );
+              })}
               <article>
                 <span className="workflow-policy-icon workflow-policy-icon--blue">
                   <Phone size={17} />
@@ -12836,64 +13084,20 @@ function LegacyShipmentPoliciesScreen({
                 <div>
                   <strong>
                     {lang === "ar"
-                      ? "مصاريف الشحن التي يدفعها المستلم"
-                      : "Shipping fee paid by recipient"}
+                      ? "مصدر سعر شحن المستلم"
+                      : "Recipient shipping price source"}
                   </strong>
                   <small>
                     {lang === "ar"
-                      ? "مستقل عن سعر شحن الشركة الموجود في قائمة الأسعار."
-                      : "Independent from the company fee in the price list."}
+                      ? "يبدأ من سعر الشركة لكل منطقة، وأي تخصيص يتم داخل ملف الراسل للمنطقة نفسها."
+                      : "Starts from the company fee per area; any override is set in the sender profile for that area."}
                   </small>
                 </div>
-                <label className="select-wrap">
-                  <select
-                    value={draftSettings.shippingChargeMode}
-                    disabled={scopeControlsDisabled}
-                    onChange={(event) =>
-                      updateSetting(
-                        "shippingChargeMode",
-                        event.target
-                          .value as ShipmentDataSettings["shippingChargeMode"],
-                      )
-                    }
-                  >
-                    <option value="company_price">
-                      {lang === "ar"
-                        ? "يساوي سعر شحن الشركة"
-                        : "Same as company fee"}
-                    </option>
-                    <option value="company_plus">
-                      {lang === "ar"
-                        ? "سعر الشركة + زيادة ثابتة"
-                        : "Company fee + fixed markup"}
-                    </option>
-                    <option value="fixed">
-                      {lang === "ar" ? "مبلغ ثابت" : "Fixed amount"}
-                    </option>
-                    <option value="manual">
-                      {lang === "ar" ? "يدوي لكل شحنة" : "Manual per shipment"}
-                    </option>
-                  </select>
-                  <ChevronDown size={15} />
-                </label>
-                {(draftSettings.shippingChargeMode === "company_plus" ||
-                  draftSettings.shippingChargeMode === "fixed") && (
-                  <label className="policy-money-input">
-                    <input
-                      type="number"
-                      min="0"
-                      disabled={scopeControlsDisabled}
-                      value={draftSettings.shippingChargeValue}
-                      onChange={(event) =>
-                        updateSetting(
-                          "shippingChargeValue",
-                          Math.max(0, Number(event.target.value) || 0),
-                        )
-                      }
-                    />
-                    <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
-                  </label>
-                )}
+                <span className="policy-scope-chip">
+                  {lang === "ar"
+                    ? "قائمة الأسعار ← ملف الراسل ← بصمة الشحنة"
+                    : "Price list → sender profile → shipment snapshot"}
+                </span>
               </article>
               <button
                 className="workflow-toggle-card"
@@ -12952,6 +13156,269 @@ function LegacyShipmentPoliciesScreen({
                   <small>{s.excelHint}</small>
                 </div>
                 <em>{s.excelMode}</em>
+              </article>
+            </div>
+          </section>
+
+          <section className="shipment-workflow-panel">
+            <div className="shipment-workflow-panel__heading">
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? "السياسات التشغيلية المتقدمة"
+                    : "Advanced operational policies"}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "هذه هي افتراضات الشركة. تخصيص الراسل يتم من ملفه فقط."
+                    : "These are company defaults. Sender overrides are edited only from the sender profile."}
+                </small>
+              </span>
+            </div>
+            <div className="shipment-workflow-grid">
+              <article>
+                <div>
+                  <strong>
+                    {lang === "ar"
+                      ? "عدد محاولات التأكيد"
+                      : "Confirmation attempts"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "عدد المحاولات المقترح قبل المتابعة."
+                      : "Suggested attempts before follow-up."}
+                  </small>
+                </div>
+                <label className="policy-money-input">
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.confirmationAttempts}
+                    onChange={(event) =>
+                      updateSetting(
+                        "confirmationAttempts",
+                        Math.max(1, Math.min(10, Number(event.target.value) || 1)),
+                      )
+                    }
+                  />
+                </label>
+              </article>
+              <button
+                className="workflow-toggle-card"
+                type="button"
+                disabled={scopeControlsDisabled}
+                role="switch"
+                aria-checked={draftSettings.allowAssignmentWithoutConfirmation}
+                onClick={() =>
+                  updateSetting(
+                    "allowAssignmentWithoutConfirmation",
+                    !draftSettings.allowAssignmentWithoutConfirmation,
+                  )
+                }
+              >
+                <span className="workflow-policy-icon workflow-policy-icon--orange">
+                  <Truck size={17} />
+                </span>
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "السماح بالإسناد دون تأكيد"
+                      : "Allow assignment without confirmation"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "يعمل مع سياسة التأكيد ولا يغير حالة الشحنة."
+                      : "Works with confirmation policy and does not change shipment status."}
+                  </small>
+                </span>
+                <i className={draftSettings.allowAssignmentWithoutConfirmation ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+              <article>
+                <div>
+                  <strong>{lang === "ar" ? "كشف التكرار" : "Duplicate detection"}</strong>
+                  <small>{lang === "ar" ? "حكم مرجع الراسل المكرر." : "How duplicate sender references are handled."}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.duplicateCheckMode}
+                    onChange={(event) =>
+                      updateSetting(
+                        "duplicateCheckMode",
+                        event.target.value as ShipmentDataSettings["duplicateCheckMode"],
+                      )
+                    }
+                  >
+                    <option value="block">{lang === "ar" ? "منع" : "Block"}</option>
+                    <option value="warn">{lang === "ar" ? "تحذير" : "Warn"}</option>
+                    <option value="off">{lang === "ar" ? "غير مستخدم" : "Off"}</option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <article>
+                <div>
+                  <strong>{lang === "ar" ? "مرجع الراسل" : "Sender reference"}</strong>
+                  <small>{lang === "ar" ? "لا يولد النظام مرجعًا وهميًا عند غيابه." : "The system never invents a missing business reference."}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.senderReferenceMode}
+                    onChange={(event) =>
+                      updateSetting(
+                        "senderReferenceMode",
+                        event.target.value as ShipmentDataSettings["senderReferenceMode"],
+                      )
+                    }
+                  >
+                    <option value="required_unique">{lang === "ar" ? "مطلوب وفريد" : "Required and unique"}</option>
+                    <option value="optional_unique">{lang === "ar" ? "اختياري وفريد إن وُجد" : "Optional, unique if present"}</option>
+                    <option value="optional">{lang === "ar" ? "اختياري" : "Optional"}</option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <article>
+                <div>
+                  <strong>{lang === "ar" ? "معاينة الطرد" : "Package inspection"}</strong>
+                  <small>{lang === "ar" ? "سياسة السماح بفتح الطرد." : "Controls package inspection."}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.packageInspection}
+                    onChange={(event) =>
+                      updateSetting(
+                        "packageInspection",
+                        event.target.value as ShipmentDataSettings["packageInspection"],
+                      )
+                    }
+                  >
+                    <option value="not_allowed">{lang === "ar" ? "غير مسموح" : "Not allowed"}</option>
+                    <option value="allowed">{lang === "ar" ? "مسموح" : "Allowed"}</option>
+                    <option value="sender_approval">{lang === "ar" ? "بموافقة الراسل" : "Sender approval"}</option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <button
+                className="workflow-toggle-card"
+                type="button"
+                disabled={scopeControlsDisabled}
+                role="switch"
+                aria-checked={draftSettings.partialDeliveryEnabled}
+                onClick={() =>
+                  updateSetting(
+                    "partialDeliveryEnabled",
+                    !draftSettings.partialDeliveryEnabled,
+                  )
+                }
+              >
+                <span className="workflow-policy-icon workflow-policy-icon--green">
+                  <PackageCheck size={17} />
+                </span>
+                <span>
+                  <strong>{lang === "ar" ? "السماح بالتسليم الجزئي" : "Allow partial delivery"}</strong>
+                  <small>{lang === "ar" ? "لا ينشئ حالة؛ الحالة ومعناها من مركز الحالات." : "Does not create a status; statuses stay policy-driven."}</small>
+                </span>
+                <i className={draftSettings.partialDeliveryEnabled ? "switch switch--on" : "switch"}>
+                  <b />
+                </i>
+              </button>
+              <article>
+                <div>
+                  <strong>{lang === "ar" ? "إثبات التسليم" : "Delivery proof"}</strong>
+                  <small>{lang === "ar" ? "الإثبات الافتراضي المطلوب." : "Default required proof."}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.deliveryProof}
+                    onChange={(event) =>
+                      updateSetting(
+                        "deliveryProof",
+                        event.target.value as ShipmentDataSettings["deliveryProof"],
+                      )
+                    }
+                  >
+                    <option value="recipient_name">{lang === "ar" ? "اسم المستلم" : "Recipient name"}</option>
+                    <option value="signature">{lang === "ar" ? "توقيع" : "Signature"}</option>
+                    <option value="photo">{lang === "ar" ? "صورة" : "Photo"}</option>
+                    <option value="otp">{lang === "ar" ? "رمز تحقق" : "OTP"}</option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <article>
+                <div>
+                  <strong>{lang === "ar" ? "عرض السعر للمستلم" : "Recipient price display"}</strong>
+                  <small>{lang === "ar" ? "شكل عرض قيمة الطلب والشحن." : "How order value and shipping are displayed."}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.recipientPriceDisplay}
+                    onChange={(event) =>
+                      updateSetting(
+                        "recipientPriceDisplay",
+                        event.target.value as ShipmentDataSettings["recipientPriceDisplay"],
+                      )
+                    }
+                  >
+                    <option value="total_only">{lang === "ar" ? "الإجمالي فقط" : "Total only"}</option>
+                    <option value="separate_shipping">{lang === "ar" ? "القيمة والشحن منفصلان" : "Order and shipping separately"}</option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <article>
+                <div>
+                  <strong>{lang === "ar" ? "تفاصيل البوليصة" : "Label details"}</strong>
+                  <small>{lang === "ar" ? "مستوى البيانات الظاهرة عند الطباعة." : "Visible data level on printed labels."}</small>
+                </div>
+                <label className="select-wrap">
+                  <select
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.labelDetailMode}
+                    onChange={(event) =>
+                      updateSetting(
+                        "labelDetailMode",
+                        event.target.value as ShipmentDataSettings["labelDetailMode"],
+                      )
+                    }
+                  >
+                    <option value="full">{lang === "ar" ? "كاملة" : "Full"}</option>
+                    <option value="masked">{lang === "ar" ? "محجوبة جزئيًا" : "Masked"}</option>
+                    <option value="minimal">{lang === "ar" ? "مختصرة" : "Minimal"}</option>
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+              </article>
+              <article>
+                <div>
+                  <strong>{lang === "ar" ? "حد تنبيه التحصيل" : "Collection warning limit"}</strong>
+                  <small>{lang === "ar" ? "يظهر تنبيه ولا يمنع التسجيل." : "Raises a warning without blocking entry."}</small>
+                </div>
+                <label className="policy-money-input">
+                  <input
+                    type="number"
+                    min="0"
+                    disabled={scopeControlsDisabled}
+                    value={draftSettings.collectionWarningLimit}
+                    onChange={(event) =>
+                      updateSetting(
+                        "collectionWarningLimit",
+                        Math.max(0, Number(event.target.value) || 0),
+                      )
+                    }
+                  />
+                  <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                </label>
               </article>
             </div>
           </section>
@@ -13436,7 +13903,7 @@ function SenderPolicy360Drawer({
                     <strong>{recipientTotal.toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} {lang === "ar" ? "ج.م" : "EGP"}</strong>
                   </article>
                   <article>
-                    <small>{lang === "ar" ? "الشحن المحصل" : "Collected shipping"}</small>
+                    <small>{lang === "ar" ? "شحن مطلوب من المستلم" : "Shipping requested from recipient"}</small>
                     <strong>{recipientCharge.toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} {lang === "ar" ? "ج.م" : "EGP"}</strong>
                   </article>
                   <article className={recipientCharge - companyFee >= 0 ? "success" : "danger"}>
@@ -17615,6 +18082,7 @@ type ShipmentEntryDraft = {
 type PreparedShipment = ShipmentEntryDraft & {
   localId: string;
   shippingFee: number;
+  recipientShippingRate: number;
   recipientShippingCharge: number;
   recipientShippingSource: "company" | "custom";
   customFinancialSnapshot: {
@@ -22722,6 +23190,236 @@ function SenderAccountScreen({
   );
 }
 
+function AlertsScreen({
+  lang,
+  theme,
+  shipmentRecords,
+  settlements,
+  onLang,
+  onTheme,
+  onNavigate,
+  onOpenShipment,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  settlements: CourierSettlement[];
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onOpenShipment: (shipmentId: string) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [filter, setFilter] = useState<"all" | "payer" | "cash">("all");
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const payerAlerts = shipmentRecords.filter(
+    (shipment) =>
+      shipment.finalShippingPayer &&
+      shipment.finalShippingPayer !== shipment.shippingPayer,
+  );
+  const cashAlerts = settlements.filter(
+    (settlement) => settlement.difference !== 0,
+  );
+  const visiblePayerAlerts = filter === "cash" ? [] : payerAlerts;
+  const visibleCashAlerts = filter === "payer" ? [] : cashAlerts;
+  const totalAlerts = payerAlerts.length + cashAlerts.length;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="alerts"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><Bell size={20} /></span>
+            <span>
+              <strong>{lang === "ar" ? "التنبيهات والاختلافات" : "Alerts & discrepancies"}</strong>
+              <small>{lang === "ar" ? "رقابة تشغيلية ومالية" : "Operational and financial controls"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={lang === "ar" ? "ابحث أو انتقل بسرعة..." : "Search or jump quickly..."} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} />
+              {totalAlerts > 0 && <i />}
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+        <main className="page-content alerts-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "مركز التنبيهات" : "Alerts center"}</h1>
+                <span className="demo-chip">
+                  {totalAlerts} {lang === "ar" ? "تنبيه مفتوح" : "open alerts"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "التنبيه يكشف اختلافًا يحتاج مراجعة، ولا يغيّر شحنة أو مبلغًا من نفسه."
+                  : "An alert exposes a discrepancy for review; it never changes a shipment or amount by itself."}
+              </p>
+            </div>
+          </div>
+
+          <section className="alerts-summary">
+            <button
+              type="button"
+              className={filter === "all" ? "is-active" : ""}
+              onClick={() => setFilter("all")}
+            >
+              <span><Bell size={18} /></span>
+              <small>{lang === "ar" ? "كل التنبيهات" : "All alerts"}</small>
+              <strong>{totalAlerts}</strong>
+            </button>
+            <button
+              type="button"
+              className={filter === "payer" ? "is-active" : ""}
+              onClick={() => setFilter("payer")}
+            >
+              <span><HandCoins size={18} /></span>
+              <small>{lang === "ar" ? "تغيير متحمل الشحن" : "Shipping-payer changes"}</small>
+              <strong>{payerAlerts.length}</strong>
+            </button>
+            <button
+              type="button"
+              className={filter === "cash" ? "is-active" : ""}
+              onClick={() => setFilter("cash")}
+            >
+              <span><Landmark size={18} /></span>
+              <small>{lang === "ar" ? "فروق استلام النقد" : "Cash handover differences"}</small>
+              <strong>{cashAlerts.length}</strong>
+            </button>
+          </section>
+
+          <section className="alerts-list">
+            {visiblePayerAlerts.map((shipment) => (
+              <article className="alert-record alert-record--warning" key={`payer-${shipment.id}`}>
+                <span className="alert-record__icon"><CircleAlert size={20} /></span>
+                <div className="alert-record__content">
+                  <span className="alert-record__title">
+                    <strong>
+                      {lang === "ar"
+                        ? "اختلاف متحمل مصاريف الشحن"
+                        : "Shipping payer differs from registration"}
+                    </strong>
+                    <em>{shipment.finalShippingPayerAt?.[lang] ?? (lang === "ar" ? "بعد التسوية" : "After settlement")}</em>
+                  </span>
+                  <p>
+                    <b>{shipment.id}</b> · {shipment.recipient[lang]} · {shipment.sender[lang]}
+                  </p>
+                  <div className="alert-record__facts">
+                    <span>
+                      <small>{lang === "ar" ? "المسجل" : "Registered"}</small>
+                      <strong>
+                        {shipment.shippingPayer === "recipient"
+                          ? lang === "ar" ? "المستلم" : "Recipient"
+                          : lang === "ar" ? "الراسل" : "Sender"}
+                      </strong>
+                    </span>
+                    <ChevronLeft size={16} />
+                    <span>
+                      <small>{lang === "ar" ? "المعتمد" : "Approved"}</small>
+                      <strong>
+                        {shipment.finalShippingPayer === "recipient"
+                          ? lang === "ar" ? "المستلم" : "Recipient"
+                          : lang === "ar" ? "الراسل" : "Sender"}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>{lang === "ar" ? "أثر شحن المستلم" : "Recipient shipping effect"}</small>
+                      <strong>{money.format(shipmentAccountingRecipientShippingCharge(shipment))}</strong>
+                    </span>
+                  </div>
+                  <p className="alert-record__reason">
+                    {shipment.finalShippingPayerReason ||
+                      (lang === "ar" ? "لم يسجل سبب" : "No reason recorded")}
+                  </p>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => onOpenShipment(shipment.id)}>
+                  <Eye size={16} />
+                  {lang === "ar" ? "فتح الشحنة" : "Open shipment"}
+                </button>
+              </article>
+            ))}
+            {visibleCashAlerts.map((settlement) => (
+              <article className="alert-record alert-record--danger" key={`cash-${settlement.id}`}>
+                <span className="alert-record__icon"><Landmark size={20} /></span>
+                <div className="alert-record__content">
+                  <span className="alert-record__title">
+                    <strong>{lang === "ar" ? "فرق في استلام نقد المندوب" : "Courier cash handover difference"}</strong>
+                    <em>{settlement.timestamp[lang]}</em>
+                  </span>
+                  <p>{settlement.courier[lang]} · {settlement.id}</p>
+                  <div className="alert-record__facts">
+                    <span><small>{lang === "ar" ? "المتوقع" : "Expected"}</small><strong>{money.format(settlement.expectedCash)}</strong></span>
+                    <span><small>{lang === "ar" ? "المستلم فعليًا" : "Actually received"}</small><strong>{money.format(settlement.actualCash)}</strong></span>
+                    <span><small>{lang === "ar" ? "الفرق" : "Difference"}</small><strong>{money.format(settlement.difference)}</strong></span>
+                  </div>
+                  <p className="alert-record__reason">{settlement.adjustmentReason}</p>
+                </div>
+                <button type="button" className="secondary-button" onClick={() => onNavigate("courierAccount")}>
+                  <Eye size={16} />
+                  {lang === "ar" ? "فتح حساب المندوب" : "Open courier account"}
+                </button>
+              </article>
+            ))}
+            {visiblePayerAlerts.length === 0 && visibleCashAlerts.length === 0 && (
+              <div className="alerts-empty">
+                <ShieldCheck size={32} />
+                <strong>{lang === "ar" ? "لا توجد اختلافات في العرض الحالي" : "No discrepancies in this view"}</strong>
+                <small>
+                  {lang === "ar"
+                    ? "أي تغيير محاسبي أو فرق نقدي جديد سيظهر هنا تلقائيًا."
+                    : "New accounting changes or cash differences will appear here automatically."}
+                </small>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function CourierAccountScreen({
   lang,
   theme,
@@ -22783,6 +23481,15 @@ function CourierAccountScreen({
   const [customAmountOpen, setCustomAmountOpen] = useState(false);
   const [actualCashInput, setActualCashInput] = useState("");
   const [adjustmentReason, setAdjustmentReason] = useState("");
+  const [payerDecisions, setPayerDecisions] = useState<
+    Record<
+      string,
+      {
+        finalPayer: "recipient" | "sender";
+        reason: string;
+      }
+    >
+  >({});
   const [debtMode, setDebtMode] = useState<"none" | "full" | "partial">(
     "none",
   );
@@ -22860,6 +23567,40 @@ function CourierAccountScreen({
     return lang === "ar" ? "شهري" : "Monthly";
   }
 
+  function payerDecision(item: {
+    shipment: Shipment;
+    event: NonNullable<Shipment["statusHistory"]>[number];
+  }) {
+    return (
+      payerDecisions[item.event.id] ?? {
+        finalPayer:
+          item.shipment.finalShippingPayer ?? item.shipment.shippingPayer,
+        reason: item.shipment.finalShippingPayerReason ?? "",
+      }
+    );
+  }
+
+  function updatePayerDecision(
+    eventId: string,
+    update: Partial<{
+      finalPayer: "recipient" | "sender";
+      reason: string;
+    }>,
+    fallbackPayer: "recipient" | "sender",
+  ) {
+    setPayerDecisions((current) => ({
+      ...current,
+      [eventId]: {
+        finalPayer:
+          update.finalPayer ??
+          current[eventId]?.finalPayer ??
+          fallbackPayer,
+        reason: update.reason ?? current[eventId]?.reason ?? "",
+      },
+    }));
+    setError("");
+  }
+
   const totalCollected = pendingItems.reduce(
     (sum, item) => sum + (item.event.collectedAmount ?? 0),
     0,
@@ -22911,6 +23652,7 @@ function CourierAccountScreen({
     setAdjustmentReason("");
     setDebtMode("none");
     setPartialDebtInput("");
+    setPayerDecisions({});
     setError("");
   }
 
@@ -22937,6 +23679,21 @@ function CourierAccountScreen({
         lang === "ar"
           ? "لا توجد شحنات غير مسوّاة أو دفعة مديونية لاستلامها."
           : "There are no unsettled shipments or debt payments to receive.",
+      );
+      return;
+    }
+    const payerDecisionWithoutReason = pendingItems.find((item) => {
+      const decision = payerDecision(item);
+      return (
+        decision.finalPayer !== item.shipment.shippingPayer &&
+        !decision.reason.trim()
+      );
+    });
+    if (payerDecisionWithoutReason) {
+      setError(
+        lang === "ar"
+          ? `سبب تغيير متحمّل الشحن إجباري للشحنة ${payerDecisionWithoutReason.shipment.id}.`
+          : `A reason is required for changing the shipping payer on ${payerDecisionWithoutReason.shipment.id}.`,
       );
       return;
     }
@@ -22976,6 +23733,14 @@ function CourierAccountScreen({
     const pendingIds = new Set(pendingItems.map((item) => item.event.id));
     onShipmentsChange(
       shipmentRecords.map((shipment) => {
+        const pendingShipmentItem = pendingItems.find(
+          (item) =>
+            item.shipment.id === shipment.id &&
+            pendingIds.has(item.event.id),
+        );
+        const decision = pendingShipmentItem
+          ? payerDecision(pendingShipmentItem)
+          : null;
         const receivedReturn = pendingItems.find(
           (item) =>
             item.shipment.id === shipment.id &&
@@ -23001,6 +23766,24 @@ function CourierAccountScreen({
 
         return {
           ...shipment,
+          ...(decision
+            ? {
+                finalShippingPayer: decision.finalPayer,
+                finalShippingPayerSource:
+                  decision.finalPayer === shipment.shippingPayer
+                    ? ("registered" as const)
+                    : ("accountant_correction" as const),
+                finalShippingPayerReason:
+                  decision.finalPayer === shipment.shippingPayer
+                    ? ""
+                    : decision.reason.trim(),
+                finalShippingPayerBy: {
+                  ar: "محاسب التشغيل",
+                  en: "Operations accountant",
+                },
+                finalShippingPayerAt: timestamp,
+              }
+            : {}),
           ...(receivedReturn
             ? {
                 custody: {
@@ -23113,6 +23896,18 @@ function CourierAccountScreen({
         actualCash,
         difference: actualCash - expectedCash,
         adjustmentReason: adjustmentReason.trim(),
+        shippingPayerDecisions: pendingItems.map((item) => {
+          const decision = payerDecision(item);
+          return {
+            shipmentId: item.shipment.id,
+            registeredPayer: item.shipment.shippingPayer,
+            finalPayer: decision.finalPayer,
+            reason:
+              decision.finalPayer === item.shipment.shippingPayer
+                ? ""
+                : decision.reason.trim(),
+          };
+        }),
         timestamp,
       },
     ]);
@@ -23319,6 +24114,159 @@ function CourierAccountScreen({
               </div>
             </article>
           </section>
+
+          {pendingItems.length > 0 && (
+            <section className="courier-payer-review">
+              <div className="courier-payer-review__heading">
+                <span>
+                  <LockKeyhole size={18} />
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? "اعتماد محاسب التشغيل لمتحمّل الشحن"
+                        : "Operations accounting shipping-payer approval"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "المسجل تعليمات تحصيل، والاختيار هنا هو الحكم المالي النهائي لحساب الراسل."
+                        : "Registration stores collection instructions; this approval is final for sender accounting."}
+                    </small>
+                  </span>
+                </span>
+                <em>
+                  {pendingItems.length}{" "}
+                  {lang === "ar" ? "قرار إلزامي" : "mandatory decisions"}
+                </em>
+              </div>
+              <div className="courier-payer-review__list">
+                {pendingItems.map((item) => {
+                  const decision = payerDecision(item);
+                  const changed =
+                    decision.finalPayer !== item.shipment.shippingPayer;
+                  const finalRecipientShipping =
+                    decision.finalPayer === "recipient"
+                      ? shipmentRecipientShippingRate(item.shipment)
+                      : 0;
+                  const finalSenderDue =
+                    item.shipment.amount +
+                    finalRecipientShipping -
+                    item.shipment.shippingFee -
+                    (item.shipment.customFinancialSnapshot?.senderDeductions ??
+                      0);
+                  return (
+                    <article
+                      className={changed ? "has-change" : ""}
+                      key={item.event.id}
+                    >
+                      <div className="courier-payer-review__identity">
+                        <span>
+                          <strong>{item.shipment.id}</strong>
+                          <small>
+                            {item.shipment.recipient[lang]} ·{" "}
+                            {item.shipment.reference ||
+                              (lang === "ar" ? "مرجع غير مسجل" : "No sender reference")}
+                          </small>
+                        </span>
+                        <span className="policy-scope-chip">
+                          {lang === "ar" ? "المسجل: " : "Registered: "}
+                          {item.shipment.shippingPayer === "recipient"
+                            ? lang === "ar"
+                              ? "المستلم"
+                              : "recipient"
+                            : lang === "ar"
+                              ? "الراسل"
+                              : "sender"}
+                        </span>
+                      </div>
+                      <div className="courier-payer-review__controls">
+                        <span>
+                          <button
+                            type="button"
+                            className={
+                              decision.finalPayer === "recipient"
+                                ? "is-active"
+                                : ""
+                            }
+                            onClick={() =>
+                              updatePayerDecision(
+                                item.event.id,
+                                { finalPayer: "recipient" },
+                                item.shipment.shippingPayer,
+                              )
+                            }
+                          >
+                            {lang === "ar" ? "المستلم" : "Recipient"}
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              decision.finalPayer === "sender"
+                                ? "is-active"
+                                : ""
+                            }
+                            onClick={() =>
+                              updatePayerDecision(
+                                item.event.id,
+                                { finalPayer: "sender" },
+                                item.shipment.shippingPayer,
+                              )
+                            }
+                          >
+                            {lang === "ar" ? "الراسل" : "Sender"}
+                          </button>
+                        </span>
+                        <dl>
+                          <div>
+                            <dt>{lang === "ar" ? "المحصل فعليًا" : "Actually collected"}</dt>
+                            <dd>{money.format(item.event.collectedAmount ?? 0)}</dd>
+                          </div>
+                          <div>
+                            <dt>{lang === "ar" ? "شحن المستلم المعتمد" : "Approved recipient shipping"}</dt>
+                            <dd>{money.format(finalRecipientShipping)}</dd>
+                          </div>
+                          <div>
+                            <dt>{lang === "ar" ? "مستحق الراسل" : "Sender due"}</dt>
+                            <dd>{money.format(finalSenderDue)}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                      {changed && (
+                        <label className="courier-payer-review__reason">
+                          <span>
+                            <CircleAlert size={14} />
+                            {lang === "ar"
+                              ? "سبب الاختلاف عن التسجيل"
+                              : "Reason for differing from registration"}
+                            <em>*</em>
+                          </span>
+                          <input
+                            value={decision.reason}
+                            onChange={(event) =>
+                              updatePayerDecision(
+                                item.event.id,
+                                { reason: event.target.value },
+                                item.shipment.shippingPayer,
+                              )
+                            }
+                            placeholder={
+                              lang === "ar"
+                                ? "مثال: الاتفاق الصحيح أن الشحن على الراسل"
+                                : "e.g. Contract confirms sender pays shipping"
+                            }
+                          />
+                          <small>
+                            {lang === "ar"
+                              ? "سيظهر هذا التغيير في التنبيهات وسجل الشحنة."
+                              : "This change will appear in alerts and shipment history."}
+                          </small>
+                        </label>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <div className="courier-account-workspace">
             <section className="courier-account-table-card">
@@ -25490,13 +26438,15 @@ function AddShipmentScreen({
   const recipientAreaRate =
     findEffectiveSenderShipmentPolicy(selectedSender, senderPolicies)
       ?.recipientAreaRates?.[draft.areaId];
-  const recipientShippingCharge = recipientAreaShippingCharge(
+  const recipientShippingRate = recipientAreaShippingCharge(
     shippingFee,
-    draft.shippingPayer,
+    "recipient",
     selectedSender,
     draft.areaId,
     senderPolicies,
   );
+  const recipientShippingCharge =
+    draft.shippingPayer === "recipient" ? recipientShippingRate : 0;
   const activeGovernorates = governorates.filter(
     (governorate) => governorate.state === "active",
   );
@@ -25687,6 +26637,7 @@ function AddShipmentScreen({
       ...draft,
       localId: `prepared-${Date.now()}-${prepared.length}`,
       shippingFee,
+      recipientShippingRate,
       recipientShippingCharge,
       recipientShippingSource: recipientAreaRate?.source ?? "company",
       customFinancialSnapshot,
@@ -25767,9 +26718,7 @@ function AddShipmentScreen({
       return {
         id: `TS-${String(now + index).slice(-6)}`,
         recipientProfileId: item.recipientProfileId || undefined,
-        reference:
-          item.senderReference ||
-          `${selectedSender.en.slice(0, 2).toUpperCase()}-${String(now + index).slice(-4)}`,
+        reference: item.senderReference.trim(),
         recipient: {
           ar: item.recipientName || "غير مكتمل",
           en: item.recipientName || "Incomplete",
@@ -25811,7 +26760,7 @@ function AddShipmentScreen({
         confirmationHistory: [],
         pieces: pieceCount,
         shippingFee: item.shippingFee,
-        recipientShippingCharge: item.recipientShippingCharge,
+        recipientShippingCharge: item.recipientShippingRate,
         recipientShippingSource: item.recipientShippingSource,
         recipientShippingAreaId: item.areaId,
         sourceTrustId: trustConversion?.id,
@@ -26080,6 +27029,39 @@ function AddShipmentScreen({
                   </span>
                 </div>
 
+                {fieldVisible("SENDER_REFERENCE") && (
+                  <div className="entry-reference-strip">
+                    <span>
+                      <ClipboardCheck size={18} />
+                      <span>
+                        <strong>
+                          {fieldLabel("SENDER_REFERENCE", {
+                            ar: "مرجع الراسل",
+                            en: "Sender reference",
+                          })}
+                          {requiredMark("SENDER_REFERENCE")}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "رقم الطلب عند الراسل؛ اتركه دون قيمة إذا لم يرسله وكانت السياسة تسمح."
+                            : "The sender’s own order number; leave it empty if not supplied and policy allows it."}
+                        </small>
+                      </span>
+                    </span>
+                    <input
+                      value={draft.senderReference}
+                      onChange={(event) =>
+                        updateDraft("senderReference", event.target.value)
+                      }
+                      placeholder={
+                        lang === "ar"
+                          ? "مثال: ORD-1024"
+                          : "Example: ORD-1024"
+                      }
+                    />
+                  </div>
+                )}
+
                 <div className="entry-section entry-section--recipient">
                   <div className="entry-section-title">
                     <UserRound size={18} />
@@ -26324,24 +27306,6 @@ function AddShipmentScreen({
                     <strong>{lang === "ar" ? "الطرد" : "Parcel"}</strong>
                   </div>
                   <div className="entry-fields-grid entry-fields-grid--three">
-                    {fieldVisible("SENDER_REFERENCE") && (
-                      <label className="entry-field">
-                        <span>
-                          {fieldLabel("SENDER_REFERENCE", {
-                            ar: "مرجع الراسل",
-                            en: "Sender reference",
-                          })}
-                          {requiredMark("SENDER_REFERENCE")}
-                        </span>
-                        <input
-                          value={draft.senderReference}
-                          onChange={(event) =>
-                            updateDraft("senderReference", event.target.value)
-                          }
-                          placeholder="ORD-1024"
-                        />
-                      </label>
-                    )}
                     {fieldVisible("PIECE_COUNT") && (
                       <label className="entry-field">
                         <span>
@@ -26419,9 +27383,18 @@ function AddShipmentScreen({
                 <div className="entry-section entry-section--financial">
                   <div className="entry-section-title">
                     <HandCoins size={18} />
-                    <strong>
-                      {lang === "ar" ? "التحصيل ومصاريف الشحن" : "Collection & shipping"}
-                    </strong>
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? "التوقع المالي عند التسجيل"
+                          : "Financial expectation at registration"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "تعليمات التحصيل الآن؛ يعتمد محاسب التشغيل الحساب النهائي عند تسوية المندوب."
+                          : "Current collection instruction; operations accounting confirms the final treatment during courier settlement."}
+                      </small>
+                    </span>
                   </div>
                   <div className="entry-financial-layout">
                     {fieldVisible("SHIPMENT_PRICE") && (
@@ -26498,8 +27471,8 @@ function AddShipmentScreen({
                     <div className="entry-payer-control">
                       <span>
                         {fieldLabel("SHIPPING_PAYER", {
-                          ar: "متحمّل مصاريف الشحن",
-                          en: "Shipping payer",
+                          ar: "تعليمات تحمّل الشحن عند التسجيل",
+                          en: "Shipping payer instruction at registration",
                         })}
                       </span>
                       {policySettings.shippingPayerOverride ? (
@@ -26541,7 +27514,7 @@ function AddShipmentScreen({
                     </span>
                     <i>+</i>
                     <span>
-                      <small>{lang === "ar" ? "الشحن المحصل" : "Recipient shipping"}</small>
+                      <small>{lang === "ar" ? "شحن مطلوب من المستلم" : "Shipping requested from recipient"}</small>
                       <strong>{money.format(recipientShippingCharge)}</strong>
                     </span>
                     <i>=</i>
@@ -26570,7 +27543,7 @@ function AddShipmentScreen({
                       </span>
                     )}
                     <span>
-                      <small>{lang === "ar" ? "مستحق الراسل" : "Sender due"}</small>
+                      <small>{lang === "ar" ? "مستحق الراسل المتوقع" : "Expected sender due"}</small>
                       <strong>{money.format(senderDue)}</strong>
                     </span>
                   </div>
@@ -28551,7 +29524,7 @@ function Shipment360Screen({
                 </div>
                 <div className="shipment360-summary-money">
                   <span><small>{lang === "ar" ? "سعر الشحنة" : "Order value"}</small><strong>{money.format(shipment.amount)}</strong></span>
-                  <span><small>{lang === "ar" ? "شحن المستلم" : "Recipient shipping"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong></span>
+                  <span><small>{lang === "ar" ? "شحن مطلوب من المستلم" : "Shipping requested from recipient"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong></span>
                   <span className="shipment360-summary-money__total"><small>{lang === "ar" ? "المطلوب من المستلم" : "Due from recipient"}</small><strong>{money.format(shipmentTotalToCollect(shipment))}</strong></span>
                 </div>
               </section>
@@ -28643,6 +29616,70 @@ function Shipment360Screen({
 
           {activeTab === "finance" && (
             <div className="shipment360-layout shipment360-layout--finance">
+              <section className="shipment360-panel shipment360-panel--wide shipment360-financial-decision">
+                <div className="shipment360-panel__title">
+                  <span><LockKeyhole size={19} /></span>
+                  <div>
+                    <h2>
+                      {lang === "ar"
+                        ? "قرار متحمل مصاريف الشحن"
+                        : "Shipping-payer decision"}
+                    </h2>
+                    <p>
+                      {lang === "ar"
+                        ? "التعليمات المسجلة تظل محفوظة، والاعتماد النهائي لا يظهر إلا بعد تسوية المندوب."
+                        : "Registered instructions remain preserved; final approval appears only after courier settlement."}
+                    </p>
+                  </div>
+                </div>
+                <div className="shipment360-payer-decision">
+                  <span>
+                    <small>{lang === "ar" ? "عند التسجيل" : "At registration"}</small>
+                    <strong>
+                      {shipment.shippingPayer === "recipient"
+                        ? lang === "ar" ? "المستلم" : "Recipient"
+                        : lang === "ar" ? "الراسل" : "Sender"}
+                    </strong>
+                  </span>
+                  <ChevronLeft size={17} />
+                  <span>
+                    <small>{lang === "ar" ? "الاعتماد المحاسبي" : "Accounting approval"}</small>
+                    <strong>
+                      {shipment.finalShippingPayer
+                        ? shipment.finalShippingPayer === "recipient"
+                          ? lang === "ar" ? "المستلم" : "Recipient"
+                          : lang === "ar" ? "الراسل" : "Sender"
+                        : lang === "ar" ? "لم يعتمد بعد" : "Not approved yet"}
+                    </strong>
+                  </span>
+                  <span className={shipment.finalShippingPayer ? "policy-scope-chip policy-scope-chip--custom" : "policy-scope-chip"}>
+                    {shipment.finalShippingPayer
+                      ? lang === "ar" ? "نهائي" : "Final"
+                      : lang === "ar" ? "متوقع" : "Expected"}
+                  </span>
+                </div>
+                {shipment.finalShippingPayer &&
+                  shipment.finalShippingPayer !== shipment.shippingPayer && (
+                    <div className="financial-decision-alert">
+                      <CircleAlert size={17} />
+                      <span>
+                        <strong>
+                          {lang === "ar"
+                            ? "اختلف الاعتماد عن التسجيل"
+                            : "Approval differs from registration"}
+                        </strong>
+                        <small>
+                          {shipment.finalShippingPayerReason} ·{" "}
+                          {shipment.finalShippingPayerBy?.[lang] ?? ""}
+                          {shipment.finalShippingPayerAt
+                            ? ` · ${shipment.finalShippingPayerAt[lang]}`
+                            : ""}
+                        </small>
+                      </span>
+                    </div>
+                  )}
+              </section>
+
               <section className="shipment360-panel shipment360-panel--wide">
                 <div className="shipment360-panel__title">
                   <span><Calculator size={19} /></span>
@@ -28651,7 +29688,7 @@ function Shipment360Screen({
                 <div className="shipment360-finance-equation">
                   <span><small>{lang === "ar" ? "سعر الشحنة" : "Order value"}</small><strong>{money.format(shipment.amount)}</strong></span>
                   <b>+</b>
-                  <span><small>{lang === "ar" ? "شحن المستلم" : "Recipient shipping"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong></span>
+                  <span><small>{lang === "ar" ? "شحن مطلوب من المستلم" : "Shipping requested from recipient"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong></span>
                   {recipientAdditions > 0 && <><b>+</b><span><small>{lang === "ar" ? "إضافات" : "Additions"}</small><strong>{money.format(recipientAdditions)}</strong></span></>}
                   <b>=</b>
                   <span className="shipment360-finance-equation__total"><small>{lang === "ar" ? "الإجمالي" : "Total"}</small><strong>{money.format(shipmentTotalToCollect(shipment))}</strong></span>
@@ -28665,9 +29702,16 @@ function Shipment360Screen({
                 </div>
                 <div className="shipment360-ledger">
                   <span><small>{lang === "ar" ? "سعر الشحنة" : "Order value"}</small><strong>{money.format(shipment.amount)}</strong></span>
-                  <span><small>{lang === "ar" ? "فرق شحن المستلم" : "Recipient shipping difference"}</small><strong>{money.format(shipmentRecipientShippingCharge(shipment) - shipmentCompanyShippingFee(shipment))}</strong></span>
+                  <span><small>{lang === "ar" ? "فرق شحن المستلم المعتمد" : "Approved recipient shipping difference"}</small><strong>{money.format(shipmentAccountingRecipientShippingCharge(shipment) - shipmentCompanyShippingFee(shipment))}</strong></span>
                   <span><small>{lang === "ar" ? "خصومات الراسل" : "Sender deductions"}</small><strong>- {money.format(senderDeductions)}</strong></span>
-                  <span className="shipment360-ledger__total"><small>{lang === "ar" ? "مستحق الراسل المتوقع" : "Expected sender due"}</small><strong>{money.format(senderReceiptLine?.senderDue ?? shipmentSenderBaseDue(shipment))}</strong></span>
+                  <span className="shipment360-ledger__total">
+                    <small>
+                      {shipment.finalShippingPayer
+                        ? lang === "ar" ? "مستحق الراسل المعتمد" : "Approved sender due"
+                        : lang === "ar" ? "مستحق الراسل المتوقع" : "Expected sender due"}
+                    </small>
+                    <strong>{money.format(senderReceiptLine?.senderDue ?? shipmentSenderBaseDue(shipment))}</strong>
+                  </span>
                 </div>
                 <div className="shipment360-source-note"><ShieldCheck size={16} /><span>{settlementState}{senderReceipt ? ` · ${senderReceipt.id}` : senderDraft ? ` · ${senderDraft.id}` : ""}</span></div>
               </section>
@@ -28733,7 +29777,7 @@ function Shipment360Screen({
                   })}
                   <section>
                     <header><span><PackagePlus size={17} /></span><strong>{lang === "ar" ? "إنشاء الشحنة" : "Shipment creation"}</strong><b>1</b></header>
-                    <div className="shipment360-events"><article><i /><div><strong>{lang === "ar" ? "تم تسجيل الشحنة" : "Shipment registered"}</strong><p>{lang === "ar" ? `المرجع ${shipment.reference}` : `Reference ${shipment.reference}`}</p><small>{lang === "ar" ? "موظف التسجيل" : "Registration user"}</small></div><time>{lang === "ar" ? "بداية السجل" : "Record start"}</time></article></div>
+                    <div className="shipment360-events"><article><i /><div><strong>{lang === "ar" ? "تم تسجيل الشحنة" : "Shipment registered"}</strong><p>{shipment.reference ? (lang === "ar" ? `مرجع الراسل ${shipment.reference}` : `Sender reference ${shipment.reference}`) : (lang === "ar" ? "مرجع الراسل غير مسجل" : "Sender reference not recorded")}</p><small>{lang === "ar" ? "موظف التسجيل" : "Registration user"}</small></div><time>{lang === "ar" ? "بداية السجل" : "Record start"}</time></article></div>
                   </section>
                 </div>
               </section>
@@ -29218,7 +30262,7 @@ function ShipmentsScreen({
                                   </span>
                                   <span className="financial-cell__line">
                                     <small>
-                                      {lang === "ar" ? "الشحن المحصل" : "Recipient shipping"}
+                                      {lang === "ar" ? "شحن مطلوب من المستلم" : "Shipping requested from recipient"}
                                     </small>
                                     <strong>{money.format(shipmentRecipientShippingCharge(shipment))}</strong>
                                   </span>
@@ -29490,6 +30534,8 @@ export default function Home() {
           setSharedShipmentSettings(
             normalizeShipmentDataSettings({
               ...parsed.shipmentSettings,
+              shippingChargeMode: "company_price",
+              shippingChargeValue: 0,
               trustsEnabled: Array.isArray(parsed.trusts)
                 ? parsed.shipmentSettings.trustsEnabled
                 : true,
@@ -29533,7 +30579,11 @@ export default function Home() {
                   fields: (entry.fields ?? shipmentFieldPoliciesData).map(
                     normalizeShipmentField,
                   ),
-                  settings: normalizeShipmentDataSettings(entry.settings),
+                  settings: normalizeShipmentDataSettings({
+                    ...entry.settings,
+                    shippingChargeMode: "company_price",
+                    shippingChargeValue: 0,
+                  }),
                   recipientAreaRates: entry.recipientAreaRates ?? {},
                 })),
               };
@@ -29594,10 +30644,11 @@ export default function Home() {
                 ...shipment,
                 recipientProfileId,
                 recipientShippingCharge:
-                  shipment.recipientShippingCharge ??
-                  (shipment.shippingPayer === "recipient"
+                  shipment.shippingPayer === "sender" &&
+                  (shipment.recipientShippingCharge ?? 0) === 0
                     ? shipment.shippingFee
-                    : 0),
+                    : shipment.recipientShippingCharge ??
+                      shipment.shippingFee,
                 recipientShippingSource:
                   shipment.recipientShippingSource ?? "company",
                 recipientShippingAreaId:
@@ -30089,6 +31140,23 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
+      ) : screen === "alerts" ? (
+        <AlertsScreen
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          settlements={sharedCourierSettlements}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onOpenShipment={(shipmentId) => {
+            setShipmentFileTargetId(shipmentId);
+            setScreen("shipment360");
+          }}
+          onLogout={() => setScreen("login")}
+        />
       ) : screen === "courierAccount" ? (
         <CourierAccountScreen
           lang={lang}
@@ -30388,6 +31456,30 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onPlansChange={setSharedCourierPlans}
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "companyPolicy" ? (
+        <LegacyShipmentPoliciesScreen
+          lang={lang}
+          theme={theme}
+          fields={sharedShipmentFields}
+          settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
+          senders={sharedSenders}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onSave={(nextFields, nextSettings, nextSenderPolicies) => {
+            setSharedShipmentFields(nextFields);
+            setSharedShipmentSettings({
+              ...nextSettings,
+              shippingChargeMode: "company_price",
+              shippingChargeValue: 0,
+            });
+            setSharedSenderPolicies(nextSenderPolicies);
+          }}
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
