@@ -84,6 +84,7 @@ type Screen =
   | "courierShipments"
   | "courierPrint"
   | "courierAccount"
+  | "courierPayouts"
   | "senderAccountPrep"
   | "senderAccount"
   | "senderAccountHistory"
@@ -429,6 +430,8 @@ type CourierSettlement = {
   commissionEarned: number;
   commissionPaidNow: number;
   commissionDeferred?: number;
+  commissionDueAt?: string;
+  createdAtIso?: string;
   planSnapshot?: {
     id: string;
     name: Localized;
@@ -449,6 +452,41 @@ type CourierSettlement = {
     reason: string;
   }[];
   timestamp: Localized;
+};
+
+type CourierFixedEntitlement = {
+  id: string;
+  courier: Localized;
+  planSnapshot: {
+    id: string;
+    name: Localized;
+    code: string;
+    version: number;
+    compensationType: CourierCompensationType;
+  };
+  period: Localized;
+  amount: number;
+  dueAt: string;
+  createdAt: Localized;
+};
+
+type CourierPayout = {
+  id: string;
+  courier: Localized;
+  accountId: TreasuryAccount["id"];
+  amount: number;
+  mode: "full" | "partial";
+  reason: string;
+  dueBefore: number;
+  dueAfter: number;
+  allocations: {
+    sourceType: "commission" | "fixed_salary";
+    sourceId: string;
+    amount: number;
+  }[];
+  createdBy: Localized;
+  timestamp: Localized;
+  createdAtIso: string;
 };
 
 type SenderBalance = {
@@ -528,6 +566,7 @@ type TreasuryMovement = {
   direction: "in" | "out";
   category:
     | "courier_collection"
+    | "courier_payment"
     | "sender_payment"
     | "company_deposit"
     | "operating_expense"
@@ -542,7 +581,10 @@ type TreasuryMovement = {
   createdBy: Localized;
   timestamp: Localized;
   sequence: number;
-  linkedScreen?: "courierAccount" | "senderAccountHistory";
+  linkedScreen?:
+    | "courierAccount"
+    | "courierPayouts"
+    | "senderAccountHistory";
   linkedMovementId?: string;
 };
 
@@ -2866,6 +2908,22 @@ function captureCourierCommissionSnapshot({
   };
 }
 
+function courierCommissionDueAt(
+  cycle: CourierSettlementCycle | null,
+  from: Date,
+) {
+  const due = new Date(from);
+  if (cycle === "weekly") {
+    const daysUntilSaturday = (6 - due.getDay() + 7) % 7;
+    due.setDate(due.getDate() + daysUntilSaturday);
+    due.setHours(23, 59, 59, 999);
+  } else if (cycle === "monthly") {
+    due.setMonth(due.getMonth() + 1, 0);
+    due.setHours(23, 59, 59, 999);
+  }
+  return due.toISOString();
+}
+
 const courierDebtsData: CourierDebt[] = [
   {
     id: "courier-debt-demo-1",
@@ -2889,6 +2947,32 @@ const courierDebtsData: CourierDebt[] = [
 ];
 
 const courierSettlementsData: CourierSettlement[] = [];
+
+const courierFixedEntitlementsData: CourierFixedEntitlement[] = [
+  {
+    id: "fixed-entitlement-omar-2026-07",
+    courier: availableCouriers[4],
+    planSnapshot: {
+      id: "courier-plan-salary",
+      name: {
+        ar: "مندوبو الراتب الشهري",
+        en: "Monthly salary couriers",
+      },
+      code: "COURIER-SALARY",
+      version: 2,
+      compensationType: "salary",
+    },
+    period: { ar: "راتب يوليو 2026", en: "July 2026 salary" },
+    amount: 6500,
+    dueAt: "2026-08-01T09:00:00.000Z",
+    createdAt: {
+      ar: "اعتمد في إغلاق فترة يوليو",
+      en: "Approved at July period close",
+    },
+  },
+];
+
+const courierPayoutsData: CourierPayout[] = [];
 
 const senderBalancesData: SenderBalance[] = [
   {
@@ -4330,6 +4414,14 @@ function Sidebar({
           label: lang === "ar" ? "حساب المندوب" : "Courier account",
           icon: HandCoins,
           screen: "courierAccount" as const,
+        },
+        {
+          label:
+            lang === "ar"
+              ? "مستحقات المناديب"
+              : "Courier payouts",
+          icon: Banknote,
+          screen: "courierPayouts" as const,
         },
         {
           label:
@@ -11146,6 +11238,7 @@ function CourierRatesScreen({
   plans,
   couriers,
   settlements,
+  payouts,
   statuses,
   governorates,
   onLang,
@@ -11159,6 +11252,7 @@ function CourierRatesScreen({
   plans: CourierRatePlan[];
   couriers: CourierRecord[];
   settlements: CourierSettlement[];
+  payouts: CourierPayout[];
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
   onLang: () => void;
@@ -11393,7 +11487,7 @@ function CourierRatesScreen({
   const selectedCourierKeys = new Set(
     selected?.couriers.map((courier) => courier.en) ?? [],
   );
-  const selectedDeferredCommission = settlements
+  const selectedDeferredCommissionBeforePayout = settlements
     .filter((settlement) => selectedCourierKeys.has(settlement.courier.en))
     .reduce(
       (sum, settlement) =>
@@ -11405,6 +11499,16 @@ function CourierRatesScreen({
         ),
       0,
     );
+  const selectedDeferredCommissionPaid = payouts
+    .filter((payout) => selectedCourierKeys.has(payout.courier.en))
+    .flatMap((payout) => payout.allocations)
+    .filter((allocation) => allocation.sourceType === "commission")
+    .reduce((sum, allocation) => sum + allocation.amount, 0);
+  const selectedDeferredCommission = Math.max(
+    0,
+    selectedDeferredCommissionBeforePayout -
+      selectedDeferredCommissionPaid,
+  );
 
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
@@ -19814,6 +19918,7 @@ function TreasuryScreen({
   );
   const categoryLabels: Record<TreasuryMovement["category"], Localized> = {
     courier_collection: { ar: "تحصيل مندوب", en: "Courier collection" },
+    courier_payment: { ar: "صرف مستحق مندوب", en: "Courier payout" },
     sender_payment: { ar: "دفع للراسل", en: "Sender payment" },
     company_deposit: { ar: "تغذية خزنة", en: "Treasury funding" },
     operating_expense: { ar: "مصروف تشغيلي", en: "Operating expense" },
@@ -20490,9 +20595,13 @@ function TreasuryScreen({
                   ? lang === "ar"
                     ? "فتح حساب المندوب المرتبط"
                     : "Open linked courier account"
-                  : lang === "ar"
-                    ? "فتح إيصال الراسل المرتبط"
-                    : "Open linked sender receipt"}
+                  : selectedMovement.linkedScreen === "courierPayouts"
+                    ? lang === "ar"
+                      ? "فتح إيصال صرف المندوب"
+                      : "Open courier payout receipt"
+                    : lang === "ar"
+                      ? "فتح إيصال الراسل المرتبط"
+                      : "Open linked sender receipt"}
               </button>
             )}
           </aside>
@@ -23588,6 +23697,694 @@ function AlertsScreen({
   );
 }
 
+function CourierPayoutsScreen({
+  lang,
+  theme,
+  couriers,
+  courierPlans,
+  settlements,
+  fixedEntitlements,
+  payouts,
+  debts,
+  accounts,
+  movements,
+  onPayoutsChange,
+  onMovementsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  couriers: CourierRecord[];
+  courierPlans: CourierRatePlan[];
+  settlements: CourierSettlement[];
+  fixedEntitlements: CourierFixedEntitlement[];
+  payouts: CourierPayout[];
+  debts: CourierDebt[];
+  accounts: TreasuryAccount[];
+  movements: TreasuryMovement[];
+  onPayoutsChange: (records: CourierPayout[]) => void;
+  onMovementsChange: (records: TreasuryMovement[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const courierList = courierProfiles(couriers);
+  const firstPayableCourier =
+    fixedEntitlements.find((entitlement) => {
+      const paid = payouts
+        .flatMap((payout) => payout.allocations)
+        .filter(
+          (allocation) =>
+            allocation.sourceType === "fixed_salary" &&
+            allocation.sourceId === entitlement.id,
+        )
+        .reduce((sum, allocation) => sum + allocation.amount, 0);
+      return entitlement.amount - paid > 0;
+    })?.courier.en ??
+    settlements.find(
+      (settlement) =>
+        (settlement.commissionDeferred ??
+          settlement.commissionEarned - settlement.commissionPaidNow) > 0,
+    )?.courier.en ??
+    courierList[0]?.courier.en ??
+    "";
+  const [courierKey, setCourierKey] = useState(firstPayableCourier);
+  const [accountId, setAccountId] =
+    useState<TreasuryAccount["id"]>("main-cash");
+  const [customAmountOpen, setCustomAmountOpen] = useState(false);
+  const [customAmountInput, setCustomAmountInput] = useState("");
+  const [partialReason, setPartialReason] = useState("");
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const selectedCourier =
+    courierList.find((profile) => profile.courier.en === courierKey) ??
+    courierList[0];
+  const selectedPlan = selectedCourier
+    ? resolveCourierPayPlan(selectedCourier.courier, courierPlans)
+    : null;
+  const selectedAccount =
+    accounts.find((account) => account.id === accountId) ?? accounts[0];
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const nowValue = Date.now();
+
+  function paidForSource(
+    sourceType: CourierPayout["allocations"][number]["sourceType"],
+    sourceId: string,
+  ) {
+    return payouts
+      .flatMap((payout) => payout.allocations)
+      .filter(
+        (allocation) =>
+          allocation.sourceType === sourceType &&
+          allocation.sourceId === sourceId,
+      )
+      .reduce((sum, allocation) => sum + allocation.amount, 0);
+  }
+
+  function displayDate(iso: string) {
+    return new Date(iso).toLocaleDateString(lang === "ar" ? "ar-EG" : "en-EG", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  }
+
+  function cycleLabel(cycle: CourierSettlementCycle | undefined) {
+    if (cycle === "instant") return lang === "ar" ? "فوري" : "Instant";
+    if (cycle === "daily") return lang === "ar" ? "يومي" : "Daily";
+    if (cycle === "weekly") return lang === "ar" ? "أسبوعي" : "Weekly";
+    if (cycle === "monthly") return lang === "ar" ? "شهري" : "Monthly";
+    return lang === "ar" ? "حسب العقد" : "Per agreement";
+  }
+
+  const commissionSources = selectedCourier
+    ? settlements
+        .filter(
+          (settlement) =>
+            settlement.courier.en === selectedCourier.courier.en,
+        )
+        .map((settlement) => {
+          const amount = Math.max(
+            0,
+            settlement.commissionDeferred ??
+              settlement.commissionEarned - settlement.commissionPaidNow,
+          );
+          const paid = paidForSource("commission", settlement.id);
+          const dueAt =
+            settlement.commissionDueAt ??
+            settlement.createdAtIso ??
+            "2000-01-01T00:00:00.000Z";
+          return {
+            sourceType: "commission" as const,
+            sourceId: settlement.id,
+            title:
+              lang === "ar"
+                ? `عمولات تسوية ${settlement.id}`
+                : `Commission from ${settlement.id}`,
+            subtitle:
+              settlement.planSnapshot?.name[lang] ??
+              (lang === "ar" ? "خطة العمولة المثبتة" : "Recorded commission plan"),
+            cycle: settlement.planSnapshot?.settlementCycle,
+            amount,
+            paid,
+            remaining: Math.max(0, amount - paid),
+            dueAt,
+            recordedAt: settlement.timestamp[lang],
+          };
+        })
+        .filter((item) => item.amount > 0)
+    : [];
+
+  const fixedSources = selectedCourier
+    ? fixedEntitlements
+        .filter(
+          (entitlement) =>
+            entitlement.courier.en === selectedCourier.courier.en,
+        )
+        .map((entitlement) => {
+          const paid = paidForSource("fixed_salary", entitlement.id);
+          return {
+            sourceType: "fixed_salary" as const,
+            sourceId: entitlement.id,
+            title: entitlement.period[lang],
+            subtitle: entitlement.planSnapshot.name[lang],
+            cycle: "monthly" as CourierSettlementCycle,
+            amount: entitlement.amount,
+            paid,
+            remaining: Math.max(0, entitlement.amount - paid),
+            dueAt: entitlement.dueAt,
+            recordedAt: entitlement.createdAt[lang],
+          };
+        })
+    : [];
+
+  const outstandingSources = [...commissionSources, ...fixedSources]
+    .filter((item) => item.remaining > 0)
+    .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
+  const dueSources = outstandingSources.filter(
+    (item) => Date.parse(item.dueAt) <= nowValue,
+  );
+  const upcomingSources = outstandingSources.filter(
+    (item) => Date.parse(item.dueAt) > nowValue,
+  );
+  const dueNow = dueSources.reduce((sum, item) => sum + item.remaining, 0);
+  const upcomingTotal = upcomingSources.reduce(
+    (sum, item) => sum + item.remaining,
+    0,
+  );
+  const totalOutstanding = dueNow + upcomingTotal;
+  const selectedPayouts = selectedCourier
+    ? payouts.filter(
+        (payout) => payout.courier.en === selectedCourier.courier.en,
+      )
+    : [];
+  const totalPaid = selectedPayouts.reduce(
+    (sum, payout) => sum + payout.amount,
+    0,
+  );
+  const debtBalance = selectedCourier
+    ? debts
+        .filter(
+          (debt) =>
+            debt.courier.en === selectedCourier.courier.en &&
+            debt.state === "active",
+        )
+        .reduce((sum, debt) => sum + debt.balance, 0)
+    : 0;
+  const accountBalance = selectedAccount
+    ? movements
+        .filter((movement) => movement.accountId === selectedAccount.id)
+        .reduce(
+          (balance, movement) =>
+            balance +
+            (movement.direction === "in"
+              ? movement.amount
+              : -movement.amount),
+          selectedAccount.openingBalance,
+        )
+    : 0;
+  const payoutAmount = customAmountOpen
+    ? Math.max(0, Number(customAmountInput) || 0)
+    : dueNow;
+  const payoutAfter = Math.max(0, dueNow - payoutAmount);
+
+  function chooseCourier(nextKey: string) {
+    setCourierKey(nextKey);
+    setCustomAmountOpen(false);
+    setCustomAmountInput("");
+    setPartialReason("");
+    setError("");
+  }
+
+  function toggleCustomAmount() {
+    setCustomAmountOpen((current) => {
+      const next = !current;
+      setCustomAmountInput(next ? String(dueNow) : "");
+      setPartialReason("");
+      setError("");
+      return next;
+    });
+  }
+
+  function confirmPayout() {
+    if (!selectedCourier || !selectedAccount || dueNow <= 0) {
+      setError(
+        lang === "ar"
+          ? "لا توجد مستحقات جاهزة للصرف لهذا المندوب."
+          : "There are no courier dues ready for payout.",
+      );
+      return;
+    }
+    if (payoutAmount <= 0 || payoutAmount > dueNow) {
+      setError(
+        lang === "ar"
+          ? "مبلغ الصرف يجب أن يكون أكبر من صفر ولا يتجاوز المستحق الجاهز."
+          : "Payout must be above zero and cannot exceed the ready amount.",
+      );
+      return;
+    }
+    const isPartial = payoutAmount < dueNow;
+    if (isPartial && !partialReason.trim()) {
+      setError(
+        lang === "ar"
+          ? "سبب الصرف الجزئي إجباري حتى يظل المتبقي مفهومًا."
+          : "A reason is required for a partial payout.",
+      );
+      return;
+    }
+    if (accountBalance < payoutAmount) {
+      setError(
+        lang === "ar"
+          ? `رصيد ${selectedAccount.name.ar} لا يكفي لإتمام الصرف.`
+          : `${selectedAccount.name.en} does not have enough balance.`,
+      );
+      return;
+    }
+
+    let amountLeft = payoutAmount;
+    const allocations: CourierPayout["allocations"] = [];
+    dueSources.forEach((source) => {
+      if (amountLeft <= 0) return;
+      const allocated = Math.min(source.remaining, amountLeft);
+      allocations.push({
+        sourceType: source.sourceType,
+        sourceId: source.sourceId,
+        amount: allocated,
+      });
+      amountLeft -= allocated;
+    });
+
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const receiptId = `CPY-${String(payouts.length + 1).padStart(5, "0")}`;
+    const payout: CourierPayout = {
+      id: receiptId,
+      courier: selectedCourier.courier,
+      accountId: selectedAccount.id,
+      amount: payoutAmount,
+      mode: isPartial ? "partial" : "full",
+      reason: isPartial ? partialReason.trim() : "",
+      dueBefore: dueNow,
+      dueAfter: payoutAfter,
+      allocations,
+      createdBy: { ar: "محاسب التشغيل", en: "Operations accountant" },
+      timestamp,
+      createdAtIso: now.toISOString(),
+    };
+    const nextSequence =
+      movements.reduce(
+        (largest, movement) => Math.max(largest, movement.sequence),
+        0,
+      ) + 1;
+    const treasuryMovement: TreasuryMovement = {
+      id: `TM-CPY-${Date.now()}`,
+      accountId: selectedAccount.id,
+      direction: "out",
+      category: "courier_payment",
+      amount: payoutAmount,
+      party: selectedCourier.courier,
+      description: {
+        ar: `صرف مستحقات مندوب بإيصال ${receiptId}`,
+        en: `Courier dues paid under receipt ${receiptId}`,
+      },
+      reference: receiptId,
+      source: "system",
+      createdBy: payout.createdBy,
+      timestamp,
+      sequence: nextSequence,
+      linkedScreen: "courierPayouts",
+    };
+
+    onPayoutsChange([...payouts, payout]);
+    onMovementsChange([...movements, treasuryMovement]);
+    setCustomAmountOpen(false);
+    setCustomAmountInput("");
+    setPartialReason("");
+    setError("");
+    setToast(
+      lang === "ar"
+        ? `تم صرف ${money.format(payoutAmount)} وإصدار الإيصال ${receiptId}`
+        : `${money.format(payoutAmount)} paid under receipt ${receiptId}`,
+    );
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  if (!selectedCourier) return null;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="courierPayouts"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><Banknote size={20} /></span>
+            <span>
+              <strong>{lang === "ar" ? "مستحقات المناديب" : "Courier payouts"}</strong>
+              <small>{lang === "ar" ? "صرف الحقوق المثبتة" : "Pay recorded entitlements"}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={lang === "ar" ? "ابحث أو انتقل بسرعة..." : "Search or jump quickly..."} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} /><i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span><ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content courier-payouts-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "مستحقات المناديب" : "Courier payouts"}</h1>
+                <span className="demo-chip">
+                  {dueSources.length} {lang === "ar" ? "بند جاهز" : "ready items"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "هنا تدفع الشركة للمندوب حقوقًا سبق تثبيتها؛ حساب استلام التحصيل والمرتجعات يظل في صفحته المستقلة."
+                  : "This page pays recorded courier dues; collection and return handover stays in the separate courier account."}
+              </p>
+            </div>
+            <button className="secondary-button" type="button" onClick={() => onNavigate("courierAccount")}>
+              <HandCoins size={17} />
+              {lang === "ar" ? "فتح حساب المندوب" : "Open courier account"}
+            </button>
+          </div>
+
+          <section className="courier-payout-truth">
+            <ShieldCheck size={18} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "الصرف لا يغيّر حالة شحنة ولا يعيد حساب عمولة قديمة"
+                  : "Payout never changes shipment status or recalculates old commission"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? "كل مبلغ يأتي من بصمة العمولة أو استحقاق الراتب المثبت، ثم ينشئ إيصالًا وحركة خروج واحدة من الخزنة."
+                  : "Every amount comes from a recorded commission snapshot or approved fixed entitlement, then creates one receipt and one treasury outflow."}
+              </small>
+            </span>
+          </section>
+
+          <section className="courier-payout-selector">
+            <label>
+              <span>{lang === "ar" ? "المندوب" : "Courier"}</span>
+              <span className="entry-select">
+                <select value={courierKey} onChange={(event) => chooseCourier(event.target.value)}>
+                  {courierList.map((profile) => (
+                    <option value={profile.courier.en} key={profile.code}>
+                      {profile.courier[lang]} · {profile.code}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} />
+              </span>
+            </label>
+            <div className="courier-payout-profile">
+              <span className="mini-avatar">{selectedCourier.courier[lang].slice(0, 1)}</span>
+              <span>
+                <strong>{selectedCourier.courier[lang]}</strong>
+                <small>{selectedCourier.code} · {selectedCourier.vehicle[lang]}</small>
+              </span>
+            </div>
+            <div className="courier-payout-agreement">
+              <small>{lang === "ar" ? "اتفاق الأجر الحالي" : "Current pay agreement"}</small>
+              <strong>
+                {selectedPlan?.name[lang] ??
+                  (lang === "ar" ? "لا توجد خطة فعالة" : "No active plan")}
+              </strong>
+              <em>{cycleLabel(selectedPlan?.settlementCycle)}</em>
+            </div>
+          </section>
+
+          <section className="courier-payout-metrics">
+            <article>
+              <span><Banknote size={18} /></span>
+              <div><small>{lang === "ar" ? "جاهز للصرف الآن" : "Ready now"}</small><strong>{money.format(dueNow)}</strong></div>
+            </article>
+            <article>
+              <span><CalendarDays size={18} /></span>
+              <div><small>{lang === "ar" ? "موعده لاحق" : "Upcoming"}</small><strong>{money.format(upcomingTotal)}</strong></div>
+            </article>
+            <article>
+              <span><HandCoins size={18} /></span>
+              <div><small>{lang === "ar" ? "إجمالي غير مصروف" : "Total outstanding"}</small><strong>{money.format(totalOutstanding)}</strong></div>
+            </article>
+            <article>
+              <span><ReceiptText size={18} /></span>
+              <div><small>{lang === "ar" ? "صُرف سابقًا" : "Previously paid"}</small><strong>{money.format(totalPaid)}</strong></div>
+            </article>
+          </section>
+
+          <div className="courier-payout-workspace">
+            <section className="courier-payable-card">
+              <div className="courier-payable-heading">
+                <span>
+                  <strong>{lang === "ar" ? "الحقوق المثبتة" : "Recorded entitlements"}</strong>
+                  <small>{lang === "ar" ? "الأقدم يستفيد أولًا عند الصرف الجزئي" : "Oldest due is allocated first on partial payout"}</small>
+                </span>
+                <em>{outstandingSources.length} {lang === "ar" ? "بند" : "items"}</em>
+              </div>
+
+              <div className="courier-payable-section">
+                <div className="courier-payable-section__title">
+                  <span><Check size={15} /><strong>{lang === "ar" ? "جاهز للصرف" : "Ready for payout"}</strong></span>
+                  <b>{money.format(dueNow)}</b>
+                </div>
+                <div className="courier-payable-list">
+                  {dueSources.map((source) => (
+                    <article key={`${source.sourceType}-${source.sourceId}`}>
+                      <span className={source.sourceType === "fixed_salary" ? "is-salary" : ""}>
+                        {source.sourceType === "fixed_salary" ? <CalendarDays size={17} /> : <Truck size={17} />}
+                      </span>
+                      <div>
+                        <strong>{source.title}</strong>
+                        <small>{source.subtitle} · {cycleLabel(source.cycle)}</small>
+                        <em>{source.recordedAt}</em>
+                      </div>
+                      <dl>
+                        <div><dt>{lang === "ar" ? "الأصل" : "Original"}</dt><dd>{money.format(source.amount)}</dd></div>
+                        <div><dt>{lang === "ar" ? "صُرف" : "Paid"}</dt><dd>{money.format(source.paid)}</dd></div>
+                        <div><dt>{lang === "ar" ? "المتبقي" : "Remaining"}</dt><dd>{money.format(source.remaining)}</dd></div>
+                      </dl>
+                      <b>{lang === "ar" ? "استحق" : "Due"} {displayDate(source.dueAt)}</b>
+                    </article>
+                  ))}
+                  {dueSources.length === 0 && (
+                    <div className="courier-payable-empty">
+                      <Check size={26} />
+                      <strong>{lang === "ar" ? "لا توجد حقوق حان موعد صرفها" : "No entitlements are due now"}</strong>
+                      <small>{lang === "ar" ? "أي حق جديد أو مؤجل سيظهر هنا تلقائيًا عند موعده." : "New or deferred dues will appear here automatically when ready."}</small>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {upcomingSources.length > 0 && (
+                <div className="courier-payable-section courier-payable-section--upcoming">
+                  <div className="courier-payable-section__title">
+                    <span><Clock3 size={15} /><strong>{lang === "ar" ? "لم يأتِ موعده" : "Not due yet"}</strong></span>
+                    <b>{money.format(upcomingTotal)}</b>
+                  </div>
+                  <div className="courier-upcoming-list">
+                    {upcomingSources.map((source) => (
+                      <article key={`${source.sourceType}-${source.sourceId}`}>
+                        <span><strong>{source.title}</strong><small>{source.subtitle}</small></span>
+                        <span><small>{lang === "ar" ? "موعد الصرف" : "Payout date"}</small><strong>{displayDate(source.dueAt)}</strong></span>
+                        <b>{money.format(source.remaining)}</b>
+                      </article>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <aside className="courier-payout-panel">
+              <div className="courier-payout-panel__heading">
+                <span><Banknote size={18} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "تنفيذ الصرف" : "Execute payout"}</strong>
+                  <small>{lang === "ar" ? "إيصال واحد وحركة خزنة واحدة" : "One receipt and one treasury movement"}</small>
+                </div>
+              </div>
+
+              <label className="courier-payout-account">
+                <span>{lang === "ar" ? "مصدر الصرف" : "Pay from"}</span>
+                <span className="entry-select">
+                  <select value={accountId} onChange={(event) => { setAccountId(event.target.value as TreasuryAccount["id"]); setError(""); }}>
+                    {accounts.filter((account) => account.state === "active").map((account) => (
+                      <option value={account.id} key={account.id}>{account.name[lang]}</option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} />
+                </span>
+                <small>{lang === "ar" ? "الرصيد المتاح:" : "Available balance:"} {money.format(accountBalance)}</small>
+              </label>
+
+              <div className="courier-payout-amount">
+                <div>
+                  <span>
+                    <strong>{lang === "ar" ? "المبلغ المصروف" : "Payout amount"}</strong>
+                    <small>{lang === "ar" ? "مقفول على كامل المستحق الجاهز" : "Locked to the full ready amount"}</small>
+                  </span>
+                  <button type="button" onClick={toggleCustomAmount}>
+                    {customAmountOpen
+                      ? lang === "ar" ? "إلغاء المبلغ الآخر" : "Cancel other amount"
+                      : lang === "ar" ? "مبلغ آخر" : "Other amount"}
+                  </button>
+                </div>
+                <span className={customAmountOpen ? "active" : ""}>
+                  <input
+                    type="number"
+                    min="0"
+                    max={dueNow}
+                    disabled={!customAmountOpen}
+                    value={customAmountOpen ? customAmountInput : String(dueNow)}
+                    onChange={(event) => { setCustomAmountInput(event.target.value); setError(""); }}
+                  />
+                  <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
+                  {!customAmountOpen && <LockKeyhole size={15} />}
+                </span>
+              </div>
+
+              {customAmountOpen && payoutAmount < dueNow && (
+                <label className="courier-payout-reason">
+                  <span>{lang === "ar" ? "سبب الصرف الجزئي" : "Partial payout reason"} *</span>
+                  <textarea
+                    value={partialReason}
+                    onChange={(event) => { setPartialReason(event.target.value); setError(""); }}
+                    placeholder={lang === "ar" ? "اكتب سبب إبقاء جزء من المستحق..." : "Explain why part of the due remains..."}
+                  />
+                  <small>{lang === "ar" ? "المتبقي بعد الصرف:" : "Remaining after payout:"} {money.format(payoutAfter)}</small>
+                </label>
+              )}
+
+              <div className="courier-payout-allocation">
+                <div>
+                  <small>{lang === "ar" ? "سيغطي الصرف" : "Payout will cover"}</small>
+                  <strong>{dueSources.length} {lang === "ar" ? "بند مستحق بالترتيب" : "due items in order"}</strong>
+                </div>
+                <div>
+                  <small>{lang === "ar" ? "المتبقي للمندوب" : "Courier remains due"}</small>
+                  <strong>{money.format(payoutAfter + upcomingTotal)}</strong>
+                </div>
+              </div>
+
+              {debtBalance > 0 && (
+                <div className="courier-payout-debt-note">
+                  <CircleAlert size={16} />
+                  <span>
+                    <strong>{lang === "ar" ? `مديونية منفصلة: ${money.format(debtBalance)}` : `Separate debt: ${money.format(debtBalance)}`}</strong>
+                    <small>{lang === "ar" ? "لن تُخصم تلقائيًا من المستحق. المقاصة تحتاج عملية مستقلة وصريحة." : "It will not be offset automatically. Set-off requires a separate explicit operation."}</small>
+                  </span>
+                  <button type="button" onClick={() => onNavigate("courierAccount")}>{lang === "ar" ? "فتح الحساب" : "Open account"}</button>
+                </div>
+              )}
+
+              {error && <div className="courier-settlement-error" role="alert"><CircleAlert size={16} />{error}</div>}
+
+              <div className="courier-payout-submit">
+                <span>
+                  <small>{lang === "ar" ? "سيخرج من الخزنة" : "Treasury pays out"}</small>
+                  <strong>{money.format(payoutAmount)}</strong>
+                </span>
+                <button className="primary-button" type="button" disabled={dueNow <= 0} onClick={confirmPayout}>
+                  <ShieldCheck size={17} />
+                  {lang === "ar" ? "تأكيد الصرف وإصدار الإيصال" : "Confirm payout & issue receipt"}
+                </button>
+              </div>
+            </aside>
+          </div>
+
+          <section className="courier-payout-history">
+            <div>
+              <span>
+                <strong>{lang === "ar" ? "سجل صرف المندوب" : "Courier payout history"}</strong>
+                <small>{lang === "ar" ? "كل إيصال يظل مرتبطًا بحركة الخزنة ومصادر الاستحقاق." : "Every receipt remains linked to its treasury movement and entitlement sources."}</small>
+              </span>
+              <em>{selectedPayouts.length} {lang === "ar" ? "إيصال" : "receipts"}</em>
+            </div>
+            <div className="courier-payout-history__list">
+              {[...selectedPayouts].reverse().map((payout) => {
+                const account = accounts.find((item) => item.id === payout.accountId);
+                return (
+                  <article key={payout.id}>
+                    <span><ReceiptText size={17} /></span>
+                    <div><strong>{payout.id}</strong><small>{payout.timestamp[lang]}</small></div>
+                    <div><small>{lang === "ar" ? "من" : "From"}</small><strong>{account?.name[lang] ?? payout.accountId}</strong></div>
+                    <div><small>{lang === "ar" ? "النوع" : "Type"}</small><strong>{payout.mode === "partial" ? (lang === "ar" ? "صرف جزئي" : "Partial") : (lang === "ar" ? "صرف كامل" : "Full")}</strong></div>
+                    <b>{money.format(payout.amount)}</b>
+                  </article>
+                );
+              })}
+              {selectedPayouts.length === 0 && (
+                <div className="courier-payout-history__empty">
+                  <ReceiptText size={24} />
+                  <span><strong>{lang === "ar" ? "لم يصدر إيصال صرف لهذا المندوب" : "No payout receipt for this courier"}</strong><small>{lang === "ar" ? "أول عملية ناجحة ستظهر هنا." : "The first successful payout will appear here."}</small></span>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
+    </div>
+  );
+}
+
 function CourierAccountScreen({
   lang,
   theme,
@@ -23597,6 +24394,7 @@ function CourierAccountScreen({
   governorates,
   debts,
   settlements,
+  payouts,
   onShipmentsChange,
   onDebtsChange,
   onSettlementsChange,
@@ -23613,6 +24411,7 @@ function CourierAccountScreen({
   governorates: GovernorateRecord[];
   debts: CourierDebt[];
   settlements: CourierSettlement[];
+  payouts: CourierPayout[];
   onShipmentsChange: (records: Shipment[]) => void;
   onDebtsChange: (records: CourierDebt[]) => void;
   onSettlementsChange: (records: CourierSettlement[]) => void;
@@ -23833,7 +24632,7 @@ function CourierAccountScreen({
     0,
     totalCommission - commissionPaidNow,
   );
-  const previousDeferredCommission = settlements
+  const previousDeferredCommissionBeforePayout = settlements
     .filter(
       (settlement) =>
         settlement.courier.en === selectedCourier.courier.en,
@@ -23848,6 +24647,19 @@ function CourierAccountScreen({
         ),
       0,
     );
+  const previousDeferredCommissionPaid = payouts
+    .filter(
+      (payout) =>
+        payout.courier.en === selectedCourier.courier.en,
+    )
+    .flatMap((payout) => payout.allocations)
+    .filter((allocation) => allocation.sourceType === "commission")
+    .reduce((sum, allocation) => sum + allocation.amount, 0);
+  const previousDeferredCommission = Math.max(
+    0,
+    previousDeferredCommissionBeforePayout -
+      previousDeferredCommissionPaid,
+  );
   const totalDeferredCommission =
     previousDeferredCommission + deferredCurrentCommission;
   const currentCompanyDue = Math.max(
@@ -23972,6 +24784,23 @@ function CourierAccountScreen({
       }),
     };
     const settlementId = `courier-settlement-${Date.now()}`;
+    const deferredDueDates = commissionResults
+      .filter(
+        ({ result }) =>
+          result.amount != null &&
+          result.amount > 0 &&
+          result.settlementCycle !== "instant" &&
+          result.settlementCycle !== "daily",
+      )
+      .map(({ result }) =>
+        courierCommissionDueAt(result.settlementCycle, now),
+      );
+    const commissionDueAt =
+      deferredDueDates.length > 0
+        ? new Date(
+            Math.max(...deferredDueDates.map((value) => Date.parse(value))),
+          ).toISOString()
+        : undefined;
     const pendingIds = new Set(pendingItems.map((item) => item.event.id));
     onShipmentsChange(
       shipmentRecords.map((shipment) => {
@@ -24134,6 +24963,8 @@ function CourierAccountScreen({
         commissionEarned: totalCommission,
         commissionPaidNow,
         commissionDeferred: deferredCurrentCommission,
+        commissionDueAt,
+        createdAtIso: now.toISOString(),
         planSnapshot: activePlan
           ? {
               id: activePlan.id,
@@ -30771,6 +31602,10 @@ export default function Home() {
   const [sharedCourierSettlements, setSharedCourierSettlements] = useState(
     courierSettlementsData,
   );
+  const [sharedCourierFixedEntitlements, setSharedCourierFixedEntitlements] =
+    useState(courierFixedEntitlementsData);
+  const [sharedCourierPayouts, setSharedCourierPayouts] =
+    useState(courierPayoutsData);
   const [sharedSenderBalances, setSharedSenderBalances] =
     useState(senderBalancesData);
   const [sharedSenderDrafts, setSharedSenderDrafts] = useState(
@@ -30819,6 +31654,8 @@ export default function Home() {
           shipments?: Shipment[];
           courierDebts?: CourierDebt[];
           courierSettlements?: CourierSettlement[];
+          courierFixedEntitlements?: CourierFixedEntitlement[];
+          courierPayouts?: CourierPayout[];
           senderBalances?: SenderBalance[];
           senderDrafts?: SenderSettlementDraft[];
           senderReceipts?: SenderSettlementReceipt[];
@@ -30947,6 +31784,17 @@ export default function Home() {
         }
         if (Array.isArray(parsed.courierSettlements)) {
           setSharedCourierSettlements(parsed.courierSettlements);
+        }
+        if (
+          Array.isArray(parsed.courierFixedEntitlements) &&
+          parsed.courierFixedEntitlements.length > 0
+        ) {
+          setSharedCourierFixedEntitlements(
+            parsed.courierFixedEntitlements,
+          );
+        }
+        if (Array.isArray(parsed.courierPayouts)) {
+          setSharedCourierPayouts(parsed.courierPayouts);
         }
         if (Array.isArray(parsed.senderBalances)) {
           setSharedSenderBalances(parsed.senderBalances);
@@ -31245,6 +32093,8 @@ export default function Home() {
         shipments: sharedShipments,
         courierDebts: sharedCourierDebts,
         courierSettlements: sharedCourierSettlements,
+        courierFixedEntitlements: sharedCourierFixedEntitlements,
+        courierPayouts: sharedCourierPayouts,
         senderBalances: sharedSenderBalances,
         senderDrafts: sharedSenderDrafts,
         senderReceipts: sharedSenderReceipts,
@@ -31259,6 +32109,8 @@ export default function Home() {
     sharedCourierDebts,
     sharedCourierPlans,
     sharedCourierSettlements,
+    sharedCourierFixedEntitlements,
+    sharedCourierPayouts,
     sharedPriceLists,
     sharedSenderBalances,
     sharedSenderDrafts,
@@ -31519,6 +32371,7 @@ export default function Home() {
           governorates={sharedGovernorates}
           debts={sharedCourierDebts}
           settlements={sharedCourierSettlements}
+          payouts={sharedCourierPayouts}
           onShipmentsChange={setSharedShipments}
           onDebtsChange={setSharedCourierDebts}
           onSettlementsChange={setSharedCourierSettlements}
@@ -31526,9 +32379,30 @@ export default function Home() {
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
-           onNavigate={setScreen}
-           onLogout={() => setScreen("login")}
-         />
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "courierPayouts" ? (
+        <CourierPayoutsScreen
+          lang={lang}
+          theme={theme}
+          couriers={sharedCouriers}
+          courierPlans={sharedCourierPlans}
+          settlements={sharedCourierSettlements}
+          fixedEntitlements={sharedCourierFixedEntitlements}
+          payouts={sharedCourierPayouts}
+          debts={sharedCourierDebts}
+          accounts={treasuryAccountsData}
+          movements={sharedTreasuryMovements}
+          onPayoutsChange={setSharedCourierPayouts}
+          onMovementsChange={setSharedTreasuryMovements}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
       ) : screen === "senderAccountPrep" ? (
         <SenderAccountPreparationScreen
           lang={lang}
@@ -31804,6 +32678,7 @@ export default function Home() {
           plans={sharedCourierPlans}
           couriers={sharedCouriers}
           settlements={sharedCourierSettlements}
+          payouts={sharedCourierPayouts}
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
