@@ -253,6 +253,25 @@ type CourierRecord = {
   createdAt: Localized;
 };
 
+type CourierCommissionSnapshot = {
+  planId: string | null;
+  planName: Localized | null;
+  planCode: string | null;
+  planVersion: number | null;
+  compensationType: CourierCompensationType | null;
+  settlementCycle: CourierSettlementCycle | null;
+  areaId: string | null;
+  statusPolicyId: string;
+  amount: number | null;
+  resolution:
+    | "priced"
+    | "salary"
+    | "missing_plan"
+    | "missing_area"
+    | "missing_rate";
+  capturedAt: Localized;
+};
+
 type Shipment = {
   id: string;
   recipientProfileId?: string;
@@ -310,6 +329,7 @@ type Shipment = {
     senderReturnSettled?: boolean;
     senderOtherFees?: number;
     senderOtherFeesLabel?: Localized;
+    courierCommissionSnapshot?: CourierCommissionSnapshot;
   }[];
   pieces: number;
   /** Company revenue for shipping, resolved from the sender price list. */
@@ -408,6 +428,15 @@ type CourierSettlement = {
   collectedAmount: number;
   commissionEarned: number;
   commissionPaidNow: number;
+  commissionDeferred?: number;
+  planSnapshot?: {
+    id: string;
+    name: Localized;
+    code: string;
+    version: number;
+    compensationType: CourierCompensationType;
+    settlementCycle: CourierSettlementCycle;
+  } | null;
   debtPayment: number;
   expectedCash: number;
   actualCash: number;
@@ -2741,6 +2770,102 @@ const courierRatePlansData: CourierRatePlan[] = [
   },
 ];
 
+function resolveCourierPayPlan(
+  courier: Localized,
+  plans: CourierRatePlan[],
+) {
+  return (
+    plans.find(
+      (plan) =>
+        plan.state === "active" &&
+        plan.couriers.some(
+          (assignedCourier) =>
+            assignedCourier.en === courier.en ||
+            assignedCourier.ar === courier.ar,
+        ),
+    ) ??
+    plans.find((plan) => plan.state === "active" && plan.isDefault) ??
+    null
+  );
+}
+
+function captureCourierCommissionSnapshot({
+  courier,
+  shipment,
+  statusPolicyId,
+  plans,
+  governorates,
+  capturedAt,
+}: {
+  courier: Localized;
+  shipment: Shipment;
+  statusPolicyId: string;
+  plans: CourierRatePlan[];
+  governorates: GovernorateRecord[];
+  capturedAt: Localized;
+}): CourierCommissionSnapshot {
+  const plan = resolveCourierPayPlan(courier, plans);
+  if (!plan) {
+    return {
+      planId: null,
+      planName: null,
+      planCode: null,
+      planVersion: null,
+      compensationType: null,
+      settlementCycle: null,
+      areaId: null,
+      statusPolicyId,
+      amount: null,
+      resolution: "missing_plan",
+      capturedAt,
+    };
+  }
+
+  const base = {
+    planId: plan.id,
+    planName: plan.name,
+    planCode: plan.code,
+    planVersion: plan.version,
+    compensationType: plan.compensationType,
+    settlementCycle: plan.settlementCycle,
+    statusPolicyId,
+    capturedAt,
+  };
+
+  if (plan.compensationType === "salary") {
+    return {
+      ...base,
+      areaId: null,
+      amount: 0,
+      resolution: "salary",
+    };
+  }
+
+  const area = governorates
+    .flatMap((governorate) => governorate.areas)
+    .find(
+      (candidate) =>
+        candidate.name.en === shipment.area.en ||
+        candidate.name.ar === shipment.area.ar,
+    );
+  if (!area) {
+    return {
+      ...base,
+      areaId: null,
+      amount: null,
+      resolution: "missing_area",
+    };
+  }
+
+  const amount = plan.rates[area.id]?.[statusPolicyId] ?? null;
+  return {
+    ...base,
+    areaId: area.id,
+    amount,
+    resolution: amount == null ? "missing_rate" : "priced",
+  };
+}
+
 const courierDebtsData: CourierDebt[] = [
   {
     id: "courier-debt-demo-1",
@@ -2971,7 +3096,7 @@ const courierRateCopy = {
     newTitle: "إضافة خطة أجر جديدة",
     arabicName: "اسم الخطة بالعربية",
     englishName: "اسم الخطة بالإنجليزية",
-    code: "الكود الداخلي",
+    code: "رقم الخطة (يُنشأ تلقائيًا)",
     state: "حالة الاستخدام",
     compensationType: "نظام الأجر",
     settlementCycle: "دورية صرف المستحق",
@@ -3039,7 +3164,7 @@ const courierRateCopy = {
     newTitle: "Add new pay plan",
     arabicName: "Arabic plan name",
     englishName: "English plan name",
-    code: "Internal code",
+    code: "Plan number (automatic)",
     state: "Usage state",
     compensationType: "Pay model",
     settlementCycle: "Settlement cycle",
@@ -10845,13 +10970,8 @@ function CourierPlanEditor({
                     <input
                       dir="ltr"
                       value={draft.code}
-                      onChange={(event) =>
-                        setDraft((current) => ({
-                          ...current,
-                          code: event.target.value.toUpperCase().replace(/\s+/g, "-"),
-                        }))
-                      }
-                      required
+                      readOnly
+                      aria-readonly="true"
                     />
                   </span>
                 </label>
@@ -11025,6 +11145,7 @@ function CourierRatesScreen({
   theme,
   plans,
   couriers,
+  settlements,
   statuses,
   governorates,
   onLang,
@@ -11037,6 +11158,7 @@ function CourierRatesScreen({
   theme: Theme;
   plans: CourierRatePlan[];
   couriers: CourierRecord[];
+  settlements: CourierSettlement[];
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
   onLang: () => void;
@@ -11192,11 +11314,16 @@ function CourierRatesScreen({
         courierStatuses.map((status) => [status.id, null]),
       );
     });
+    const nextCodeNumber =
+      plans.reduce((largest, plan) => {
+        const match = /^CP-(\d+)$/.exec(plan.code);
+        return match ? Math.max(largest, Number(match[1])) : largest;
+      }, 0) + 1;
     setIsNew(true);
     setEditing({
       id: `courier-plan-${Date.now()}`,
       name: { ar: "", en: "" },
-      code: "",
+      code: `CP-${String(nextCodeNumber).padStart(4, "0")}`,
       state: "draft",
       isDefault: false,
       compensationType: "commission",
@@ -11263,6 +11390,21 @@ function CourierRatesScreen({
         )
         .filter((record): record is CourierRecord => Boolean(record))
     : [];
+  const selectedCourierKeys = new Set(
+    selected?.couriers.map((courier) => courier.en) ?? [],
+  );
+  const selectedDeferredCommission = settlements
+    .filter((settlement) => selectedCourierKeys.has(settlement.courier.en))
+    .reduce(
+      (sum, settlement) =>
+        sum +
+        Math.max(
+          0,
+          settlement.commissionDeferred ??
+            settlement.commissionEarned - settlement.commissionPaidNow,
+        ),
+      0,
+    );
 
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
@@ -11581,6 +11723,19 @@ function CourierRatesScreen({
                           {lang === "ar" ? "موعد الصرف" : "Payout timing"}
                         </small>
                         <strong>{cycleLabel(selected.settlementCycle)}</strong>
+                      </article>
+                      <article>
+                        <small>
+                          {lang === "ar"
+                            ? "عمولات مثبتة لم تُصرف"
+                            : "Recorded unpaid commission"}
+                        </small>
+                        <strong>
+                          {selectedDeferredCommission.toLocaleString(
+                            lang === "ar" ? "ar-EG" : "en-EG",
+                          )}{" "}
+                          {c.priceCurrency}
+                        </strong>
                       </article>
                       <article>
                         <small>
@@ -18130,6 +18285,8 @@ function CourierShipmentsScreen({
   shipmentRecords,
   statuses,
   couriers,
+  courierPlans,
+  governorates,
   onShipmentsChange,
   onLang,
   onTheme,
@@ -18141,6 +18298,8 @@ function CourierShipmentsScreen({
   shipmentRecords: Shipment[];
   statuses: StatusPolicy[];
   couriers: CourierRecord[];
+  courierPlans: CourierRatePlan[];
+  governorates: GovernorateRecord[];
   onShipmentsChange: (records: Shipment[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -18349,6 +18508,14 @@ function CourierShipmentsScreen({
       deliveredSnapshot === null
         ? null
         : Math.max(0, selectedShipment.pieces - deliveredSnapshot);
+    const courierCommissionSnapshot = captureCourierCommissionSnapshot({
+      courier: selectedCourier.courier,
+      shipment: selectedShipment,
+      statusPolicyId: selectedStatus.id,
+      plans: courierPlans,
+      governorates,
+      capturedAt: timestamp,
+    });
     const isFullyDelivered =
       selectedStatus.pieceEffect.en === "All pieces delivered";
     const nextCustody: Localized = isFullyDelivered
@@ -18418,6 +18585,7 @@ function CourierShipmentsScreen({
             nextDate,
             timestamp,
             settlementStatus: "pending" as const,
+            courierCommissionSnapshot,
           },
           ...(shipment.statusHistory ?? []),
         ],
@@ -23515,18 +23683,10 @@ function CourierAccountScreen({
       )
       .map((event) => ({ shipment, event })),
   );
-  const activePlan =
-    courierPlans.find(
-      (plan) =>
-        plan.state === "active" &&
-        plan.couriers.some(
-          (courier) => courier.en === selectedCourier.courier.en,
-        ),
-    ) ??
-    courierPlans.find(
-      (plan) => plan.state === "active" && plan.isDefault,
-    ) ??
-    courierPlans[0];
+  const activePlan = resolveCourierPayPlan(
+    selectedCourier.courier,
+    courierPlans,
+  );
   const activeDebts = debts.filter(
     (debt) =>
       debt.courier.en === selectedCourier.courier.en &&
@@ -23550,14 +23710,57 @@ function CourierAccountScreen({
     shipment: Shipment;
     event: NonNullable<Shipment["statusHistory"]>[number];
   }) {
-    if (!activePlan || activePlan.compensationType === "salary") return 0;
+    const captured = item.event.courierCommissionSnapshot;
+    if (captured) {
+      return {
+        amount: captured.amount,
+        resolution: captured.resolution,
+        settlementCycle: captured.settlementCycle,
+        planId: captured.planId,
+        planVersion: captured.planVersion,
+      };
+    }
+    if (!activePlan) {
+      return {
+        amount: null,
+        resolution: "missing_plan" as const,
+        settlementCycle: null,
+        planId: null,
+        planVersion: null,
+      };
+    }
+    if (activePlan.compensationType === "salary") {
+      return {
+        amount: 0,
+        resolution: "salary" as const,
+        settlementCycle: activePlan.settlementCycle,
+        planId: activePlan.id,
+        planVersion: activePlan.version,
+      };
+    }
     const area = areaRecords.find(
       (record) =>
         record.area.name.en === item.shipment.area.en ||
         record.area.name.ar === item.shipment.area.ar,
     );
-    if (!area) return 0;
-    return activePlan.rates[area.area.id]?.[item.event.statusPolicyId] ?? 0;
+    if (!area) {
+      return {
+        amount: null,
+        resolution: "missing_area" as const,
+        settlementCycle: activePlan.settlementCycle,
+        planId: activePlan.id,
+        planVersion: activePlan.version,
+      };
+    }
+    const amount =
+      activePlan.rates[area.area.id]?.[item.event.statusPolicyId] ?? null;
+    return {
+      amount,
+      resolution: amount == null ? ("missing_rate" as const) : ("priced" as const),
+      settlementCycle: activePlan.settlementCycle,
+      planId: activePlan.id,
+      planVersion: activePlan.version,
+    };
   }
 
   function cycleLabel(cycle: CourierSettlementCycle) {
@@ -23605,17 +23808,48 @@ function CourierAccountScreen({
     (sum, item) => sum + (item.event.collectedAmount ?? 0),
     0,
   );
-  const totalCommission = pendingItems.reduce(
-    (sum, item) => sum + itemCommission(item),
+  const commissionResults = pendingItems.map((item) => ({
+    item,
+    result: itemCommission(item),
+  }));
+  const commissionGaps = commissionResults.filter(
+    ({ result }) => result.amount == null,
+  );
+  const totalCommission = commissionResults.reduce(
+    (sum, { result }) => sum + (result.amount ?? 0),
     0,
   );
-  const commissionPaidNow =
-    activePlan &&
-    activePlan.compensationType !== "salary" &&
-    (activePlan.settlementCycle === "instant" ||
-      activePlan.settlementCycle === "daily")
-      ? totalCommission
-      : 0;
+  const commissionPaidNow = commissionResults.reduce(
+    (sum, { result }) =>
+      sum +
+      (result.amount != null &&
+      (result.settlementCycle === "instant" ||
+        result.settlementCycle === "daily")
+        ? result.amount
+        : 0),
+    0,
+  );
+  const deferredCurrentCommission = Math.max(
+    0,
+    totalCommission - commissionPaidNow,
+  );
+  const previousDeferredCommission = settlements
+    .filter(
+      (settlement) =>
+        settlement.courier.en === selectedCourier.courier.en,
+    )
+    .reduce(
+      (sum, settlement) =>
+        sum +
+        Math.max(
+          0,
+          settlement.commissionDeferred ??
+            settlement.commissionEarned - settlement.commissionPaidNow,
+        ),
+      0,
+    );
+  const totalDeferredCommission =
+    previousDeferredCommission + deferredCurrentCommission;
   const currentCompanyDue = Math.max(
     0,
     totalCollected - commissionPaidNow,
@@ -23679,6 +23913,14 @@ function CourierAccountScreen({
         lang === "ar"
           ? "لا توجد شحنات غير مسوّاة أو دفعة مديونية لاستلامها."
           : "There are no unsettled shipments or debt payments to receive.",
+      );
+      return;
+    }
+    if (commissionGaps.length > 0) {
+      setError(
+        lang === "ar"
+          ? `لا يمكن إغلاق الحساب: توجد ${commissionGaps.length} شحنة بلا عمولة محددة. راجع قائمة عمولات المندوب أولًا.`
+          : `The account cannot be closed: ${commissionGaps.length} shipment(s) have no defined courier commission. Review the courier commission list first.`,
       );
       return;
     }
@@ -23891,6 +24133,17 @@ function CourierAccountScreen({
         collectedAmount: totalCollected,
         commissionEarned: totalCommission,
         commissionPaidNow,
+        commissionDeferred: deferredCurrentCommission,
+        planSnapshot: activePlan
+          ? {
+              id: activePlan.id,
+              name: activePlan.name,
+              code: activePlan.code,
+              version: activePlan.version,
+              compensationType: activePlan.compensationType,
+              settlementCycle: activePlan.settlementCycle,
+            }
+          : null,
         debtPayment,
         expectedCash,
         actualCash,
@@ -24096,7 +24349,13 @@ function CourierAccountScreen({
               <span><Truck size={18} /></span>
               <div>
                 <small>{lang === "ar" ? "عمولة مكتسبة" : "Commission earned"}</small>
-                <strong>{money.format(totalCommission)}</strong>
+                <strong>
+                  {commissionGaps.length
+                    ? lang === "ar"
+                      ? "غير مكتملة"
+                      : "Incomplete"
+                    : money.format(totalCommission)}
+                </strong>
               </div>
             </article>
             <article>
@@ -24114,6 +24373,32 @@ function CourierAccountScreen({
               </div>
             </article>
           </section>
+
+          {commissionGaps.length > 0 && (
+            <section className="courier-commission-gap" role="alert">
+              <CircleAlert size={18} />
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? `${commissionGaps.length} شحنة بلا عمولة محددة — الحساب لن يُغلق كصفر`
+                    : `${commissionGaps.length} shipment(s) have no commission — the account will not close them as zero`}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "العمولة الناقصة تظهر كاستثناء مالي حتى يُحدد سعر المنطقة والحالة في قائمة عمولات المندوب."
+                    : "A missing commission remains a financial exception until the area/status rate is defined in the courier commission list."}
+                </small>
+              </span>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => onNavigate("courierRates")}
+              >
+                <Settings2 size={15} />
+                {lang === "ar" ? "فتح قوائم العمولات" : "Open commission lists"}
+              </button>
+            </section>
+          )}
 
           {pendingItems.length > 0 && (
             <section className="courier-payer-review">
@@ -24306,13 +24591,21 @@ function CourierAccountScreen({
                 </div>
                 <div className="courier-account-table__body">
                   {pendingItems.map((item) => {
-                    const commission = itemCommission(item);
+                    const commissionResult = itemCommission(item);
+                    const commission = commissionResult.amount;
                     const paidNow =
-                      commissionPaidNow > 0 ? commission : 0;
-                    const companyDue = Math.max(
-                      0,
-                      (item.event.collectedAmount ?? 0) - paidNow,
-                    );
+                      commission != null &&
+                      (commissionResult.settlementCycle === "instant" ||
+                        commissionResult.settlementCycle === "daily")
+                        ? commission
+                        : 0;
+                    const companyDue =
+                      commission == null
+                        ? null
+                        : Math.max(
+                            0,
+                            (item.event.collectedAmount ?? 0) - paidNow,
+                          );
                     return (
                       <button
                         type="button"
@@ -24342,12 +24635,30 @@ function CourierAccountScreen({
                           </strong>
                         </span>
                         <span className="courier-account-money">
-                          <small>{cycleLabel(activePlan?.settlementCycle ?? "daily")}</small>
-                          <strong>{money.format(commission)}</strong>
+                          <small>
+                            {commissionResult.settlementCycle
+                              ? cycleLabel(commissionResult.settlementCycle)
+                              : lang === "ar"
+                                ? "تحتاج ضبط"
+                                : "Needs setup"}
+                          </small>
+                          <strong className={commission == null ? "is-missing" : ""}>
+                            {commission == null
+                              ? lang === "ar"
+                                ? "غير محددة"
+                                : "Not set"
+                              : money.format(commission)}
+                          </strong>
                         </span>
                         <span className="courier-account-money courier-account-money--due">
                           <small>{lang === "ar" ? "للشركة" : "Company"}</small>
-                          <strong>{money.format(companyDue)}</strong>
+                          <strong>
+                            {companyDue == null
+                              ? lang === "ar"
+                                ? "بعد الضبط"
+                                : "After setup"
+                              : money.format(companyDue)}
+                          </strong>
                         </span>
                         <span className="courier-account-pieces">
                           <strong>{item.event.deliveredPieces ?? "—"}</strong>
@@ -24421,17 +24732,49 @@ function CourierAccountScreen({
                 </span>
                 <span>
                   <small>{lang === "ar" ? "عمولة مكتسبة" : "Commission earned"}</small>
-                  <strong>{money.format(totalCommission)}</strong>
+                  <strong>
+                    {commissionGaps.length
+                      ? lang === "ar"
+                        ? "تحتاج استكمال"
+                        : "Needs completion"
+                      : money.format(totalCommission)}
+                  </strong>
                 </span>
                 <span>
-                  <small>{lang === "ar" ? "عمولة تُدفع الآن" : "Commission paid now"}</small>
+                  <small>{lang === "ar" ? "تُصرف/تُخصم الآن" : "Paid/offset now"}</small>
                   <strong>- {money.format(commissionPaidNow)}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "تُرحّل من الحساب الحالي" : "Deferred from this account"}</small>
+                  <strong>{money.format(deferredCurrentCommission)}</strong>
+                </span>
+                <span>
+                  <small>{lang === "ar" ? "رصيد عمولات مؤجلة سابقًا" : "Previous deferred commission"}</small>
+                  <strong>{money.format(previousDeferredCommission)}</strong>
                 </span>
                 <span className="courier-settlement-breakdown__due">
                   <small>{lang === "ar" ? "مطلوب من الحساب الحالي" : "Current account due"}</small>
                   <strong>{money.format(currentCompanyDue)}</strong>
                 </span>
               </div>
+
+              {totalDeferredCommission > 0 && (
+                <div className="courier-commission-accrual-note">
+                  <CalendarDays size={16} />
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? `إجمالي عمولات محفوظة للصرف: ${money.format(totalDeferredCommission)}`
+                        : `Total commission saved for payout: ${money.format(totalDeferredCommission)}`}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "دورية الصرف تحدد موعد دفعها فقط؛ تحصيل الشركة لا يختفي ولا تُعتبر العمولة صفرًا."
+                        : "The payout cycle controls when it is paid; company collection remains recorded and commission is never treated as zero."}
+                    </small>
+                  </span>
+                </div>
+              )}
 
               <div className="courier-debt-card">
                 <div className="courier-debt-card__heading">
@@ -24660,7 +25003,10 @@ function CourierAccountScreen({
                 <button
                   className="primary-button"
                   type="button"
-                  disabled={!pendingItems.length && debtPayment === 0}
+                  disabled={
+                    (!pendingItems.length && debtPayment === 0) ||
+                    commissionGaps.length > 0
+                  }
                   onClick={settleCourierAccount}
                 >
                   <ShieldCheck size={17} />
@@ -24758,7 +25104,13 @@ function CourierAccountScreen({
                   </span>
                   <span>
                     <small>{lang === "ar" ? "عمولة المندوب" : "Courier commission"}</small>
-                    <strong>{money.format(itemCommission(selectedItem))}</strong>
+                    <strong>
+                      {itemCommission(selectedItem).amount == null
+                        ? lang === "ar"
+                          ? "غير محددة — تمنع التسوية"
+                          : "Not set — settlement blocked"
+                        : money.format(itemCommission(selectedItem).amount ?? 0)}
+                    </strong>
                   </span>
                   <span>
                     <small>{lang === "ar" ? "القطع المسلّمة" : "Delivered pieces"}</small>
@@ -31268,6 +31620,8 @@ export default function Home() {
           shipmentRecords={sharedShipments}
           statuses={sharedStatuses}
           couriers={sharedCouriers}
+          courierPlans={sharedCourierPlans}
+          governorates={sharedGovernorates}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
@@ -31449,6 +31803,7 @@ export default function Home() {
           theme={theme}
           plans={sharedCourierPlans}
           couriers={sharedCouriers}
+          settlements={sharedCourierSettlements}
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}

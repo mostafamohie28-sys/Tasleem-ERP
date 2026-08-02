@@ -49,8 +49,13 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /function AlertsScreen/);
   assert.match(page, /اعتماد محاسب التشغيل لمتحمّل الشحن/);
   assert.match(page, /مرجع الراسل غير مسجل/);
+  assert.match(page, /courierCommissionSnapshot/);
+  assert.match(page, /captureCourierCommissionSnapshot/);
+  assert.match(page, /الحساب لن يُغلق كصفر/);
+  assert.match(page, /commissionDeferred/);
   assert.match(page, /tasleem-control-center-v2/);
   assert.match(css, /courier-payer-review/);
+  assert.match(css, /courier-commission-gap/);
   assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.sidebar\s*\{[\s\S]*?z-index:\s*75/);
   assert.match(layout, /Tasleem ERP/);
   assert.match(packageJson, /"build":\s*"vinext build"/);
