@@ -61,6 +61,10 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /استبدال شحنات بين المناديب/);
   assert.match(page, /استبدال الشحنات بين الرسل/);
   assert.match(page, /replacementHistory/);
+  assert.match(page, /function AccessControlScreen/);
+  assert.match(page, /permissionCatalog/);
+  assert.match(page, /sharedAccessActivities/);
+  assert.match(page, /accessActivities:\s*sharedAccessActivities/);
   assert.match(page, /سعر المنطقة غير مكتمل للراسل البديل/);
   assert.match(page, /tasleem-control-center-v2/);
   assert.match(css, /courier-payer-review/);
@@ -68,6 +72,9 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /courier-payout-workspace/);
   assert.match(css, /replacement-workspace/);
   assert.match(css, /replacement-confirm-layer/);
+  assert.match(css, /access-role-workspace/);
+  assert.match(css, /activity-timeline/);
+  assert.match(css, /access-dialog-layer/);
   assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.sidebar\s*\{[\s\S]*?z-index:\s*75/);
   assert.match(layout, /Tasleem ERP/);
   assert.match(packageJson, /"build":\s*"vinext build"/);

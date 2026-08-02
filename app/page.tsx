@@ -94,6 +94,10 @@ type Screen =
   | "senders"
   | "recipients"
   | "couriers"
+  | "employees"
+  | "users"
+  | "roles"
+  | "activity"
   | "treasury"
   | "alerts"
   | "companyPolicy";
@@ -255,6 +259,66 @@ type CourierRecord = {
   state: "active" | "paused";
   notes: string;
   createdAt: Localized;
+};
+
+type EmployeeRecord = {
+  id: string;
+  code: string;
+  name: Localized;
+  phone: string;
+  jobTitle: Localized;
+  department: Localized;
+  workplace: Localized;
+  state: "active" | "suspended" | "ended";
+  startDate: string;
+  endDate: string;
+  notes: string;
+  createdAt: Localized;
+};
+
+type UserAccountRecord = {
+  id: string;
+  employeeId: string;
+  loginIdentifier: string;
+  roleIds: string[];
+  scope: "company" | "branch" | "warehouse" | "self";
+  state: "invited" | "active" | "locked" | "disabled";
+  invitationState: "pending" | "accepted" | "expired" | "not_applicable";
+  mfaState: "required" | "complete" | "not_required";
+  activeSessions: number;
+  lastLogin: Localized;
+  createdAt: Localized;
+};
+
+type PermissionCatalogEntry = {
+  id: string;
+  module: Localized;
+  label: Localized;
+  description: Localized;
+  sensitivity: "normal" | "sensitive";
+};
+
+type AccessRole = {
+  id: string;
+  code: string;
+  name: Localized;
+  description: Localized;
+  state: "active" | "draft" | "assignments_disabled";
+  protected: boolean;
+  version: number;
+  permissionIds: string[];
+};
+
+type AccessActivity = {
+  id: string;
+  category: "people" | "access" | "security" | "operational";
+  outcome: "succeeded" | "rejected" | "technical_failure";
+  event: Localized;
+  actor: Localized;
+  target: Localized;
+  details: Localized;
+  timestamp: Localized;
+  occurredAtIso: string;
 };
 
 type CourierCommissionSnapshot = {
@@ -2729,6 +2793,477 @@ const courierRecordsData: CourierRecord[] = availableCouriers.map(
   }),
 );
 
+const permissionCatalog: PermissionCatalogEntry[] = [
+  {
+    id: "shipments.view",
+    module: { ar: "الشحنات", en: "Shipments" },
+    label: { ar: "مشاهدة الشحنات", en: "View shipments" },
+    description: {
+      ar: "عرض الشحنات داخل نطاق المستخدم فقط.",
+      en: "View shipments inside the user's effective scope.",
+    },
+    sensitivity: "normal",
+  },
+  {
+    id: "shipments.create",
+    module: { ar: "الشحنات", en: "Shipments" },
+    label: { ar: "إضافة شحنة", en: "Create shipment" },
+    description: {
+      ar: "تسجيل شحنة موجودة فعليًا في الشركة.",
+      en: "Register a shipment physically present at the company.",
+    },
+    sensitivity: "normal",
+  },
+  {
+    id: "shipments.status",
+    module: { ar: "الشحنات", en: "Shipments" },
+    label: { ar: "تسجيل حالة", en: "Record status" },
+    description: {
+      ar: "استخدام الحالات المسموحة للدور.",
+      en: "Use shipment statuses allowed for the role.",
+    },
+    sensitivity: "normal",
+  },
+  {
+    id: "shipments.assign",
+    module: { ar: "الشحنات", en: "Shipments" },
+    label: { ar: "الإسناد والاستبدال", en: "Assign and replace" },
+    description: {
+      ar: "إسناد الشحنات واستبدال المندوب داخل النطاق.",
+      en: "Assign shipments and replace couriers inside scope.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "senders.manage",
+    module: { ar: "الرسل", en: "Senders" },
+    label: { ar: "إدارة الرسل والسياسات", en: "Manage senders and policies" },
+    description: {
+      ar: "تعديل ملف الراسل وسياساته التشغيلية.",
+      en: "Edit sender profiles and operating policies.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "senders.settle",
+    module: { ar: "الرسل", en: "Senders" },
+    label: { ar: "تجهيز وتسوية الراسل", en: "Prepare and settle sender" },
+    description: {
+      ar: "إنشاء حساب الراسل وتنفيذ الدفع والمرتجع.",
+      en: "Prepare sender accounts and execute money and returns.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "couriers.manage",
+    module: { ar: "المناديب", en: "Couriers" },
+    label: { ar: "إدارة المناديب", en: "Manage couriers" },
+    description: {
+      ar: "تعديل ملفات المناديب وخطط عمولاتهم.",
+      en: "Edit courier profiles and compensation plans.",
+    },
+    sensitivity: "normal",
+  },
+  {
+    id: "couriers.settle",
+    module: { ar: "المناديب", en: "Couriers" },
+    label: { ar: "تسوية حساب المندوب", en: "Settle courier account" },
+    description: {
+      ar: "اعتماد التحصيل والمرتجعات ومتحمل الشحن.",
+      en: "Approve collection, returns and shipping payer.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "couriers.pay",
+    module: { ar: "المناديب", en: "Couriers" },
+    label: { ar: "صرف مستحق المندوب", en: "Pay courier entitlement" },
+    description: {
+      ar: "صرف المستحقات المثبتة من خزنة مسموحة.",
+      en: "Pay recorded courier entitlements from an allowed treasury.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "treasury.view",
+    module: { ar: "المالية", en: "Finance" },
+    label: { ar: "مشاهدة الخزنة", en: "View treasury" },
+    description: {
+      ar: "عرض الأرصدة والحركات المسموحة.",
+      en: "View allowed balances and movements.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "treasury.post",
+    module: { ar: "المالية", en: "Finance" },
+    label: { ar: "تسجيل حركة مالية", en: "Post financial movement" },
+    description: {
+      ar: "إنشاء حركة مالية يدوية موثقة.",
+      en: "Create a documented manual financial movement.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "treasury.approve",
+    module: { ar: "المالية", en: "Finance" },
+    label: { ar: "اعتماد التصحيح المالي", en: "Approve financial correction" },
+    description: {
+      ar: "اعتماد تصحيح أو عملية مالية حساسة.",
+      en: "Approve a correction or sensitive financial action.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "access.users",
+    module: { ar: "الوصول والأمان", en: "Access & security" },
+    label: { ar: "إدارة المستخدمين", en: "Manage users" },
+    description: {
+      ar: "إضافة الحسابات وقفلها وتعطيلها وسحب الجلسات.",
+      en: "Create, lock, disable accounts and revoke sessions.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "access.roles",
+    module: { ar: "الوصول والأمان", en: "Access & security" },
+    label: { ar: "إدارة الأدوار", en: "Manage roles" },
+    description: {
+      ar: "تعديل تعريفات الأدوار ونشر إصداراتها.",
+      en: "Edit role definitions and publish their versions.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "access.audit",
+    module: { ar: "الوصول والأمان", en: "Access & security" },
+    label: { ar: "قراءة سجل النشاط", en: "View activity log" },
+    description: {
+      ar: "عرض أحداث التشغيل والأمان المسموحة.",
+      en: "View allowed operational and security events.",
+    },
+    sensitivity: "sensitive",
+  },
+];
+
+const allPermissionIds = permissionCatalog.map((permission) => permission.id);
+
+const accessRolesData: AccessRole[] = [
+  {
+    id: "role-owner",
+    code: "OWNER",
+    name: { ar: "مالك الشركة", en: "Company owner" },
+    description: {
+      ar: "دور محمي لإدارة الشركة ولا يعدل من المحرر العام.",
+      en: "Protected company administration role.",
+    },
+    state: "active",
+    protected: true,
+    version: 1,
+    permissionIds: allPermissionIds,
+  },
+  {
+    id: "role-operations-manager",
+    code: "OPERATIONS_MANAGER",
+    name: { ar: "مدير التشغيل", en: "Operations manager" },
+    description: {
+      ar: "إدارة الشحنات والإسناد والمناديب والمتابعة.",
+      en: "Manage shipments, assignment, couriers and follow-up.",
+    },
+    state: "active",
+    protected: false,
+    version: 3,
+    permissionIds: [
+      "shipments.view",
+      "shipments.create",
+      "shipments.status",
+      "shipments.assign",
+      "senders.manage",
+      "couriers.manage",
+      "couriers.settle",
+      "access.audit",
+    ],
+  },
+  {
+    id: "role-warehouse",
+    code: "WAREHOUSE_EMPLOYEE",
+    name: { ar: "موظف المخزن", en: "Warehouse employee" },
+    description: {
+      ar: "إضافة الشحنات والمخزن واستكمال البيانات.",
+      en: "Shipment intake, warehouse and data completion.",
+    },
+    state: "active",
+    protected: false,
+    version: 2,
+    permissionIds: [
+      "shipments.view",
+      "shipments.create",
+      "shipments.status",
+    ],
+  },
+  {
+    id: "role-customer-service",
+    code: "CUSTOMER_SERVICE",
+    name: { ar: "خدمة العملاء", en: "Customer service" },
+    description: {
+      ar: "التأكيد والمتابعة وملاحظات المستلمين.",
+      en: "Confirmation, follow-up and recipient notes.",
+    },
+    state: "active",
+    protected: false,
+    version: 2,
+    permissionIds: ["shipments.view", "shipments.status"],
+  },
+  {
+    id: "role-accounting",
+    code: "OPERATIONS_ACCOUNTANT",
+    name: { ar: "محاسب التشغيل", en: "Operations accountant" },
+    description: {
+      ar: "تسويات المناديب والرسل وحركات الخزنة المسموحة.",
+      en: "Courier, sender and permitted treasury settlements.",
+    },
+    state: "active",
+    protected: false,
+    version: 2,
+    permissionIds: [
+      "shipments.view",
+      "senders.settle",
+      "couriers.settle",
+      "couriers.pay",
+      "treasury.view",
+      "treasury.post",
+    ],
+  },
+];
+
+const employeesData: EmployeeRecord[] = [
+  {
+    id: "employee-1",
+    code: "EMP-0001",
+    name: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    phone: "0100 204 1985",
+    jobTitle: { ar: "مدير النظام", en: "System administrator" },
+    department: { ar: "الإدارة", en: "Management" },
+    workplace: { ar: "الفرع الرئيسي", en: "Main branch" },
+    state: "active",
+    startDate: "2025-01-05",
+    endDate: "",
+    notes: "",
+    createdAt: { ar: "5 يناير 2025", en: "5 Jan 2025" },
+  },
+  {
+    id: "employee-2",
+    code: "EMP-0002",
+    name: { ar: "محمود عادل", en: "Mahmoud Adel" },
+    phone: "0112 774 3051",
+    jobTitle: { ar: "مدير التشغيل", en: "Operations manager" },
+    department: { ar: "التشغيل", en: "Operations" },
+    workplace: { ar: "الفرع الرئيسي", en: "Main branch" },
+    state: "active",
+    startDate: "2025-03-12",
+    endDate: "",
+    notes: "",
+    createdAt: { ar: "12 مارس 2025", en: "12 Mar 2025" },
+  },
+  {
+    id: "employee-3",
+    code: "EMP-0003",
+    name: { ar: "سارة إبراهيم", en: "Sara Ibrahim" },
+    phone: "0122 507 6319",
+    jobTitle: { ar: "موظف مخزن", en: "Warehouse employee" },
+    department: { ar: "المخزن", en: "Warehouse" },
+    workplace: { ar: "المخزن الرئيسي", en: "Main warehouse" },
+    state: "active",
+    startDate: "2025-06-01",
+    endDate: "",
+    notes: "",
+    createdAt: { ar: "1 يونيو 2025", en: "1 Jun 2025" },
+  },
+  {
+    id: "employee-4",
+    code: "EMP-0004",
+    name: { ar: "ندى سمير", en: "Nada Samir" },
+    phone: "0109 332 4810",
+    jobTitle: { ar: "خدمة عملاء", en: "Customer service" },
+    department: { ar: "خدمة العملاء", en: "Customer service" },
+    workplace: { ar: "الفرع الرئيسي", en: "Main branch" },
+    state: "active",
+    startDate: "2026-01-10",
+    endDate: "",
+    notes: "",
+    createdAt: { ar: "10 يناير 2026", en: "10 Jan 2026" },
+  },
+  {
+    id: "employee-5",
+    code: "EMP-0005",
+    name: { ar: "يوسف طارق", en: "Youssef Tarek" },
+    phone: "0155 118 9062",
+    jobTitle: { ar: "محاسب تشغيل", en: "Operations accountant" },
+    department: { ar: "الحسابات", en: "Accounting" },
+    workplace: { ar: "الفرع الرئيسي", en: "Main branch" },
+    state: "active",
+    startDate: "2025-09-18",
+    endDate: "",
+    notes: "",
+    createdAt: { ar: "18 سبتمبر 2025", en: "18 Sep 2025" },
+  },
+  {
+    id: "employee-6",
+    code: "EMP-0006",
+    name: { ar: "ريم خالد", en: "Reem Khaled" },
+    phone: "0111 664 2075",
+    jobTitle: { ar: "مساعد تشغيل", en: "Operations assistant" },
+    department: { ar: "التشغيل", en: "Operations" },
+    workplace: { ar: "الفرع الرئيسي", en: "Main branch" },
+    state: "suspended",
+    startDate: "2026-02-02",
+    endDate: "",
+    notes: "إيقاف إداري مؤقت",
+    createdAt: { ar: "2 فبراير 2026", en: "2 Feb 2026" },
+  },
+];
+
+const userAccountsData: UserAccountRecord[] = [
+  {
+    id: "user-1",
+    employeeId: "employee-1",
+    loginIdentifier: "ahmed.hassan",
+    roleIds: ["role-owner"],
+    scope: "company",
+    state: "active",
+    invitationState: "accepted",
+    mfaState: "complete",
+    activeSessions: 2,
+    lastLogin: { ar: "اليوم، 8:14 ص", en: "Today, 8:14 AM" },
+    createdAt: { ar: "5 يناير 2025", en: "5 Jan 2025" },
+  },
+  {
+    id: "user-2",
+    employeeId: "employee-2",
+    loginIdentifier: "mahmoud.adel",
+    roleIds: ["role-operations-manager"],
+    scope: "branch",
+    state: "active",
+    invitationState: "accepted",
+    mfaState: "complete",
+    activeSessions: 1,
+    lastLogin: { ar: "اليوم، 7:52 ص", en: "Today, 7:52 AM" },
+    createdAt: { ar: "12 مارس 2025", en: "12 Mar 2025" },
+  },
+  {
+    id: "user-3",
+    employeeId: "employee-3",
+    loginIdentifier: "sara.ibrahim",
+    roleIds: ["role-warehouse"],
+    scope: "warehouse",
+    state: "active",
+    invitationState: "accepted",
+    mfaState: "not_required",
+    activeSessions: 1,
+    lastLogin: { ar: "أمس، 5:40 م", en: "Yesterday, 5:40 PM" },
+    createdAt: { ar: "1 يونيو 2025", en: "1 Jun 2025" },
+  },
+  {
+    id: "user-4",
+    employeeId: "employee-4",
+    loginIdentifier: "nada.samir",
+    roleIds: ["role-customer-service"],
+    scope: "branch",
+    state: "invited",
+    invitationState: "pending",
+    mfaState: "required",
+    activeSessions: 0,
+    lastLogin: { ar: "لم يسجل الدخول", en: "Never signed in" },
+    createdAt: { ar: "1 أغسطس 2026", en: "1 Aug 2026" },
+  },
+  {
+    id: "user-5",
+    employeeId: "employee-5",
+    loginIdentifier: "youssef.tarek",
+    roleIds: ["role-accounting"],
+    scope: "branch",
+    state: "locked",
+    invitationState: "accepted",
+    mfaState: "complete",
+    activeSessions: 0,
+    lastLogin: { ar: "31 يوليو، 4:18 م", en: "31 Jul, 4:18 PM" },
+    createdAt: { ar: "18 سبتمبر 2025", en: "18 Sep 2025" },
+  },
+];
+
+const accessActivityData: AccessActivity[] = [
+  {
+    id: "AUD-0006",
+    category: "security",
+    outcome: "rejected",
+    event: { ar: "محاولة دخول مرفوضة", en: "Rejected sign-in attempt" },
+    actor: { ar: "يوسف طارق", en: "Youssef Tarek" },
+    target: { ar: "الحساب user-5", en: "Account user-5" },
+    details: {
+      ar: "تجاوز عدد المحاولات المسموح وأصبح الحساب مقفولًا.",
+      en: "Allowed attempts were exceeded and the account became locked.",
+    },
+    timestamp: { ar: "اليوم، 7:42 ص", en: "Today, 7:42 AM" },
+    occurredAtIso: "2026-08-02T04:42:00.000Z",
+  },
+  {
+    id: "AUD-0005",
+    category: "access",
+    outcome: "succeeded",
+    event: { ar: "إرسال دعوة مستخدم", en: "User invitation sent" },
+    actor: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    target: { ar: "ندى سمير", en: "Nada Samir" },
+    details: {
+      ar: "أُنشئ الحساب بدور خدمة العملاء ونطاق الفرع.",
+      en: "Account created with Customer Service role and branch scope.",
+    },
+    timestamp: { ar: "أمس، 6:20 م", en: "Yesterday, 6:20 PM" },
+    occurredAtIso: "2026-08-01T15:20:00.000Z",
+  },
+  {
+    id: "AUD-0004",
+    category: "operational",
+    outcome: "succeeded",
+    event: { ar: "استبدال شحنات مندوب", en: "Courier shipments replaced" },
+    actor: { ar: "محمود عادل", en: "Mahmoud Adel" },
+    target: { ar: "شحنة واحدة", en: "One shipment" },
+    details: {
+      ar: "حُفظ الطرف السابق والجديد دون تغيير حالة الشحنة.",
+      en: "Previous and new parties were preserved without changing shipment status.",
+    },
+    timestamp: { ar: "أمس، 3:05 م", en: "Yesterday, 3:05 PM" },
+    occurredAtIso: "2026-08-01T12:05:00.000Z",
+  },
+  {
+    id: "AUD-0003",
+    category: "access",
+    outcome: "succeeded",
+    event: { ar: "نشر إصدار دور", en: "Role version published" },
+    actor: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    target: { ar: "مدير التشغيل — الإصدار 3", en: "Operations manager — v3" },
+    details: {
+      ar: "أضيفت قراءة سجل النشاط دون تغيير نطاق البيانات.",
+      en: "Activity log access was added without changing data scope.",
+    },
+    timestamp: { ar: "30 يوليو، 1:10 م", en: "30 Jul, 1:10 PM" },
+    occurredAtIso: "2026-07-30T10:10:00.000Z",
+  },
+  {
+    id: "AUD-0002",
+    category: "people",
+    outcome: "succeeded",
+    event: { ar: "إضافة موظف", en: "Employee added" },
+    actor: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+    target: { ar: "ريم خالد", en: "Reem Khaled" },
+    details: {
+      ar: "أُضيف ملف الموظف بلا إنشاء حساب دخول.",
+      en: "Employee profile was added without creating a user account.",
+    },
+    timestamp: { ar: "2 فبراير، 9:30 ص", en: "2 Feb, 9:30 AM" },
+    occurredAtIso: "2026-02-02T07:30:00.000Z",
+  },
+];
+
 function courierProfiles(records: CourierRecord[]) {
   const available = records.filter((record) => record.state === "active");
   return (available.length ? available : records).map((record) => ({
@@ -4517,6 +5052,31 @@ function Sidebar({
           label: t.couriers,
           icon: UserRound,
           screen: "couriers" as const,
+        },
+      ],
+    },
+    {
+      label: lang === "ar" ? "الإدارة والأمان" : "Administration & security",
+      items: [
+        {
+          label: lang === "ar" ? "الموظفون" : "Employees",
+          icon: UsersRound,
+          screen: "employees" as const,
+        },
+        {
+          label: lang === "ar" ? "المستخدمون" : "Users",
+          icon: UserRound,
+          screen: "users" as const,
+        },
+        {
+          label: lang === "ar" ? "الأدوار والصلاحيات" : "Roles & permissions",
+          icon: ShieldCheck,
+          screen: "roles" as const,
+        },
+        {
+          label: lang === "ar" ? "سجل النشاط" : "Activity log",
+          icon: Clock3,
+          screen: "activity" as const,
         },
       ],
     },
@@ -26789,6 +27349,1052 @@ function AssignmentScreen({
   );
 }
 
+type AccessSection = "employees" | "users" | "roles" | "activity";
+
+function AccessControlScreen({
+  section,
+  lang,
+  theme,
+  employees,
+  users,
+  roles,
+  activities,
+  onEmployeesChange,
+  onUsersChange,
+  onRolesChange,
+  onActivitiesChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  section: AccessSection;
+  lang: Lang;
+  theme: Theme;
+  employees: EmployeeRecord[];
+  users: UserAccountRecord[];
+  roles: AccessRole[];
+  activities: AccessActivity[];
+  onEmployeesChange: (records: EmployeeRecord[]) => void;
+  onUsersChange: (records: UserAccountRecord[]) => void;
+  onRolesChange: (records: AccessRole[]) => void;
+  onActivitiesChange: (records: AccessActivity[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const [employeeDialog, setEmployeeDialog] = useState(false);
+  const [userDialog, setUserDialog] = useState(false);
+  const [employeeNameAr, setEmployeeNameAr] = useState("");
+  const [employeeNameEn, setEmployeeNameEn] = useState("");
+  const [employeePhone, setEmployeePhone] = useState("");
+  const [employeeTitleAr, setEmployeeTitleAr] = useState("");
+  const [employeeDepartmentAr, setEmployeeDepartmentAr] = useState("");
+  const [employeeWorkplaceAr, setEmployeeWorkplaceAr] =
+    useState("الفرع الرئيسي");
+  const [employeeStartDate, setEmployeeStartDate] = useState("");
+  const [createAccountWithEmployee, setCreateAccountWithEmployee] =
+    useState(false);
+  const [employeeRoleId, setEmployeeRoleId] = useState(
+    roles.find((role) => !role.protected)?.id ?? "",
+  );
+  const [employeeLogin, setEmployeeLogin] = useState("");
+  const candidateEmployee =
+    employees.find(
+      (employee) =>
+        employee.state === "active" &&
+        !users.some((user) => user.employeeId === employee.id),
+    ) ?? null;
+  const [userEmployeeId, setUserEmployeeId] = useState(
+    candidateEmployee?.id ?? "",
+  );
+  const [userLogin, setUserLogin] = useState("");
+  const [userRoleId, setUserRoleId] = useState(
+    roles.find((role) => !role.protected && role.state === "active")?.id ?? "",
+  );
+  const [userScope, setUserScope] =
+    useState<UserAccountRecord["scope"]>("branch");
+  const [userMfaRequired, setUserMfaRequired] = useState(true);
+  const [selectedRoleId, setSelectedRoleId] = useState(
+    roles.find((role) => !role.protected)?.id ?? roles[0]?.id ?? "",
+  );
+  const initialRole =
+    roles.find((role) => role.id === selectedRoleId) ?? roles[0];
+  const [roleDraft, setRoleDraft] = useState<AccessRole | null>(
+    initialRole ? { ...initialRole, permissionIds: [...initialRole.permissionIds] } : null,
+  );
+  const [activityCategory, setActivityCategory] = useState<
+    "all" | AccessActivity["category"]
+  >("all");
+  const [activityOutcome, setActivityOutcome] = useState<
+    "all" | AccessActivity["outcome"]
+  >("all");
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const normalizedSearch = search.trim().toLowerCase();
+  const employeeUsers = new Map(users.map((user) => [user.employeeId, user]));
+  const filteredEmployees = employees.filter(
+    (employee) =>
+      !normalizedSearch ||
+      [
+        employee.code,
+        employee.name.ar,
+        employee.name.en,
+        employee.phone,
+        employee.jobTitle.ar,
+        employee.jobTitle.en,
+        employee.department.ar,
+        employee.department.en,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch)),
+  );
+  const filteredUsers = users.filter((user) => {
+    const employee = employees.find((record) => record.id === user.employeeId);
+    return (
+      !normalizedSearch ||
+      [
+        user.id,
+        user.loginIdentifier,
+        employee?.code ?? "",
+        employee?.name.ar ?? "",
+        employee?.name.en ?? "",
+      ].some((value) => value.toLowerCase().includes(normalizedSearch))
+    );
+  });
+  const filteredActivities = activities.filter((activity) => {
+    const matchesCategory =
+      activityCategory === "all" || activity.category === activityCategory;
+    const matchesOutcome =
+      activityOutcome === "all" || activity.outcome === activityOutcome;
+    const matchesSearch =
+      !normalizedSearch ||
+      [
+        activity.id,
+        activity.event.ar,
+        activity.event.en,
+        activity.actor.ar,
+        activity.actor.en,
+        activity.target.ar,
+        activity.target.en,
+        activity.details.ar,
+        activity.details.en,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch));
+    return matchesCategory && matchesOutcome && matchesSearch;
+  });
+  const availableEmployeeCandidates = employees.filter(
+    (employee) =>
+      employee.state === "active" &&
+      !users.some((user) => user.employeeId === employee.id),
+  );
+  const selectedRole =
+    roles.find((role) => role.id === selectedRoleId) ?? roles[0] ?? null;
+  const roleUserCount = selectedRole
+    ? users.filter((user) => user.roleIds.includes(selectedRole.id)).length
+    : 0;
+  const sensitivePermissionCount =
+    roleDraft?.permissionIds.filter(
+      (permissionId) =>
+        permissionCatalog.find((permission) => permission.id === permissionId)
+          ?.sensitivity === "sensitive",
+    ).length ?? 0;
+  const roleHasFinancialConflict = Boolean(
+    roleDraft?.permissionIds.includes("treasury.post") &&
+      roleDraft.permissionIds.includes("treasury.approve"),
+  );
+  const permissionModules = Array.from(
+    new Map(
+      permissionCatalog.map((permission) => [
+        permission.module.en,
+        permission.module,
+      ]),
+    ).values(),
+  );
+
+  const sectionCopy: Record<
+    AccessSection,
+    { title: Localized; subtitle: Localized; icon: typeof UsersRound }
+  > = {
+    employees: {
+      title: { ar: "الموظفون", en: "Employees" },
+      subtitle: {
+        ar: "ملفات الأشخاص والعمل، مستقلة عن حسابات الدخول.",
+        en: "People and employment profiles, separate from sign-in accounts.",
+      },
+      icon: UsersRound,
+    },
+    users: {
+      title: { ar: "المستخدمون", en: "Users" },
+      subtitle: {
+        ar: "حسابات الدخول والأدوار والنطاق والجلسات.",
+        en: "Sign-in accounts, roles, scope and sessions.",
+      },
+      icon: UserRound,
+    },
+    roles: {
+      title: { ar: "الأدوار والصلاحيات", en: "Roles & permissions" },
+      subtitle: {
+        ar: "تحكم في قدرات الدور دون منح مباشر مخفي للمستخدم.",
+        en: "Control role capabilities without hidden direct user grants.",
+      },
+      icon: ShieldCheck,
+    },
+    activity: {
+      title: { ar: "سجل النشاط", en: "Activity log" },
+      subtitle: {
+        ar: "أحداث تشغيل وأمان محفوظة للقراءة والمراجعة.",
+        en: "Preserved operational and security events for review.",
+      },
+      icon: Clock3,
+    },
+  };
+  const currentCopy = sectionCopy[section];
+  const HeaderIcon = currentCopy.icon;
+
+  function formatNow() {
+    const now = new Date();
+    return {
+      now,
+      timestamp: {
+        ar: now.toLocaleString("ar-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        en: now.toLocaleString("en-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+      } as Localized,
+    };
+  }
+
+  function addActivity(
+    category: AccessActivity["category"],
+    outcome: AccessActivity["outcome"],
+    event: Localized,
+    target: Localized,
+    details: Localized,
+  ) {
+    const { now, timestamp } = formatNow();
+    onActivitiesChange([
+      {
+        id: `AUD-${Date.now()}`,
+        category,
+        outcome,
+        event,
+        actor: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        target,
+        details,
+        timestamp,
+        occurredAtIso: now.toISOString(),
+      },
+      ...activities,
+    ]);
+  }
+
+  function showToast(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  function resetEmployeeForm() {
+    setEmployeeNameAr("");
+    setEmployeeNameEn("");
+    setEmployeePhone("");
+    setEmployeeTitleAr("");
+    setEmployeeDepartmentAr("");
+    setEmployeeWorkplaceAr("الفرع الرئيسي");
+    setEmployeeStartDate("");
+    setCreateAccountWithEmployee(false);
+    setEmployeeLogin("");
+    setError("");
+  }
+
+  function saveEmployee() {
+    if (
+      !employeeNameAr.trim() ||
+      !employeePhone.trim() ||
+      !employeeTitleAr.trim() ||
+      !employeeDepartmentAr.trim() ||
+      !employeeStartDate
+    ) {
+      setError(
+        lang === "ar"
+          ? "استكمل الاسم والهاتف والمسمى والقسم وتاريخ البداية."
+          : "Complete name, phone, job title, department and start date.",
+      );
+      return;
+    }
+    if (
+      createAccountWithEmployee &&
+      (!employeeLogin.trim() || !employeeRoleId)
+    ) {
+      setError(
+        lang === "ar"
+          ? "حدد معرف الدخول والدور قبل إنشاء الحساب."
+          : "Choose a login identifier and role before creating the account.",
+      );
+      return;
+    }
+    if (
+      createAccountWithEmployee &&
+      users.some(
+        (user) =>
+          user.loginIdentifier.toLowerCase() ===
+          employeeLogin.trim().toLowerCase(),
+      )
+    ) {
+      setError(
+        lang === "ar"
+          ? "معرف الدخول مستخدم بالفعل."
+          : "The login identifier is already in use.",
+      );
+      return;
+    }
+    const { timestamp } = formatNow();
+    const nextNumber =
+      employees.reduce((largest, employee) => {
+        const value = Number(employee.code.replace(/\D/g, ""));
+        return Number.isFinite(value) ? Math.max(largest, value) : largest;
+      }, 0) + 1;
+    const employee: EmployeeRecord = {
+      id: `employee-${Date.now()}`,
+      code: `EMP-${String(nextNumber).padStart(4, "0")}`,
+      name: {
+        ar: employeeNameAr.trim(),
+        en: employeeNameEn.trim() || employeeNameAr.trim(),
+      },
+      phone: employeePhone.trim(),
+      jobTitle: {
+        ar: employeeTitleAr.trim(),
+        en: employeeTitleAr.trim(),
+      },
+      department: {
+        ar: employeeDepartmentAr.trim(),
+        en: employeeDepartmentAr.trim(),
+      },
+      workplace: {
+        ar: employeeWorkplaceAr.trim() || "الفرع الرئيسي",
+        en: employeeWorkplaceAr.trim() || "Main branch",
+      },
+      state: "active",
+      startDate: employeeStartDate,
+      endDate: "",
+      notes: "",
+      createdAt: timestamp,
+    };
+    onEmployeesChange([...employees, employee]);
+    if (createAccountWithEmployee) {
+      const account: UserAccountRecord = {
+        id: `user-${Date.now()}`,
+        employeeId: employee.id,
+        loginIdentifier: employeeLogin.trim(),
+        roleIds: [employeeRoleId],
+        scope: "branch",
+        state: "invited",
+        invitationState: "pending",
+        mfaState: "required",
+        activeSessions: 0,
+        lastLogin: {
+          ar: "لم يسجل الدخول",
+          en: "Never signed in",
+        },
+        createdAt: timestamp,
+      };
+      onUsersChange([...users, account]);
+    }
+    addActivity(
+      "people",
+      "succeeded",
+      { ar: "إضافة موظف", en: "Employee added" },
+      employee.name,
+      createAccountWithEmployee
+        ? {
+            ar: "حُفظ ملف الموظف وأُنشئت دعوة حساب دخول دون كلمة مرور مكشوفة.",
+            en: "Employee profile and account invitation were created without exposing a password.",
+          }
+        : {
+            ar: "حُفظ ملف الموظف بلا إنشاء حساب دخول.",
+            en: "Employee profile was saved without a sign-in account.",
+          },
+    );
+    setEmployeeDialog(false);
+    resetEmployeeForm();
+    showToast(
+      lang === "ar"
+        ? "تم حفظ الموظف بنجاح"
+        : "Employee saved successfully",
+    );
+  }
+
+  function openUserDialog() {
+    const candidate = availableEmployeeCandidates[0];
+    setUserEmployeeId(candidate?.id ?? "");
+    setUserLogin("");
+    setUserRoleId(
+      roles.find((role) => !role.protected && role.state === "active")?.id ??
+        "",
+    );
+    setUserScope("branch");
+    setUserMfaRequired(true);
+    setError("");
+    setUserDialog(true);
+  }
+
+  function saveUser() {
+    const employee = employees.find(
+      (record) => record.id === userEmployeeId,
+    );
+    if (!employee || !userLogin.trim() || !userRoleId) {
+      setError(
+        lang === "ar"
+          ? "اختر الموظف ومعرف الدخول والدور."
+          : "Choose the employee, login identifier and role.",
+      );
+      return;
+    }
+    if (users.some((user) => user.employeeId === employee.id)) {
+      setError(
+        lang === "ar"
+          ? "هذا الموظف مرتبط بحساب بالفعل."
+          : "This employee already has an account.",
+      );
+      return;
+    }
+    if (
+      users.some(
+        (user) =>
+          user.loginIdentifier.toLowerCase() ===
+          userLogin.trim().toLowerCase(),
+      )
+    ) {
+      setError(
+        lang === "ar"
+          ? "معرف الدخول مستخدم بالفعل."
+          : "The login identifier is already in use.",
+      );
+      return;
+    }
+    const { timestamp } = formatNow();
+    const role = roles.find((record) => record.id === userRoleId);
+    const account: UserAccountRecord = {
+      id: `user-${Date.now()}`,
+      employeeId: employee.id,
+      loginIdentifier: userLogin.trim(),
+      roleIds: [userRoleId],
+      scope: userScope,
+      state: "invited",
+      invitationState: "pending",
+      mfaState: userMfaRequired ? "required" : "not_required",
+      activeSessions: 0,
+      lastLogin: { ar: "لم يسجل الدخول", en: "Never signed in" },
+      createdAt: timestamp,
+    };
+    onUsersChange([...users, account]);
+    addActivity(
+      "access",
+      "succeeded",
+      { ar: "إنشاء حساب ودعوة", en: "Account and invitation created" },
+      employee.name,
+      {
+        ar: `الدور: ${role?.name.ar ?? "غير معروف"} · النطاق: ${scopeLabel(
+          userScope,
+          "ar",
+        )}`,
+        en: `Role: ${role?.name.en ?? "Unknown"} · Scope: ${scopeLabel(
+          userScope,
+          "en",
+        )}`,
+      },
+    );
+    setUserDialog(false);
+    showToast(
+      lang === "ar"
+        ? "تم إنشاء الحساب وإرسال دعوة التفعيل"
+        : "Account created and activation invitation sent",
+    );
+  }
+
+  function scopeLabel(
+    scope: UserAccountRecord["scope"],
+    locale: Lang = lang,
+  ) {
+    const labels: Record<UserAccountRecord["scope"], Localized> = {
+      company: { ar: "كل الشركة", en: "Entire company" },
+      branch: { ar: "الفرع الرئيسي", en: "Main branch" },
+      warehouse: { ar: "المخزن الرئيسي", en: "Main warehouse" },
+      self: { ar: "البيانات الذاتية فقط", en: "Self only" },
+    };
+    return labels[scope][locale];
+  }
+
+  function changeUserState(user: UserAccountRecord) {
+    if (user.roleIds.includes("role-owner")) {
+      setError(
+        lang === "ar"
+          ? "لا يمكن قفل أو تعطيل المالك الأخير من هذه الصفحة."
+          : "The last active owner cannot be locked or disabled here.",
+      );
+      addActivity(
+        "security",
+        "rejected",
+        { ar: "محاولة تغيير حساب محمي", en: "Protected account change attempted" },
+        { ar: user.loginIdentifier, en: user.loginIdentifier },
+        {
+          ar: "منع حارس المالك الأخير العملية.",
+          en: "The last-owner guard rejected the operation.",
+        },
+      );
+      return;
+    }
+    const nextState: UserAccountRecord["state"] =
+      user.state === "active" ? "disabled" : "active";
+    const nextUsers = users.map((record) =>
+      record.id === user.id
+        ? {
+            ...record,
+            state: nextState,
+            activeSessions: nextState === "disabled" ? 0 : record.activeSessions,
+          }
+        : record,
+    );
+    onUsersChange(nextUsers);
+    const employee = employees.find(
+      (record) => record.id === user.employeeId,
+    );
+    addActivity(
+      "security",
+      "succeeded",
+      nextState === "disabled"
+        ? { ar: "تعطيل حساب", en: "Account disabled" }
+        : { ar: "تمكين حساب", en: "Account enabled" },
+      employee?.name ?? { ar: user.loginIdentifier, en: user.loginIdentifier },
+      nextState === "disabled"
+        ? {
+            ar: "أُلغي الوصول وسُحبت الجلسات النشطة دون حذف التاريخ.",
+            en: "Access was disabled and active sessions revoked without deleting history.",
+          }
+        : {
+            ar: "أُعيد تمكين الحساب دون إنشاء جلسة جديدة.",
+            en: "The account was enabled without creating a new session.",
+          },
+    );
+    setError("");
+    showToast(
+      nextState === "disabled"
+        ? lang === "ar"
+          ? "تم تعطيل الحساب وسحب جلساته"
+          : "Account disabled and sessions revoked"
+        : lang === "ar"
+          ? "تم تمكين الحساب"
+          : "Account enabled",
+    );
+  }
+
+  function revokeSessions(user: UserAccountRecord) {
+    if (user.activeSessions === 0) return;
+    onUsersChange(
+      users.map((record) =>
+        record.id === user.id ? { ...record, activeSessions: 0 } : record,
+      ),
+    );
+    const employee = employees.find(
+      (record) => record.id === user.employeeId,
+    );
+    addActivity(
+      "security",
+      "succeeded",
+      { ar: "سحب الجلسات", en: "Sessions revoked" },
+      employee?.name ?? { ar: user.loginIdentifier, en: user.loginIdentifier },
+      {
+        ar: `تم إنهاء ${user.activeSessions} جلسة دون تغيير حالة الحساب.`,
+        en: `${user.activeSessions} session(s) ended without changing account state.`,
+      },
+    );
+    showToast(
+      lang === "ar" ? "تم سحب الجلسات النشطة" : "Active sessions revoked",
+    );
+  }
+
+  function chooseRole(role: AccessRole) {
+    setSelectedRoleId(role.id);
+    setRoleDraft({
+      ...role,
+      permissionIds: [...role.permissionIds],
+    });
+    setError("");
+  }
+
+  function createRole() {
+    const role: AccessRole = {
+      id: `role-${Date.now()}`,
+      code: `CUSTOM_${String(roles.length + 1).padStart(2, "0")}`,
+      name: { ar: "دور مخصص جديد", en: "New custom role" },
+      description: {
+        ar: "راجع الصلاحيات ثم احفظ الإصدار الأول.",
+        en: "Review permissions, then save the first version.",
+      },
+      state: "draft",
+      protected: false,
+      version: 1,
+      permissionIds: ["shipments.view"],
+    };
+    onRolesChange([...roles, role]);
+    chooseRole(role);
+    addActivity(
+      "access",
+      "succeeded",
+      { ar: "إنشاء مسودة دور", en: "Role draft created" },
+      role.name,
+      {
+        ar: "المسودة بلا مستخدمين أو نطاقات وستحتاج حفظًا قبل الاستخدام.",
+        en: "The draft has no users or scopes and must be saved before use.",
+      },
+    );
+  }
+
+  function togglePermission(permissionId: string) {
+    if (!roleDraft || roleDraft.protected) return;
+    setRoleDraft({
+      ...roleDraft,
+      permissionIds: roleDraft.permissionIds.includes(permissionId)
+        ? roleDraft.permissionIds.filter((id) => id !== permissionId)
+        : [...roleDraft.permissionIds, permissionId],
+    });
+    setError("");
+  }
+
+  function saveRole() {
+    if (!roleDraft || roleDraft.protected) return;
+    if (!roleDraft.name.ar.trim() || roleDraft.permissionIds.length === 0) {
+      setError(
+        lang === "ar"
+          ? "اكتب اسم الدور واختر صلاحية واحدة على الأقل."
+          : "Enter a role name and choose at least one permission.",
+      );
+      return;
+    }
+    const previous = roles.find((role) => role.id === roleDraft.id);
+    const nextRole: AccessRole = {
+      ...roleDraft,
+      state: "active",
+      version: previous?.state === "draft" ? 1 : (previous?.version ?? 0) + 1,
+    };
+    onRolesChange(
+      roles.map((role) => (role.id === nextRole.id ? nextRole : role)),
+    );
+    setRoleDraft({
+      ...nextRole,
+      permissionIds: [...nextRole.permissionIds],
+    });
+    addActivity(
+      "access",
+      "succeeded",
+      { ar: "نشر إصدار دور", en: "Role version published" },
+      nextRole.name,
+      {
+        ar: `الإصدار ${nextRole.version} · ${nextRole.permissionIds.length} صلاحية · لا توجد منح مباشرة للمستخدم.`,
+        en: `Version ${nextRole.version} · ${nextRole.permissionIds.length} permissions · no direct user grant.`,
+      },
+    );
+    showToast(
+      lang === "ar"
+        ? `تم حفظ الإصدار ${nextRole.version} من الدور`
+        : `Role version ${nextRole.version} saved`,
+    );
+  }
+
+  const stateLabel = (
+    state: EmployeeRecord["state"] | UserAccountRecord["state"],
+  ) => {
+    const labels: Record<string, Localized> = {
+      active: { ar: "نشط", en: "Active" },
+      suspended: { ar: "موقوف إداريًا", en: "Suspended" },
+      ended: { ar: "انتهى العمل", en: "Employment ended" },
+      invited: { ar: "دعوة معلقة", en: "Invitation pending" },
+      locked: { ar: "مقفول أمنيًا", en: "Security locked" },
+      disabled: { ar: "معطل", en: "Disabled" },
+    };
+    return labels[state]?.[lang] ?? state;
+  };
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen={section}
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <HeaderIcon size={20} />
+            </span>
+            <span>
+              <strong>{currentCopy.title[lang]}</strong>
+              <small>
+                {lang === "ar"
+                  ? "الأشخاص والوصول والرقابة"
+                  : "People, access and oversight"}
+              </small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={
+                section === "activity"
+                  ? lang === "ar"
+                    ? "ابحث في الحدث أو الفاعل أو الهدف..."
+                    : "Search event, actor or target..."
+                  : lang === "ar"
+                    ? "ابحث بالاسم أو الكود أو الهاتف..."
+                    : "Search name, code or phone..."
+              }
+            />
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+          </div>
+        </header>
+
+        <main className="page-content access-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{currentCopy.title[lang]}</h1>
+                <span className="demo-chip">
+                  {lang === "ar" ? "بيانات تجريبية محلية" : "Local demo data"}
+                </span>
+              </div>
+              <p>{currentCopy.subtitle[lang]}</p>
+            </div>
+            {section === "employees" && (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => {
+                  resetEmployeeForm();
+                  setEmployeeDialog(true);
+                }}
+              >
+                <Plus size={17} />
+                {lang === "ar" ? "إضافة موظف" : "Add employee"}
+              </button>
+            )}
+            {section === "users" && (
+              <button
+                className="primary-button"
+                type="button"
+                disabled={availableEmployeeCandidates.length === 0}
+                onClick={openUserDialog}
+              >
+                <Plus size={17} />
+                {lang === "ar" ? "إضافة مستخدم" : "Add user"}
+              </button>
+            )}
+            {section === "roles" && (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={createRole}
+              >
+                <Plus size={17} />
+                {lang === "ar" ? "إنشاء دور مخصص" : "Create custom role"}
+              </button>
+            )}
+          </div>
+
+          <nav className="access-tabs" aria-label={lang === "ar" ? "صفحات الإدارة والأمان" : "Administration and security pages"}>
+            {(
+              [
+                ["employees", sectionCopy.employees],
+                ["users", sectionCopy.users],
+                ["roles", sectionCopy.roles],
+                ["activity", sectionCopy.activity],
+              ] as const
+            ).map(([id, item]) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  type="button"
+                  className={section === id ? "is-active" : ""}
+                  onClick={() => onNavigate(id)}
+                  key={id}
+                >
+                  <Icon size={17} />
+                  {item.title[lang]}
+                </button>
+              );
+            })}
+          </nav>
+
+          {section === "employees" && (
+            <>
+              <section className="access-metrics">
+                <article>
+                  <span><UsersRound size={19} /></span>
+                  <div><small>{lang === "ar" ? "إجمالي الموظفين" : "Total employees"}</small><strong>{employees.length}</strong></div>
+                </article>
+                <article>
+                  <span><Check size={19} /></span>
+                  <div><small>{lang === "ar" ? "موظفون نشطون" : "Active employees"}</small><strong>{employees.filter((employee) => employee.state === "active").length}</strong></div>
+                </article>
+                <article>
+                  <span><UserRound size={19} /></span>
+                  <div><small>{lang === "ar" ? "بدون حساب دخول" : "Without an account"}</small><strong>{employees.filter((employee) => !employeeUsers.has(employee.id)).length}</strong></div>
+                </article>
+                <article>
+                  <span><CircleAlert size={19} /></span>
+                  <div><small>{lang === "ar" ? "موقوف أو منتهي" : "Suspended or ended"}</small><strong>{employees.filter((employee) => employee.state !== "active").length}</strong></div>
+                </article>
+              </section>
+
+              <section className="access-directory">
+                <div className="access-directory__heading">
+                  <span><strong>{lang === "ar" ? "دليل الموظفين" : "Employee directory"}</strong><small>{filteredEmployees.length} {lang === "ar" ? "موظف" : "employee(s)"}</small></span>
+                  <label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={lang === "ar" ? "اسم، كود، هاتف..." : "Name, code, phone..."} /></label>
+                </div>
+                <div className="access-list access-list--employees">
+                  {filteredEmployees.map((employee) => {
+                    const account = employeeUsers.get(employee.id);
+                    return (
+                      <article key={employee.id}>
+                        <span className="access-avatar">{employee.name[lang].slice(0, 1)}</span>
+                        <div className="access-person"><strong>{employee.name[lang]}</strong><small>{employee.code} · <span dir="ltr">{employee.phone}</span></small></div>
+                        <div><small>{lang === "ar" ? "العمل" : "Job"}</small><strong>{employee.jobTitle[lang]}</strong><em>{employee.department[lang]}</em></div>
+                        <div><small>{lang === "ar" ? "جهة العمل" : "Workplace"}</small><strong>{employee.workplace[lang]}</strong><em>{employee.startDate}</em></div>
+                        <div><small>{lang === "ar" ? "الحساب" : "Account"}</small><strong className={account ? "is-good" : "is-attention"}>{account ? stateLabel(account.state) : lang === "ar" ? "لا يوجد حساب" : "No account"}</strong><em>{account?.loginIdentifier ?? (lang === "ar" ? "ينشأ من المستخدمين" : "Create from Users")}</em></div>
+                        <span className={`access-state access-state--${employee.state}`}>{stateLabel(employee.state)}</span>
+                        <button className="secondary-button access-row-action" type="button" onClick={() => onNavigate("users")}><ChevronLeft size={15} />{account ? lang === "ar" ? "فتح الحساب" : "Open account" : lang === "ar" ? "إنشاء حساب" : "Create account"}</button>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            </>
+          )}
+
+          {section === "users" && (
+            <>
+              <section className="access-security-note">
+                <LockKeyhole size={19} />
+                <span>
+                  <strong>{lang === "ar" ? "لا تُعرض أو تُخزن كلمة مرور داخل هذه الصفحة" : "Passwords are never displayed or stored on this page"}</strong>
+                  <small>{lang === "ar" ? "إنشاء الحساب يرسل دعوة تفعيل، والإيقاف يسحب الجلسات دون حذف التاريخ. المصادقة هنا نموذج تصميم وليست حماية إنتاجية." : "Account creation sends an activation invitation; disabling revokes sessions without deleting history. Authentication here is a design prototype, not production security."}</small>
+                </span>
+              </section>
+              <section className="access-metrics">
+                <article><span><UserRound size={19} /></span><div><small>{lang === "ar" ? "حسابات البشر" : "Human accounts"}</small><strong>{users.length}</strong></div></article>
+                <article><span><Check size={19} /></span><div><small>{lang === "ar" ? "نشطة" : "Active"}</small><strong>{users.filter((user) => user.state === "active").length}</strong></div></article>
+                <article><span><Clock3 size={19} /></span><div><small>{lang === "ar" ? "دعوات معلقة" : "Pending invitations"}</small><strong>{users.filter((user) => user.invitationState === "pending").length}</strong></div></article>
+                <article><span><CircleAlert size={19} /></span><div><small>{lang === "ar" ? "مقفولة أو معطلة" : "Locked or disabled"}</small><strong>{users.filter((user) => user.state === "locked" || user.state === "disabled").length}</strong></div></article>
+              </section>
+              {error && <div className="access-page-error" role="alert"><CircleAlert size={16} />{error}</div>}
+              <section className="access-directory">
+                <div className="access-directory__heading"><span><strong>{lang === "ar" ? "دليل المستخدمين" : "User directory"}</strong><small>{filteredUsers.length} {lang === "ar" ? "حساب بشري" : "human account(s)"}</small></span><label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={lang === "ar" ? "اسم أو معرف دخول..." : "Name or login..."} /></label></div>
+                <div className="access-list access-list--users">
+                  {filteredUsers.map((user) => {
+                    const employee = employees.find((record) => record.id === user.employeeId);
+                    const userRoles = roles.filter((role) => user.roleIds.includes(role.id));
+                    const isOwner = user.roleIds.includes("role-owner");
+                    return (
+                      <article key={user.id}>
+                        <span className="access-avatar">{employee?.name[lang].slice(0, 1) ?? "؟"}</span>
+                        <div className="access-person"><strong>{employee?.name[lang] ?? (lang === "ar" ? "صاحب غير معروف" : "Unknown subject")}</strong><small>{user.loginIdentifier}</small></div>
+                        <div><small>{lang === "ar" ? "الدور" : "Role"}</small><strong>{userRoles.map((role) => role.name[lang]).join("، ") || "—"}</strong><em>{scopeLabel(user.scope)}</em></div>
+                        <div><small>{lang === "ar" ? "الأمان" : "Security"}</small><strong>{user.mfaState === "complete" ? lang === "ar" ? "MFA مكتمل" : "MFA complete" : user.mfaState === "required" ? lang === "ar" ? "MFA مطلوب" : "MFA required" : lang === "ar" ? "غير مطلوب" : "Not required"}</strong><em>{user.activeSessions} {lang === "ar" ? "جلسة نشطة" : "active session(s)"}</em></div>
+                        <div><small>{lang === "ar" ? "آخر دخول" : "Last login"}</small><strong>{user.lastLogin[lang]}</strong><em>{user.invitationState === "pending" ? lang === "ar" ? "الدعوة لم تُقبل" : "Invitation not accepted" : user.id}</em></div>
+                        <span className={`access-state access-state--${user.state}`}>{stateLabel(user.state)}</span>
+                        <div className="access-user-actions">
+                          <button type="button" disabled={isOwner} onClick={() => changeUserState(user)}>{user.state === "active" ? lang === "ar" ? "تعطيل" : "Disable" : lang === "ar" ? "تمكين" : "Enable"}</button>
+                          <button type="button" disabled={user.activeSessions === 0} onClick={() => revokeSessions(user)}>{lang === "ar" ? "سحب الجلسات" : "Revoke sessions"}</button>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+            </>
+          )}
+
+          {section === "roles" && roleDraft && selectedRole && (
+            <>
+              <section className="access-role-summary">
+                <article><small>{lang === "ar" ? "الأدوار الفعالة" : "Active roles"}</small><strong>{roles.filter((role) => role.state === "active").length}</strong></article>
+                <article><small>{lang === "ar" ? "صلاحيات الكتالوج" : "Catalog permissions"}</small><strong>{permissionCatalog.length}</strong></article>
+                <article><small>{lang === "ar" ? "قدرات حساسة بالدور" : "Sensitive permissions"}</small><strong>{sensitivePermissionCount}</strong></article>
+                <article><small>{lang === "ar" ? "مستخدمو الدور" : "Role users"}</small><strong>{roleUserCount}</strong></article>
+              </section>
+              <div className="access-role-workspace">
+                <aside className="access-role-list">
+                  <div><strong>{lang === "ar" ? "أدوار الشركة" : "Company roles"}</strong><small>{lang === "ar" ? "الدور لا يملك المستخدمين أو النطاق" : "Roles do not own users or scope"}</small></div>
+                  {roles.map((role) => (
+                    <button type="button" className={role.id === selectedRole.id ? "is-active" : ""} onClick={() => chooseRole(role)} key={role.id}>
+                      <span><ShieldCheck size={17} /></span>
+                      <div><strong>{role.name[lang]}</strong><small>{role.code} · v{role.version}</small></div>
+                      <em>{users.filter((user) => user.roleIds.includes(role.id)).length}</em>
+                    </button>
+                  ))}
+                </aside>
+                <section className="access-role-editor">
+                  <div className="access-role-editor__head">
+                    <span><strong>{lang === "ar" ? "تعريف الدور" : "Role definition"}</strong><small>{roleDraft.protected ? lang === "ar" ? "دور المالك محمي للقراءة فقط" : "Owner role is protected and read-only" : lang === "ar" ? "التعديل ينشئ إصدارًا جديدًا عند الحفظ" : "Saving creates a new version"}</small></span>
+                    <span className={roleDraft.state === "active" ? "access-role-state is-active" : "access-role-state"}>{roleDraft.state === "active" ? lang === "ar" ? "فعال" : "Active" : lang === "ar" ? "مسودة" : "Draft"}</span>
+                  </div>
+                  <div className="access-role-fields">
+                    <label><span>{lang === "ar" ? "اسم الدور بالعربية" : "Arabic role name"}</span><input disabled={roleDraft.protected} value={roleDraft.name.ar} onChange={(event) => setRoleDraft({ ...roleDraft, name: { ...roleDraft.name, ar: event.target.value } })} /></label>
+                    <label><span>{lang === "ar" ? "اسم الدور بالإنجليزية" : "English role name"}</span><input disabled={roleDraft.protected} value={roleDraft.name.en} onChange={(event) => setRoleDraft({ ...roleDraft, name: { ...roleDraft.name, en: event.target.value } })} /></label>
+                    <label><span>{lang === "ar" ? "كود النظام" : "System code"}</span><input readOnly value={roleDraft.code} /></label>
+                    <label className="is-wide"><span>{lang === "ar" ? "وصف الدور" : "Role description"}</span><input disabled={roleDraft.protected} value={roleDraft.description[lang]} onChange={(event) => setRoleDraft({ ...roleDraft, description: { ...roleDraft.description, [lang]: event.target.value } })} /></label>
+                  </div>
+                  <div className="access-permission-groups">
+                    {permissionModules.map((module) => (
+                      <section key={module.en}>
+                        <div><strong>{module[lang]}</strong><small>{permissionCatalog.filter((permission) => permission.module.en === module.en && roleDraft.permissionIds.includes(permission.id)).length}/{permissionCatalog.filter((permission) => permission.module.en === module.en).length}</small></div>
+                        {permissionCatalog.filter((permission) => permission.module.en === module.en).map((permission) => {
+                          const checked = roleDraft.permissionIds.includes(permission.id);
+                          return (
+                            <label className={checked ? "is-selected" : ""} key={permission.id}>
+                              <input type="checkbox" disabled={roleDraft.protected} checked={checked} onChange={() => togglePermission(permission.id)} />
+                              <span><Check size={13} /></span>
+                              <div><strong>{permission.label[lang]}</strong><small>{permission.description[lang]}</small></div>
+                              {permission.sensitivity === "sensitive" && <em>{lang === "ar" ? "حساسة" : "Sensitive"}</em>}
+                            </label>
+                          );
+                        })}
+                      </section>
+                    ))}
+                  </div>
+                  {roleHasFinancialConflict && (
+                    <div className="access-sod-warning"><CircleAlert size={17} /><span><strong>{lang === "ar" ? "مراجعة فصل الواجبات مطلوبة" : "Segregation-of-duties review required"}</strong><small>{lang === "ar" ? "الدور يجمع تسجيل الحركة المالية واعتماد تصحيحها. سيظل ذلك ظاهرًا في المعاينة والسجل." : "This role combines posting a financial movement and approving its correction. The conflict remains visible in preview and audit."}</small></span></div>
+                  )}
+                  {error && <div className="access-page-error"><CircleAlert size={16} />{error}</div>}
+                  <footer className="access-role-footer">
+                    <div><small>{lang === "ar" ? "معاينة الوصول" : "Access preview"}</small><strong>{roleDraft.permissionIds.length} {lang === "ar" ? "قدرة محددة" : "selected capabilities"} · {sensitivePermissionCount} {lang === "ar" ? "حساسة" : "sensitive"}</strong></div>
+                    <button className="primary-button" type="button" disabled={roleDraft.protected} onClick={saveRole}><Save size={17} />{lang === "ar" ? "حفظ إصدار الدور" : "Save role version"}</button>
+                  </footer>
+                </section>
+              </div>
+            </>
+          )}
+
+          {section === "activity" && (
+            <>
+              <section className="access-security-note">
+                <ShieldCheck size={19} />
+                <span><strong>{lang === "ar" ? "السجل تراكمي للقراءة ولا يقبل التعديل أو الحذف" : "The log is append-only and cannot be edited or deleted"}</strong><small>{lang === "ar" ? "النجاح والرفض والفشل حقائق منفصلة، ولا توجد كلمات مرور أو رموز تفعيل أو أسرار داخل التفاصيل." : "Success, rejection and technical failure are separate facts; passwords, invitation tokens and secrets are excluded."}</small></span>
+              </section>
+              <section className="activity-controls">
+                <label><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={lang === "ar" ? "حدث، فاعل، هدف..." : "Event, actor, target..."} /></label>
+                <span className="entry-select"><select value={activityCategory} onChange={(event) => setActivityCategory(event.target.value as typeof activityCategory)}><option value="all">{lang === "ar" ? "كل الفئات" : "All categories"}</option><option value="people">{lang === "ar" ? "الأشخاص" : "People"}</option><option value="access">{lang === "ar" ? "الوصول" : "Access"}</option><option value="security">{lang === "ar" ? "الأمان" : "Security"}</option><option value="operational">{lang === "ar" ? "التشغيل" : "Operational"}</option></select><ChevronDown size={15} /></span>
+                <span className="entry-select"><select value={activityOutcome} onChange={(event) => setActivityOutcome(event.target.value as typeof activityOutcome)}><option value="all">{lang === "ar" ? "كل النتائج" : "All outcomes"}</option><option value="succeeded">{lang === "ar" ? "نجح" : "Succeeded"}</option><option value="rejected">{lang === "ar" ? "مرفوض" : "Rejected"}</option><option value="technical_failure">{lang === "ar" ? "فشل تقني" : "Technical failure"}</option></select><ChevronDown size={15} /></span>
+              </section>
+              <section className="activity-timeline">
+                <div className="activity-timeline__head"><span><strong>{lang === "ar" ? "الأحداث المسجلة" : "Recorded events"}</strong><small>{filteredActivities.length} {lang === "ar" ? "حدثًا مطابقًا" : "matching event(s)"}</small></span><em>{lang === "ar" ? "قراءة فقط" : "Read only"}</em></div>
+                <div className="activity-timeline__list">
+                  {filteredActivities.map((activity) => (
+                    <article key={activity.id}>
+                      <span className={`activity-dot activity-dot--${activity.outcome}`}>{activity.outcome === "succeeded" ? <Check size={15} /> : <CircleAlert size={15} />}</span>
+                      <div className="activity-main"><strong>{activity.event[lang]}</strong><p>{activity.details[lang]}</p><small>{activity.id} · {activity.timestamp[lang]}</small></div>
+                      <div><small>{lang === "ar" ? "الفاعل" : "Actor"}</small><strong>{activity.actor[lang]}</strong></div>
+                      <div><small>{lang === "ar" ? "الهدف" : "Target"}</small><strong>{activity.target[lang]}</strong></div>
+                      <span className={`activity-outcome activity-outcome--${activity.outcome}`}>{activity.outcome === "succeeded" ? lang === "ar" ? "نجح" : "Succeeded" : activity.outcome === "rejected" ? lang === "ar" ? "مرفوض" : "Rejected" : lang === "ar" ? "فشل تقني" : "Technical failure"}</span>
+                    </article>
+                  ))}
+                  {filteredActivities.length === 0 && <div className="activity-empty"><Clock3 size={28} /><strong>{lang === "ar" ? "لا توجد أحداث مطابقة" : "No matching events"}</strong></div>}
+                </div>
+              </section>
+            </>
+          )}
+        </main>
+      </div>
+
+      {employeeDialog && (
+        <div className="access-dialog-layer">
+          <section className="access-dialog" role="dialog" aria-modal="true">
+            <header><span><UsersRound size={20} /></span><div><strong>{lang === "ar" ? "إضافة موظف" : "Add employee"}</strong><small>{lang === "ar" ? "ملف العمل مستقل عن حساب الدخول" : "Employment profile is separate from the sign-in account"}</small></div><button type="button" onClick={() => setEmployeeDialog(false)}><X size={18} /></button></header>
+            <div className="access-dialog__body">
+              <div className="access-form-grid">
+                <label><span>{lang === "ar" ? "اسم الموظف بالعربية" : "Arabic employee name"} *</span><input value={employeeNameAr} onChange={(event) => setEmployeeNameAr(event.target.value)} /></label>
+                <label><span>{lang === "ar" ? "الاسم بالإنجليزية" : "English name"}</span><input value={employeeNameEn} onChange={(event) => setEmployeeNameEn(event.target.value)} /></label>
+                <label><span>{lang === "ar" ? "رقم الهاتف" : "Phone"} *</span><input dir="ltr" value={employeePhone} onChange={(event) => setEmployeePhone(event.target.value)} /></label>
+                <label><span>{lang === "ar" ? "المسمى الوظيفي" : "Job title"} *</span><input value={employeeTitleAr} onChange={(event) => setEmployeeTitleAr(event.target.value)} /></label>
+                <label><span>{lang === "ar" ? "القسم" : "Department"} *</span><input value={employeeDepartmentAr} onChange={(event) => setEmployeeDepartmentAr(event.target.value)} /></label>
+                <label><span>{lang === "ar" ? "جهة العمل" : "Workplace"} *</span><input value={employeeWorkplaceAr} onChange={(event) => setEmployeeWorkplaceAr(event.target.value)} /></label>
+                <label><span>{lang === "ar" ? "تاريخ بداية العمل" : "Employment start date"} *</span><input type="date" value={employeeStartDate} onChange={(event) => setEmployeeStartDate(event.target.value)} /></label>
+              </div>
+              <button className="access-account-choice" type="button" role="switch" aria-checked={createAccountWithEmployee} onClick={() => setCreateAccountWithEmployee((value) => !value)}><span><UserRound size={18} /></span><div><strong>{lang === "ar" ? "إنشاء حساب دخول الآن" : "Create sign-in account now"}</strong><small>{lang === "ar" ? "اختياري؛ يمكن إنشاؤه لاحقًا من صفحة المستخدمين." : "Optional; it can be created later from Users."}</small></div><i className={createAccountWithEmployee ? "switch switch--on" : "switch"}><b /></i></button>
+              {createAccountWithEmployee && (
+                <div className="access-form-grid access-form-grid--account">
+                  <label><span>{lang === "ar" ? "معرف الدخول" : "Login identifier"} *</span><input value={employeeLogin} onChange={(event) => setEmployeeLogin(event.target.value)} placeholder="name.user" /></label>
+                  <label><span>{lang === "ar" ? "الدور" : "Role"} *</span><span className="entry-select"><select value={employeeRoleId} onChange={(event) => setEmployeeRoleId(event.target.value)}>{roles.filter((role) => !role.protected && role.state === "active").map((role) => <option value={role.id} key={role.id}>{role.name[lang]}</option>)}</select><ChevronDown size={15} /></span></label>
+                  <div className="access-no-password"><LockKeyhole size={15} />{lang === "ar" ? "لن تُنشأ كلمة مرور هنا؛ سيصل للمستخدم مسار تفعيل آمن." : "No password is created here; the user receives a secure activation flow."}</div>
+                </div>
+              )}
+              {error && <div className="access-page-error"><CircleAlert size={16} />{error}</div>}
+            </div>
+            <footer><button className="secondary-button" type="button" onClick={() => setEmployeeDialog(false)}>{lang === "ar" ? "إلغاء" : "Cancel"}</button><button className="primary-button" type="button" onClick={saveEmployee}><Save size={17} />{lang === "ar" ? "حفظ الموظف" : "Save employee"}</button></footer>
+          </section>
+        </div>
+      )}
+
+      {userDialog && (
+        <div className="access-dialog-layer">
+          <section className="access-dialog access-dialog--user" role="dialog" aria-modal="true">
+            <header><span><UserRound size={20} /></span><div><strong>{lang === "ar" ? "إضافة مستخدم لموظف قائم" : "Add user for an existing employee"}</strong><small>{lang === "ar" ? "حساب بشري واحد مرتبط بصاحب حقيقي واحد" : "One human account bound to one real subject"}</small></div><button type="button" onClick={() => setUserDialog(false)}><X size={18} /></button></header>
+            <div className="access-dialog__body">
+              {availableEmployeeCandidates.length ? (
+                <>
+                  <div className="access-form-grid">
+                    <label className="is-wide"><span>{lang === "ar" ? "الموظف بدون حساب" : "Employee without an account"} *</span><span className="entry-select"><select value={userEmployeeId} onChange={(event) => setUserEmployeeId(event.target.value)}>{availableEmployeeCandidates.map((employee) => <option value={employee.id} key={employee.id}>{employee.name[lang]} — {employee.code}</option>)}</select><ChevronDown size={15} /></span></label>
+                    <label><span>{lang === "ar" ? "معرف الدخول" : "Login identifier"} *</span><input value={userLogin} onChange={(event) => setUserLogin(event.target.value)} placeholder="name.user" /></label>
+                    <label><span>{lang === "ar" ? "الدور" : "Role"} *</span><span className="entry-select"><select value={userRoleId} onChange={(event) => setUserRoleId(event.target.value)}>{roles.filter((role) => !role.protected && role.state === "active").map((role) => <option value={role.id} key={role.id}>{role.name[lang]}</option>)}</select><ChevronDown size={15} /></span></label>
+                    <label><span>{lang === "ar" ? "نطاق البيانات" : "Data scope"} *</span><span className="entry-select"><select value={userScope} onChange={(event) => setUserScope(event.target.value as UserAccountRecord["scope"])}><option value="branch">{scopeLabel("branch")}</option><option value="warehouse">{scopeLabel("warehouse")}</option><option value="company">{scopeLabel("company")}</option><option value="self">{scopeLabel("self")}</option></select><ChevronDown size={15} /></span></label>
+                  </div>
+                  <button className="access-account-choice" type="button" role="switch" aria-checked={userMfaRequired} onClick={() => setUserMfaRequired((value) => !value)}><span><ShieldCheck size={18} /></span><div><strong>{lang === "ar" ? "طلب التحقق متعدد العوامل" : "Require multi-factor authentication"}</strong><small>{lang === "ar" ? "يظل الحساب في مرحلة الإعداد حتى يكمله المستخدم." : "Access setup remains incomplete until the user finishes it."}</small></div><i className={userMfaRequired ? "switch switch--on" : "switch"}><b /></i></button>
+                  <div className="access-preview"><ShieldCheck size={17} /><span><strong>{lang === "ar" ? "معاينة الوصول قبل الإنشاء" : "Access preview before creation"}</strong><small>{roles.find((role) => role.id === userRoleId)?.name[lang] ?? "—"} · {scopeLabel(userScope)} · {userMfaRequired ? lang === "ar" ? "MFA مطلوب" : "MFA required" : lang === "ar" ? "MFA غير مطلوب" : "MFA not required"}</small></span></div>
+                </>
+              ) : (
+                <div className="activity-empty"><Check size={28} /><strong>{lang === "ar" ? "كل الموظفين النشطين لديهم حسابات" : "All active employees already have accounts"}</strong></div>
+              )}
+              {error && <div className="access-page-error"><CircleAlert size={16} />{error}</div>}
+            </div>
+            <footer><button className="secondary-button" type="button" onClick={() => setUserDialog(false)}>{lang === "ar" ? "إلغاء" : "Cancel"}</button><button className="primary-button" type="button" disabled={!availableEmployeeCandidates.length} onClick={saveUser}><ShieldCheck size={17} />{lang === "ar" ? "إنشاء الحساب وإرسال الدعوة" : "Create account and send invitation"}</button></footer>
+          </section>
+        </div>
+      )}
+
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
+    </div>
+  );
+}
+
 type ReplacementParty = {
   id: string;
   name: Localized;
@@ -32531,6 +34137,11 @@ export default function Home() {
   const [sharedRecipients, setSharedRecipients] =
     useState<RecipientRecord[]>(recipientRecordsData);
   const [sharedCouriers, setSharedCouriers] = useState(courierRecordsData);
+  const [sharedEmployees, setSharedEmployees] = useState(employeesData);
+  const [sharedUsers, setSharedUsers] = useState(userAccountsData);
+  const [sharedAccessRoles, setSharedAccessRoles] = useState(accessRolesData);
+  const [sharedAccessActivities, setSharedAccessActivities] =
+    useState(accessActivityData);
   const [sharedGovernorates, setSharedGovernorates] = useState(governoratesData);
   const [sharedPriceLists, setSharedPriceLists] = useState(priceListsData);
   const [sharedCourierPlans, setSharedCourierPlans] = useState(
@@ -32596,6 +34207,10 @@ export default function Home() {
           senders?: SenderRecord[];
           recipients?: RecipientRecord[];
           couriers?: CourierRecord[];
+          employees?: EmployeeRecord[];
+          users?: UserAccountRecord[];
+          accessRoles?: AccessRole[];
+          accessActivities?: AccessActivity[];
           governorates?: GovernorateRecord[];
           priceLists?: PriceListRecord[];
           courierPlans?: CourierRatePlan[];
@@ -32649,6 +34264,24 @@ export default function Home() {
         }
         if (Array.isArray(parsed.couriers) && parsed.couriers.length > 0) {
           setSharedCouriers(parsed.couriers);
+        }
+        if (Array.isArray(parsed.employees) && parsed.employees.length > 0) {
+          setSharedEmployees(parsed.employees);
+        }
+        if (Array.isArray(parsed.users) && parsed.users.length > 0) {
+          setSharedUsers(parsed.users);
+        }
+        if (
+          Array.isArray(parsed.accessRoles) &&
+          parsed.accessRoles.length > 0
+        ) {
+          setSharedAccessRoles(parsed.accessRoles);
+        }
+        if (
+          Array.isArray(parsed.accessActivities) &&
+          parsed.accessActivities.length > 0
+        ) {
+          setSharedAccessActivities(parsed.accessActivities);
         }
         if (Array.isArray(parsed.governorates)) {
           setSharedGovernorates(parsed.governorates);
@@ -33039,6 +34672,10 @@ export default function Home() {
         senders: sharedSenders,
         recipients: sharedRecipients,
         couriers: sharedCouriers,
+        employees: sharedEmployees,
+        users: sharedUsers,
+        accessRoles: sharedAccessRoles,
+        accessActivities: sharedAccessActivities,
         governorates: sharedGovernorates,
         priceLists: sharedPriceLists,
         courierPlans: sharedCourierPlans,
@@ -33083,6 +34720,10 @@ export default function Home() {
     sharedSenders,
     sharedRecipients,
     sharedCouriers,
+    sharedEmployees,
+    sharedUsers,
+    sharedAccessRoles,
+    sharedAccessActivities,
   ]);
 
   function saveShipmentRecords(records: Shipment[]) {
@@ -33294,6 +34935,29 @@ export default function Home() {
           debts={sharedCourierDebts}
           onRecordsChange={setSharedCouriers}
           onPlansChange={setSharedCourierPlans}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "employees" ||
+        screen === "users" ||
+        screen === "roles" ||
+        screen === "activity" ? (
+        <AccessControlScreen
+          section={screen}
+          lang={lang}
+          theme={theme}
+          employees={sharedEmployees}
+          users={sharedUsers}
+          roles={sharedAccessRoles}
+          activities={sharedAccessActivities}
+          onEmployeesChange={setSharedEmployees}
+          onUsersChange={setSharedUsers}
+          onRolesChange={setSharedAccessRoles}
+          onActivitiesChange={setSharedAccessActivities}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))

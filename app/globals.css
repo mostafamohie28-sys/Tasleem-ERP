@@ -41,6 +41,1187 @@
   --transition: 180ms ease;
 }
 
+/* People, users, access roles and append-only activity */
+.access-page {
+  display: grid;
+  gap: 15px;
+  padding-bottom: 34px;
+}
+
+.access-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  box-shadow: var(--shadow-sm);
+}
+
+.access-tabs button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  color: var(--text-soft);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.access-tabs button:hover {
+  color: var(--text);
+  background: var(--surface-soft);
+}
+
+.access-tabs button.is-active {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+  border-color: color-mix(in srgb, var(--primary) 20%, var(--border));
+  box-shadow: inset 0 -2px var(--primary);
+}
+
+.access-metrics,
+.access-role-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.access-metrics article,
+.access-role-summary article {
+  display: flex;
+  min-height: 105px;
+  align-items: center;
+  gap: 12px;
+  padding: 15px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  box-shadow: var(--shadow-sm);
+}
+
+.access-metrics article > span {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+  border-radius: 12px;
+}
+
+.access-metrics article:nth-child(2) > span {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, var(--surface));
+}
+
+.access-metrics article:nth-child(3) > span,
+.access-metrics article:nth-child(4) > span {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+}
+
+.access-metrics article > div {
+  display: grid;
+  gap: 7px;
+}
+
+.access-metrics small,
+.access-role-summary small {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.access-metrics strong,
+.access-role-summary strong {
+  color: var(--text);
+  font-size: 23px;
+  font-weight: 900;
+}
+
+.access-directory {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  box-shadow: var(--shadow-sm);
+}
+
+.access-directory__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 17px;
+  border-bottom: 1px solid var(--border);
+}
+
+.access-directory__heading > span {
+  display: grid;
+  gap: 3px;
+}
+
+.access-directory__heading strong {
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.access-directory__heading small {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.access-directory__heading label,
+.activity-controls > label {
+  display: flex;
+  width: min(320px, 42%);
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--text-soft);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.access-directory__heading input,
+.activity-controls input {
+  width: 100%;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 13px;
+}
+
+.access-list {
+  display: grid;
+}
+
+.access-list article {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  min-height: 82px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.access-list article:last-child {
+  border-bottom: 0;
+}
+
+.access-list article:hover {
+  background: color-mix(in srgb, var(--primary) 3%, var(--surface));
+}
+
+.access-list--employees article {
+  grid-template-columns: 42px minmax(150px, 1.2fr) minmax(130px, 0.95fr) minmax(125px, 0.9fr) minmax(145px, 1fr) auto auto;
+}
+
+.access-list--users article {
+  grid-template-columns: 42px minmax(150px, 1.1fr) minmax(145px, 1fr) minmax(130px, 0.9fr) minmax(130px, 0.95fr) auto minmax(125px, auto);
+}
+
+.access-avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 10%, var(--surface));
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.access-list article > div:not(.access-user-actions),
+.access-person {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.access-list article strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-list article small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-list article em {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-person strong {
+  font-size: 13px !important;
+}
+
+.access-list .is-good {
+  color: var(--success);
+}
+
+.access-list .is-attention {
+  color: var(--warning);
+}
+
+.access-state {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 9px;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, var(--surface));
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.access-state--suspended,
+.access-state--invited {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+}
+
+.access-state--ended,
+.access-state--locked,
+.access-state--disabled {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+}
+
+.access-row-action {
+  min-height: 34px;
+  padding-inline: 10px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.access-user-actions {
+  display: grid;
+  gap: 5px;
+}
+
+.access-user-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
+  color: var(--primary);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.access-user-actions button:disabled {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.access-security-note,
+.access-sod-warning,
+.access-preview,
+.access-no-password {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  color: var(--success);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--success) 8%, transparent), transparent 75%),
+    var(--surface);
+  border: 1px solid color-mix(in srgb, var(--success) 23%, var(--border));
+  border-radius: 13px;
+}
+
+.access-security-note span,
+.access-sod-warning span,
+.access-preview span {
+  display: grid;
+  gap: 3px;
+}
+
+.access-security-note strong,
+.access-sod-warning strong,
+.access-preview strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 820;
+}
+
+.access-security-note small,
+.access-sod-warning small,
+.access-preview small {
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+.access-page-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--danger) 20%, var(--border));
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.access-role-summary article {
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  min-height: 88px;
+}
+
+.access-role-workspace {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.52fr) minmax(0, 2fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.access-role-list,
+.access-role-editor {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.access-role-list {
+  position: sticky;
+  top: 82px;
+  padding: 9px;
+}
+
+.access-role-list > div {
+  display: grid;
+  gap: 4px;
+  padding: 9px 8px 13px;
+}
+
+.access-role-list > div strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.access-role-list > div small {
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.access-role-list > button {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  min-height: 58px;
+  margin-bottom: 5px;
+  padding: 7px 8px;
+  color: var(--text);
+  text-align: start;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 11px;
+}
+
+.access-role-list > button:hover {
+  background: var(--surface-soft);
+}
+
+.access-role-list > button.is-active {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
+}
+
+.access-role-list > button > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: inherit;
+  background: var(--surface-soft);
+  border-radius: 9px;
+}
+
+.access-role-list > button > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.access-role-list button strong {
+  overflow: hidden;
+  font-size: 11px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-role-list button small {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-role-list button em {
+  display: grid;
+  min-width: 25px;
+  height: 25px;
+  place-items: center;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+  border-radius: 8px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.access-role-editor {
+  padding: 16px;
+}
+
+.access-role-editor__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.access-role-editor__head > span:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.access-role-editor__head strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.access-role-editor__head small {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.access-role-state {
+  padding: 5px 9px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.access-role-state.is-active {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, var(--surface));
+}
+
+.access-role-fields,
+.access-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+}
+
+.access-role-fields {
+  margin: 14px 0;
+}
+
+.access-role-fields label,
+.access-form-grid label {
+  display: grid;
+  gap: 7px;
+}
+
+.access-role-fields label.is-wide,
+.access-form-grid label.is-wide {
+  grid-column: 1 / -1;
+}
+
+.access-role-fields label > span:first-child,
+.access-form-grid label > span:first-child {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.access-role-fields input,
+.access-form-grid input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 11px;
+  color: var(--text);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  outline: 0;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.access-role-fields input:focus,
+.access-form-grid input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.access-role-fields input:disabled,
+.access-role-fields input[readonly] {
+  color: var(--text-soft);
+  cursor: not-allowed;
+}
+
+.access-permission-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.access-permission-groups > section {
+  padding: 10px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.access-permission-groups > section > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.access-permission-groups > section > div strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.access-permission-groups > section > div small {
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.access-permission-groups label {
+  display: grid;
+  grid-template-columns: 23px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 52px;
+  margin-bottom: 5px;
+  padding: 7px;
+  background: var(--surface);
+  border: 1px solid transparent;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.access-permission-groups label.is-selected {
+  border-color: color-mix(in srgb, var(--primary) 18%, var(--border));
+}
+
+.access-permission-groups input {
+  position: absolute;
+  opacity: 0;
+}
+
+.access-permission-groups label > span {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  place-items: center;
+  color: transparent;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+}
+
+.access-permission-groups label.is-selected > span {
+  color: #fff;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.access-permission-groups label > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.access-permission-groups label strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.access-permission-groups label small {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 8px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.access-permission-groups label em {
+  padding: 3px 6px;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, var(--surface));
+  border-radius: 6px;
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.access-sod-warning {
+  align-items: flex-start;
+  margin-top: 12px;
+  color: var(--warning);
+  background:
+    linear-gradient(100deg, color-mix(in srgb, var(--warning) 8%, transparent), transparent 75%),
+    var(--surface);
+  border-color: color-mix(in srgb, var(--warning) 24%, var(--border));
+}
+
+.access-role-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.access-role-footer > div {
+  display: grid;
+  gap: 4px;
+}
+
+.access-role-footer small {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.access-role-footer strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.activity-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(160px, 0.4fr) minmax(160px, 0.4fr);
+  gap: 9px;
+  padding: 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+}
+
+.activity-controls > label {
+  width: 100%;
+}
+
+.activity-controls .entry-select {
+  min-height: 40px;
+}
+
+.activity-timeline {
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.activity-timeline__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.activity-timeline__head > span {
+  display: grid;
+  gap: 3px;
+}
+
+.activity-timeline__head strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.activity-timeline__head small {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.activity-timeline__head em {
+  padding: 5px 8px;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface));
+  border-radius: 7px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.activity-timeline__list article {
+  display: grid;
+  grid-template-columns: 36px minmax(220px, 1.7fr) minmax(130px, 0.65fr) minmax(130px, 0.7fr) auto;
+  align-items: center;
+  gap: 11px;
+  min-height: 76px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.activity-timeline__list article:last-child {
+  border-bottom: 0;
+}
+
+.activity-dot {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, var(--surface));
+  border-radius: 10px;
+}
+
+.activity-dot--rejected,
+.activity-dot--technical_failure {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+}
+
+.activity-main {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.activity-main strong,
+.activity-timeline__list article > div strong {
+  color: var(--text);
+  font-size: 11px;
+}
+
+.activity-main p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 10px;
+  line-height: 1.55;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-main small,
+.activity-timeline__list article > div small {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.activity-timeline__list article > div:not(.activity-main) {
+  display: grid;
+  gap: 4px;
+}
+
+.activity-outcome {
+  padding: 5px 8px;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 9%, var(--surface));
+  border-radius: 7px;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.activity-outcome--rejected,
+.activity-outcome--technical_failure {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, var(--surface));
+}
+
+.activity-empty {
+  display: grid;
+  min-height: 150px;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
+.activity-empty strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.access-dialog-layer {
+  position: fixed;
+  z-index: 125;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgb(5 18 41 / 58%);
+  backdrop-filter: blur(5px);
+}
+
+.access-dialog {
+  display: grid;
+  width: min(720px, 100%);
+  max-height: min(90vh, 820px);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 19px;
+  box-shadow: 0 28px 72px rgb(3 16 42 / 35%);
+}
+
+.access-dialog > header {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 36px;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.access-dialog > header > span {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 9%, var(--surface));
+  border-radius: 11px;
+}
+
+.access-dialog > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.access-dialog > header strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.access-dialog > header small {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.access-dialog > header > button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--text-soft);
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+
+.access-dialog__body {
+  display: grid;
+  gap: 13px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.access-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 12px 16px;
+  background: var(--surface-soft);
+  border-top: 1px solid var(--border);
+}
+
+.access-account-choice {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  color: var(--text);
+  text-align: start;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.access-account-choice > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  color: var(--primary);
+  background: var(--surface);
+  border-radius: 10px;
+}
+
+.access-account-choice > div {
+  display: grid;
+  gap: 3px;
+}
+
+.access-account-choice strong {
+  font-size: 12px;
+}
+
+.access-account-choice small {
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
+.access-form-grid--account {
+  padding: 12px;
+  background: color-mix(in srgb, var(--primary) 5%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--primary) 16%, var(--border));
+  border-radius: 11px;
+}
+
+.access-no-password {
+  grid-column: 1 / -1;
+  padding: 9px 10px;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.access-preview {
+  align-items: flex-start;
+}
+
+@media (max-width: 1180px) {
+  .access-list--employees article,
+  .access-list--users article {
+    grid-template-columns: 42px minmax(140px, 1fr) minmax(125px, 0.9fr) minmax(125px, 0.85fr) auto;
+  }
+
+  .access-list--employees article > div:nth-of-type(3),
+  .access-list--users article > div:nth-of-type(3) {
+    display: none;
+  }
+
+  .access-list--employees .access-row-action,
+  .access-list--users .access-user-actions {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .access-metrics,
+  .access-role-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .access-role-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .access-role-list {
+    position: static;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .access-role-list > div {
+    grid-column: 1 / -1;
+  }
+
+  .activity-timeline__list article {
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+
+  .activity-timeline__list article > div:not(.activity-main) {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .access-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .access-directory__heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .access-directory__heading label {
+    width: 100%;
+  }
+
+  .access-list {
+    gap: 9px;
+    padding: 9px;
+  }
+
+  .access-list--employees article,
+  .access-list--users article {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .access-list article > div:not(.access-person):not(.access-user-actions),
+  .access-list article > .access-row-action,
+  .access-list article > .access-user-actions {
+    grid-column: 2 / -1;
+  }
+
+  .access-list--employees article > div:nth-of-type(3),
+  .access-list--users article > div:nth-of-type(3) {
+    display: grid;
+  }
+
+  .access-user-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .access-permission-groups {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .access-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .access-form-grid label.is-wide,
+  .access-no-password {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .access-metrics,
+  .access-role-summary {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .access-metrics article,
+  .access-role-summary article {
+    min-height: 85px;
+    padding: 11px;
+  }
+
+  .access-metrics article > span {
+    width: 36px;
+    height: 36px;
+  }
+
+  .access-metrics strong,
+  .access-role-summary strong {
+    font-size: 19px;
+  }
+
+  .access-role-list {
+    grid-template-columns: 1fr;
+  }
+
+  .access-role-list > div {
+    grid-column: auto;
+  }
+
+  .access-role-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .access-role-fields label.is-wide {
+    grid-column: auto;
+  }
+
+  .access-role-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .access-role-footer button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .access-dialog-layer {
+    align-items: end;
+    padding: 0;
+  }
+
+  .access-dialog {
+    max-height: 94vh;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .access-dialog > footer {
+    flex-direction: column-reverse;
+  }
+
+  .access-dialog > footer button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* Shipment replacement — one direct operation with preserved history */
 .replacement-page {
   display: grid;
