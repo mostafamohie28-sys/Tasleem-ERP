@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import {
+  ArrowLeftRight,
   Banknote,
   Barcode,
   Bell,
@@ -81,6 +82,8 @@ type Screen =
   | "addShipment"
   | "confirmation"
   | "assignment"
+  | "courierReplacement"
+  | "senderReplacement"
   | "courierShipments"
   | "courierPrint"
   | "courierAccount"
@@ -357,7 +360,23 @@ type Shipment = {
   };
   warehouseLocation?: string;
   warehouseHistory?: WarehouseMovement[];
+  replacementHistory?: ShipmentReplacementEvent[];
   address: Localized;
+};
+
+type ShipmentReplacementEvent = {
+  id: string;
+  kind: "courier" | "sender";
+  from: Localized;
+  to: Localized;
+  performedBy: Localized;
+  timestamp: Localized;
+  note: string;
+};
+
+type ShipmentReplacementRecord = ShipmentReplacementEvent & {
+  shipmentIds: string[];
+  warnings: string[];
 };
 
 function shipmentCompanyShippingFee(shipment: Shipment) {
@@ -2974,6 +2993,8 @@ const courierFixedEntitlementsData: CourierFixedEntitlement[] = [
 
 const courierPayoutsData: CourierPayout[] = [];
 
+const shipmentReplacementRecordsData: ShipmentReplacementRecord[] = [];
+
 const senderBalancesData: SenderBalance[] = [
   {
     id: "sender-balance-orchid-1",
@@ -4396,6 +4417,22 @@ function Sidebar({
           label: t.assignment,
           icon: Truck,
           screen: "assignment" as const,
+        },
+        {
+          label:
+            lang === "ar"
+              ? "استبدال شحنات المناديب"
+              : "Replace courier shipments",
+          icon: ArrowLeftRight,
+          screen: "courierReplacement" as const,
+        },
+        {
+          label:
+            lang === "ar"
+              ? "استبدال شحنات الرسل"
+              : "Replace sender shipments",
+          icon: UsersRound,
+          screen: "senderReplacement" as const,
         },
         {
           label: lang === "ar" ? "شحنات المناديب" : "Courier shipments",
@@ -26752,6 +26789,894 @@ function AssignmentScreen({
   );
 }
 
+type ReplacementParty = {
+  id: string;
+  name: Localized;
+  code: string;
+  meta: Localized;
+};
+
+function ShipmentReplacementScreen({
+  mode,
+  lang,
+  theme,
+  shipmentRecords,
+  couriers,
+  senders,
+  priceLists,
+  statuses,
+  governorates,
+  replacementRecords,
+  onShipmentsChange,
+  onReplacementRecordsChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onOpenShipment,
+  onLogout,
+}: {
+  mode: "courier" | "sender";
+  lang: Lang;
+  theme: Theme;
+  shipmentRecords: Shipment[];
+  couriers: CourierRecord[];
+  senders: SenderRecord[];
+  priceLists: PriceListRecord[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  replacementRecords: ShipmentReplacementRecord[];
+  onShipmentsChange: (records: Shipment[]) => void;
+  onReplacementRecordsChange: (records: ShipmentReplacementRecord[]) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onOpenShipment: (shipmentId: string) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const parties: ReplacementParty[] =
+    mode === "courier"
+      ? couriers
+          .filter((courier) => courier.state === "active")
+          .map((courier) => ({
+            id: courier.id,
+            name: courier.name,
+            code: courier.code,
+            meta: courier.vehicle,
+          }))
+      : senders
+          .filter((sender) => sender.state === "active")
+          .map((sender) => ({
+            id: sender.id,
+            name: sender.name,
+            code: sender.code,
+            meta: {
+              ar: sender.contactName || sender.phone,
+              en: sender.contactName || sender.phone,
+            },
+          }));
+
+  function shipmentBelongsTo(
+    shipment: Shipment,
+    party: ReplacementParty | undefined,
+  ) {
+    if (!party) return false;
+    if (mode === "courier") {
+      return (
+        shipment.custodyType === "courier" &&
+        Boolean(
+          shipment.courier &&
+            (shipment.courier.en === party.name.en ||
+              shipment.courier.ar === party.name.ar),
+        )
+      );
+    }
+    return (
+      shipment.sender.en === party.name.en ||
+      shipment.sender.ar === party.name.ar
+    );
+  }
+
+  const initialCurrentParty =
+    parties.find((party) =>
+      shipmentRecords.some((shipment) => shipmentBelongsTo(shipment, party)),
+    ) ?? parties[0];
+  const initialReplacementParty =
+    parties.find((party) => party.id !== initialCurrentParty?.id) ?? parties[0];
+  const [currentPartyId, setCurrentPartyId] = useState(
+    initialCurrentParty?.id ?? "",
+  );
+  const [replacementPartyId, setReplacementPartyId] = useState(
+    initialReplacementParty?.id ?? "",
+  );
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [search, setSearch] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [toast, setToast] = useState("");
+
+  const currentParty =
+    parties.find((party) => party.id === currentPartyId) ?? parties[0];
+  const replacementParty =
+    parties.find((party) => party.id === replacementPartyId) ??
+    parties.find((party) => party.id !== currentParty?.id) ??
+    parties[0];
+  const currentShipments = shipmentRecords.filter((shipment) =>
+    shipmentBelongsTo(shipment, currentParty),
+  );
+  const normalizedSearch = search.trim().toLowerCase();
+  const visibleShipments = currentShipments.filter(
+    (shipment) =>
+      !normalizedSearch ||
+      [
+        shipment.id,
+        shipment.reference,
+        shipment.phone,
+        shipment.recipient.ar,
+        shipment.recipient.en,
+        shipment.area.ar,
+        shipment.area.en,
+      ].some((value) => value.toLowerCase().includes(normalizedSearch)),
+  );
+  const selectedShipments = currentShipments.filter((shipment) =>
+    selectedIds.includes(shipment.id),
+  );
+  const recentRecords = replacementRecords
+    .filter((record) => record.kind === mode)
+    .slice(0, 6);
+  const selectedPieces = selectedShipments.reduce(
+    (sum, shipment) => sum + shipment.pieces,
+    0,
+  );
+  const selectedCollection = selectedShipments.reduce(
+    (sum, shipment) => sum + shipmentTotalToCollect(shipment),
+    0,
+  );
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+  const title =
+    mode === "courier"
+      ? lang === "ar"
+        ? "استبدال شحنات بين المناديب"
+        : "Replace shipments between couriers"
+      : lang === "ar"
+        ? "استبدال الشحنات بين الرسل"
+        : "Replace shipments between senders";
+  const activeScreen =
+    mode === "courier" ? "courierReplacement" : "senderReplacement";
+
+  function chooseCurrentParty(id: string) {
+    setCurrentPartyId(id);
+    if (id === replacementPartyId) {
+      setReplacementPartyId(
+        parties.find((party) => party.id !== id)?.id ?? "",
+      );
+    }
+    setSelectedIds([]);
+    setSearch("");
+    setError("");
+  }
+
+  function chooseReplacementParty(id: string) {
+    setReplacementPartyId(id);
+    setError("");
+  }
+
+  function toggleShipment(id: string) {
+    setSelectedIds((current) =>
+      current.includes(id)
+        ? current.filter((shipmentId) => shipmentId !== id)
+        : [...current, id],
+    );
+    setError("");
+  }
+
+  function linkedPriceList(sender: ReplacementParty) {
+    return (
+      priceLists.find((priceList) =>
+        priceList.senders.some(
+          (linkedSender) =>
+            linkedSender.en === sender.name.en ||
+            linkedSender.ar === sender.name.ar,
+        ),
+      ) ??
+      priceLists.find((priceList) => priceList.isDefault) ??
+      null
+    );
+  }
+
+  function shipmentAreaId(shipment: Shipment) {
+    return governorates
+      .flatMap((governorate) => governorate.areas)
+      .find(
+        (area) =>
+          area.name.en === shipment.area.en ||
+          area.name.ar === shipment.area.ar,
+      )?.id;
+  }
+
+  function openConfirmation() {
+    if (!currentParty || !replacementParty) {
+      setError(
+        lang === "ar"
+          ? "اختر الطرف الحالي والطرف البديل."
+          : "Choose the current and replacement parties.",
+      );
+      return;
+    }
+    if (currentParty.id === replacementParty.id) {
+      setError(
+        lang === "ar"
+          ? "لا يمكن اختيار نفس الطرف في الجهتين."
+          : "The same party cannot be selected on both sides.",
+      );
+      return;
+    }
+    if (selectedIds.length === 0) {
+      setError(
+        lang === "ar"
+          ? "حدد شحنة واحدة على الأقل."
+          : "Select at least one shipment.",
+      );
+      return;
+    }
+    setConfirmOpen(true);
+  }
+
+  function executeReplacement() {
+    if (!currentParty || !replacementParty) return;
+    const stillValid = shipmentRecords.filter(
+      (shipment) =>
+        selectedIds.includes(shipment.id) &&
+        shipmentBelongsTo(shipment, currentParty),
+    );
+    if (stillValid.length !== selectedIds.length) {
+      setConfirmOpen(false);
+      setError(
+        lang === "ar"
+          ? "تغيرت بعض الشحنات منذ فتح الصفحة. راجع القائمة الحالية ثم حاول مرة أخرى."
+          : "Some shipments changed while this page was open. Review the current list and try again.",
+      );
+      setSelectedIds(stillValid.map((shipment) => shipment.id));
+      return;
+    }
+
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const operationId = `${
+      mode === "courier" ? "CRP" : "SRP"
+    }-${Date.now()}`;
+    const warnings: string[] = [];
+    const replacementEvent: ShipmentReplacementEvent = {
+      id: operationId,
+      kind: mode,
+      from: currentParty.name,
+      to: replacementParty.name,
+      performedBy: {
+        ar: "موظف العمليات",
+        en: "Operations employee",
+      },
+      timestamp,
+      note:
+        mode === "courier"
+          ? lang === "ar"
+            ? "استبدال المندوب المسجل مع الحفاظ على حالة الشحنة وتاريخها."
+            : "Recorded courier replaced while preserving shipment status and history."
+          : lang === "ar"
+            ? "استبدال الراسل المسجل مع مراجعة التسعير والآثار المالية داخليًا."
+            : "Recorded sender replaced with internal pricing and financial review.",
+    };
+    const replacementPriceList =
+      mode === "sender" ? linkedPriceList(replacementParty) : null;
+
+    const nextShipments = shipmentRecords.map((shipment) => {
+      if (!selectedIds.includes(shipment.id)) return shipment;
+      if (mode === "courier") {
+        return {
+          ...shipment,
+          courier: replacementParty.name,
+          custody: { ar: "مع المندوب", en: "With courier" },
+          assignedAt: timestamp,
+          lastEvent: {
+            ar: `استُبدل المندوب من ${currentParty.name.ar} إلى ${replacementParty.name.ar}`,
+            en: `Courier replaced from ${currentParty.name.en} to ${replacementParty.name.en}`,
+          },
+          replacementHistory: [
+            replacementEvent,
+            ...(shipment.replacementHistory ?? []),
+          ],
+        };
+      }
+
+      const financiallyClosed = (shipment.statusHistory ?? []).some(
+        (event) =>
+          event.senderMoneySettled ||
+          event.senderSettlementStatus === "reserved" ||
+          event.senderSettlementStatus === "settled",
+      );
+      const areaId = shipmentAreaId(shipment);
+      const replacementCompanyFee = areaId
+        ? companyDeliveryPriceForArea(
+            replacementPriceList,
+            statuses,
+            areaId,
+          )
+        : null;
+      if (financiallyClosed) {
+        warnings.push(
+          lang === "ar"
+            ? `${shipment.id}: يوجد حساب راسل أو مستند مالي سابق؛ حُفظ كما هو للمراجعة.`
+            : `${shipment.id}: an existing sender account or financial document was preserved for review.`,
+        );
+      } else if (replacementCompanyFee === null) {
+        warnings.push(
+          lang === "ar"
+            ? `${shipment.id}: سعر المنطقة غير مكتمل للراسل البديل.`
+            : `${shipment.id}: the replacement sender has no complete area price.`,
+        );
+      }
+      if (shipment.reference) {
+        warnings.push(
+          lang === "ar"
+            ? `${shipment.id}: مرجع الراسل محفوظ ويحتاج مراجعة مع الراسل البديل.`
+            : `${shipment.id}: the sender reference was preserved and needs review with the replacement sender.`,
+        );
+      }
+
+      const canRefreshPricing =
+        !financiallyClosed && replacementCompanyFee !== null;
+      const nextCompanyFee = canRefreshPricing
+        ? replacementCompanyFee
+        : shipment.shippingFee;
+      const followsCompanyPrice =
+        shipment.recipientShippingSource !== "custom";
+      const nextRecipientCharge =
+        canRefreshPricing &&
+        followsCompanyPrice &&
+        shipment.shippingPayer === "recipient"
+          ? replacementCompanyFee
+          : shipment.recipientShippingCharge;
+
+      return {
+        ...shipment,
+        sender: replacementParty.name,
+        shippingFee: nextCompanyFee,
+        recipientShippingCharge: nextRecipientCharge,
+        recipientShippingAreaId: areaId ?? shipment.recipientShippingAreaId,
+        lastEvent: {
+          ar: `استُبدل الراسل من ${currentParty.name.ar} إلى ${replacementParty.name.ar}`,
+          en: `Sender replaced from ${currentParty.name.en} to ${replacementParty.name.en}`,
+        },
+        replacementHistory: [
+          replacementEvent,
+          ...(shipment.replacementHistory ?? []),
+        ],
+      };
+    });
+
+    const operation: ShipmentReplacementRecord = {
+      ...replacementEvent,
+      shipmentIds: [...selectedIds],
+      warnings: [...new Set(warnings)],
+    };
+    onShipmentsChange(nextShipments);
+    onReplacementRecordsChange([operation, ...replacementRecords]);
+    setConfirmOpen(false);
+    setSelectedIds([]);
+    setError("");
+    setToast(
+      mode === "courier"
+        ? lang === "ar"
+          ? `تم استبدال ${operation.shipmentIds.length} شحنة وظهرت فورًا مع المندوب البديل.`
+          : `${operation.shipmentIds.length} shipment(s) moved to the replacement courier.`
+        : operation.warnings.length
+          ? lang === "ar"
+            ? `تم استبدال ${operation.shipmentIds.length} شحنة مع ${operation.warnings.length} تنبيه للمراجعة.`
+            : `${operation.shipmentIds.length} shipment(s) replaced with ${operation.warnings.length} review note(s).`
+          : lang === "ar"
+            ? `تم استبدال الراسل لـ${operation.shipmentIds.length} شحنة وتحديث البيانات الجارية.`
+            : `Sender replaced for ${operation.shipmentIds.length} shipment(s).`,
+    );
+    window.setTimeout(() => setToast(""), 3600);
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen={activeScreen}
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={lang === "ar" ? "فتح القائمة" : "Open navigation"}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon">
+              <ArrowLeftRight size={20} />
+            </span>
+            <span>
+              <strong>{title}</strong>
+              <small>
+                {lang === "ar"
+                  ? "تصحيح مباشر مع تاريخ محفوظ"
+                  : "Direct correction with preserved history"}
+              </small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={
+                lang === "ar"
+                  ? "ابحث برقم الشحنة أو الباركود أو الهاتف..."
+                  : "Search shipment, barcode or phone..."
+              }
+            />
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+          </div>
+        </header>
+
+        <main className="page-content replacement-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{title}</h1>
+                <span className="demo-chip">
+                  {lang === "ar" ? "عملية واحدة أو مجموعة" : "Single or batch"}
+                </span>
+              </div>
+              <p>
+                {mode === "courier"
+                  ? lang === "ar"
+                    ? "اختر المندوب الحالي والبديل ثم الشحنات. حالة الشحنة وبيانات المستلم لا تتغير."
+                    : "Choose the current and replacement courier, then shipments. Status and recipient data stay unchanged."
+                  : lang === "ar"
+                    ? "اختر الراسل الحالي والبديل ثم الشحنات. المكان والحالة والمندوب لا يتغيرون."
+                    : "Choose the current and replacement sender, then shipments. Location, status and courier stay unchanged."}
+              </p>
+            </div>
+          </div>
+
+          <section className="replacement-truth">
+            <ShieldCheck size={19} />
+            <span>
+              <strong>
+                {lang === "ar"
+                  ? "النظام يحفظ ما قبل وما بعد ولا يمسح التاريخ"
+                  : "The system preserves before and after without erasing history"}
+              </strong>
+              <small>
+                {mode === "courier"
+                  ? lang === "ar"
+                    ? "بعد التنفيذ تختفي الشحنات من المندوب الحالي وتظهر للبديل وفي صفحة طباعته."
+                    : "After execution, shipments leave the current courier and appear with the replacement and on their print page."
+                  : lang === "ar"
+                    ? "أي سعر ناقص أو حساب سابق يظهر كتنبيه مراجعة، ولا يُعاد كتابة مستند مالي مغلق."
+                    : "Missing pricing or previous accounts become review notes; closed documents are never silently rewritten."}
+              </small>
+            </span>
+          </section>
+
+          <section className="replacement-route">
+            <label>
+              <span>
+                {mode === "courier"
+                  ? lang === "ar"
+                    ? "المندوب الحالي"
+                    : "Current courier"
+                  : lang === "ar"
+                    ? "الراسل الحالي"
+                    : "Current sender"}
+              </span>
+              <span className="entry-select">
+                <select
+                  value={currentParty?.id ?? ""}
+                  onChange={(event) => chooseCurrentParty(event.target.value)}
+                >
+                  {parties.map((party) => (
+                    <option value={party.id} key={party.id}>
+                      {party.name[lang]} — {party.code}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} />
+              </span>
+              <small>
+                {currentParty
+                  ? `${currentParty.meta[lang]} · ${currentShipments.length} ${
+                      lang === "ar" ? "شحنة" : "shipment(s)"
+                    }`
+                  : "—"}
+              </small>
+            </label>
+
+            <span className="replacement-route__arrow">
+              <ArrowLeftRight size={22} />
+            </span>
+
+            <label>
+              <span>
+                {mode === "courier"
+                  ? lang === "ar"
+                    ? "المندوب البديل"
+                    : "Replacement courier"
+                  : lang === "ar"
+                    ? "الراسل البديل"
+                    : "Replacement sender"}
+              </span>
+              <span className="entry-select">
+                <select
+                  value={replacementParty?.id ?? ""}
+                  onChange={(event) =>
+                    chooseReplacementParty(event.target.value)
+                  }
+                >
+                  {parties
+                    .filter((party) => party.id !== currentParty?.id)
+                    .map((party) => (
+                      <option value={party.id} key={party.id}>
+                        {party.name[lang]} — {party.code}
+                      </option>
+                    ))}
+                </select>
+                <ChevronDown size={16} />
+              </span>
+              <small>
+                {replacementParty
+                  ? replacementParty.meta[lang]
+                  : lang === "ar"
+                    ? "اختر البديل"
+                    : "Choose replacement"}
+              </small>
+            </label>
+          </section>
+
+          <div className="replacement-workspace">
+            <section className="replacement-shipments">
+              <div className="replacement-section-heading">
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "حدد الشحنات المطلوب استبدالها"
+                      : "Select shipments to replace"}
+                  </strong>
+                  <small>
+                    {visibleShipments.length}{" "}
+                    {lang === "ar" ? "شحنة ظاهرة" : "visible shipment(s)"}
+                  </small>
+                </span>
+                <label>
+                  <Search size={16} />
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "رقم الشحنة أو الهاتف..."
+                        : "Shipment or phone..."
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="replacement-list">
+                {visibleShipments.map((shipment) => {
+                  const checked = selectedIds.includes(shipment.id);
+                  return (
+                    <article
+                      className={checked ? "is-selected" : ""}
+                      key={shipment.id}
+                    >
+                      <label className="replacement-check">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleShipment(shipment.id)}
+                        />
+                        <span>
+                          <Check size={13} />
+                        </span>
+                      </label>
+                      <button
+                        className="replacement-shipment-id"
+                        type="button"
+                        onClick={() => onOpenShipment(shipment.id)}
+                      >
+                        <strong>{shipment.id}</strong>
+                        <small>{shipment.reference || "—"}</small>
+                      </button>
+                      <div className="replacement-recipient">
+                        <strong>{shipment.recipient[lang]}</strong>
+                        <small dir="ltr">{shipment.phone}</small>
+                      </div>
+                      <div>
+                        <strong>{shipment.area[lang]}</strong>
+                        <small>{shipment.governorate[lang]}</small>
+                      </div>
+                      <div>
+                        <strong>{shipment.status[lang]}</strong>
+                        <small>{shipment.custody[lang]}</small>
+                      </div>
+                      <div className="replacement-money">
+                        <strong>{money.format(shipmentTotalToCollect(shipment))}</strong>
+                        <small>
+                          {shipment.pieces}{" "}
+                          {lang === "ar" ? "قطعة" : "piece(s)"}
+                        </small>
+                      </div>
+                    </article>
+                  );
+                })}
+                {visibleShipments.length === 0 && (
+                  <div className="replacement-empty">
+                    <PackageCheck size={30} />
+                    <strong>
+                      {lang === "ar"
+                        ? "لا توجد شحنات مطابقة لدى الطرف الحالي"
+                        : "No matching shipments for the current party"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "اختر طرفًا آخر أو غيّر البحث."
+                        : "Choose another party or change the search."}
+                    </small>
+                  </div>
+                )}
+              </div>
+            </section>
+
+            <aside className="replacement-summary">
+              <div className="replacement-summary__title">
+                <span>
+                  <ClipboardCheck size={19} />
+                </span>
+                <div>
+                  <strong>
+                    {lang === "ar" ? "مراجعة الاستبدال" : "Replacement review"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "لا ينفذ شيء قبل التأكيد"
+                      : "Nothing changes before confirmation"}
+                  </small>
+                </div>
+              </div>
+              <dl>
+                <div>
+                  <dt>{lang === "ar" ? "عدد الشحنات" : "Shipments"}</dt>
+                  <dd>{selectedShipments.length}</dd>
+                </div>
+                <div>
+                  <dt>{lang === "ar" ? "إجمالي القطع" : "Pieces"}</dt>
+                  <dd>{selectedPieces}</dd>
+                </div>
+                <div>
+                  <dt>
+                    {lang === "ar"
+                      ? "التحصيل المتوقع"
+                      : "Expected collection"}
+                  </dt>
+                  <dd>{money.format(selectedCollection)}</dd>
+                </div>
+              </dl>
+              <div className="replacement-summary__route">
+                <span>
+                  <small>{lang === "ar" ? "من" : "From"}</small>
+                  <strong>{currentParty?.name[lang] ?? "—"}</strong>
+                </span>
+                <ArrowLeftRight size={18} />
+                <span>
+                  <small>{lang === "ar" ? "إلى" : "To"}</small>
+                  <strong>{replacementParty?.name[lang] ?? "—"}</strong>
+                </span>
+              </div>
+              <div className="replacement-summary__guard">
+                <LockKeyhole size={16} />
+                <span>
+                  <strong>
+                    {mode === "courier"
+                      ? lang === "ar"
+                        ? "لا تتغير حالة الشحنة أو تحصيلها"
+                        : "Status and collection stay unchanged"
+                      : lang === "ar"
+                        ? "لا يتغير مكان الطرد أو المندوب"
+                        : "Parcel location and courier stay unchanged"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "المجموعة كلها تنجح أو لا ينفذ منها شيء."
+                      : "The whole batch succeeds or nothing is applied."}
+                  </small>
+                </span>
+              </div>
+              {error && (
+                <div className="replacement-error" role="alert">
+                  <CircleAlert size={16} />
+                  {error}
+                </div>
+              )}
+              <button
+                className="primary-button replacement-submit"
+                type="button"
+                disabled={selectedShipments.length === 0}
+                onClick={openConfirmation}
+              >
+                <ArrowLeftRight size={17} />
+                {mode === "courier"
+                  ? lang === "ar"
+                    ? "استبدال الشحنات"
+                    : "Replace shipments"
+                  : lang === "ar"
+                    ? "استبدال الراسل"
+                    : "Replace sender"}
+              </button>
+            </aside>
+          </div>
+
+          <section className="replacement-history">
+            <div className="replacement-history__heading">
+              <span>
+                <Clock3 size={18} />
+                <div>
+                  <strong>
+                    {lang === "ar"
+                      ? "آخر عمليات الاستبدال"
+                      : "Recent replacement operations"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "سجل تراكمي لا يمسح ما قبله"
+                      : "Append-only history"}
+                  </small>
+                </div>
+              </span>
+              <em>{recentRecords.length}</em>
+            </div>
+            <div className="replacement-history__list">
+              {recentRecords.map((record) => (
+                <article key={record.id}>
+                  <span>
+                    <ArrowLeftRight size={17} />
+                  </span>
+                  <div>
+                    <strong>
+                      {record.from[lang]} ← {record.to[lang]}
+                    </strong>
+                    <small>
+                      {record.shipmentIds.join("، ")}
+                    </small>
+                  </div>
+                  <div>
+                    <small>{record.performedBy[lang]}</small>
+                    <strong>{record.timestamp[lang]}</strong>
+                  </div>
+                  {record.warnings.length > 0 && (
+                    <b>
+                      <CircleAlert size={13} />
+                      {record.warnings.length}{" "}
+                      {lang === "ar" ? "تنبيه" : "note(s)"}
+                    </b>
+                  )}
+                </article>
+              ))}
+              {recentRecords.length === 0 && (
+                <div className="replacement-history__empty">
+                  <Clock3 size={24} />
+                  <strong>
+                    {lang === "ar"
+                      ? "لا توجد عمليات استبدال مسجلة بعد"
+                      : "No replacement operations recorded yet"}
+                  </strong>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {confirmOpen && currentParty && replacementParty && (
+        <div className="replacement-confirm-layer" role="presentation">
+          <section
+            className="replacement-confirm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="replacement-confirm-title"
+          >
+            <button
+              className="replacement-confirm__close"
+              type="button"
+              onClick={() => setConfirmOpen(false)}
+              aria-label={lang === "ar" ? "إغلاق" : "Close"}
+            >
+              <X size={18} />
+            </button>
+            <span className="replacement-confirm__icon">
+              <ArrowLeftRight size={24} />
+            </span>
+            <h2 id="replacement-confirm-title">
+              {lang === "ar" ? "تأكيد الاستبدال" : "Confirm replacement"}
+            </h2>
+            <p>
+              {lang === "ar"
+                ? `سيتم استبدال ${selectedShipments.length} شحنة من ${currentParty.name.ar} إلى ${replacementParty.name.ar}.`
+                : `${selectedShipments.length} shipment(s) will move from ${currentParty.name.en} to ${replacementParty.name.en}.`}
+            </p>
+            <div>
+              <span>
+                <small>{lang === "ar" ? "الشحنات" : "Shipments"}</small>
+                <strong>{selectedShipments.length}</strong>
+              </span>
+              <span>
+                <small>{lang === "ar" ? "القطع" : "Pieces"}</small>
+                <strong>{selectedPieces}</strong>
+              </span>
+            </div>
+            <footer>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+              >
+                {lang === "ar" ? "رجوع" : "Back"}
+              </button>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={executeReplacement}
+              >
+                <Check size={17} />
+                {lang === "ar" ? "تأكيد وتنفيذ" : "Confirm and apply"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function getShipmentConfirmationCode(
   shipment: Shipment,
 ): "confirmed" | "no_answer" | "later" | "not_recorded" {
@@ -30431,6 +31356,30 @@ function Shipment360Screen({
       })),
     },
     {
+      id: "replacements",
+      title:
+        lang === "ar"
+          ? "سجل استبدال الأطراف"
+          : "Party replacement history",
+      icon: ArrowLeftRight,
+      events: (shipment.replacementHistory ?? []).map((event) => ({
+        id: event.id,
+        title:
+          event.kind === "courier"
+            ? lang === "ar"
+              ? "استبدال المندوب"
+              : "Courier replaced"
+            : lang === "ar"
+              ? "استبدال الراسل"
+              : "Sender replaced",
+        details: `${event.from[lang]} ← ${event.to[lang]}${
+          event.note ? ` · ${event.note}` : ""
+        }`,
+        actor: event.performedBy[lang],
+        timestamp: event.timestamp[lang],
+      })),
+    },
+    {
       id: "confirmation",
       title: lang === "ar" ? "سجل التأكيد والتواصل" : "Confirmation history",
       icon: Phone,
@@ -31606,6 +32555,8 @@ export default function Home() {
     useState(courierFixedEntitlementsData);
   const [sharedCourierPayouts, setSharedCourierPayouts] =
     useState(courierPayoutsData);
+  const [sharedReplacementRecords, setSharedReplacementRecords] =
+    useState(shipmentReplacementRecordsData);
   const [sharedSenderBalances, setSharedSenderBalances] =
     useState(senderBalancesData);
   const [sharedSenderDrafts, setSharedSenderDrafts] = useState(
@@ -31656,6 +32607,7 @@ export default function Home() {
           courierSettlements?: CourierSettlement[];
           courierFixedEntitlements?: CourierFixedEntitlement[];
           courierPayouts?: CourierPayout[];
+          shipmentReplacementRecords?: ShipmentReplacementRecord[];
           senderBalances?: SenderBalance[];
           senderDrafts?: SenderSettlementDraft[];
           senderReceipts?: SenderSettlementReceipt[];
@@ -31795,6 +32747,9 @@ export default function Home() {
         }
         if (Array.isArray(parsed.courierPayouts)) {
           setSharedCourierPayouts(parsed.courierPayouts);
+        }
+        if (Array.isArray(parsed.shipmentReplacementRecords)) {
+          setSharedReplacementRecords(parsed.shipmentReplacementRecords);
         }
         if (Array.isArray(parsed.senderBalances)) {
           setSharedSenderBalances(parsed.senderBalances);
@@ -32095,6 +33050,7 @@ export default function Home() {
         courierSettlements: sharedCourierSettlements,
         courierFixedEntitlements: sharedCourierFixedEntitlements,
         courierPayouts: sharedCourierPayouts,
+        shipmentReplacementRecords: sharedReplacementRecords,
         senderBalances: sharedSenderBalances,
         senderDrafts: sharedSenderDrafts,
         senderReceipts: sharedSenderReceipts,
@@ -32111,6 +33067,7 @@ export default function Home() {
     sharedCourierSettlements,
     sharedCourierFixedEntitlements,
     sharedCourierPayouts,
+    sharedReplacementRecords,
     sharedPriceLists,
     sharedSenderBalances,
     sharedSenderDrafts,
@@ -32520,6 +33477,56 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "courierReplacement" ? (
+        <ShipmentReplacementScreen
+          mode="courier"
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          couriers={sharedCouriers}
+          senders={sharedSenders}
+          priceLists={sharedPriceLists}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          replacementRecords={sharedReplacementRecords}
+          onShipmentsChange={setSharedShipments}
+          onReplacementRecordsChange={setSharedReplacementRecords}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onOpenShipment={(shipmentId) => {
+            setShipmentFileTargetId(shipmentId);
+            setScreen("shipment360");
+          }}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "senderReplacement" ? (
+        <ShipmentReplacementScreen
+          mode="sender"
+          lang={lang}
+          theme={theme}
+          shipmentRecords={sharedShipments}
+          couriers={sharedCouriers}
+          senders={sharedSenders}
+          priceLists={sharedPriceLists}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          replacementRecords={sharedReplacementRecords}
+          onShipmentsChange={setSharedShipments}
+          onReplacementRecordsChange={setSharedReplacementRecords}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
+          onNavigate={setScreen}
+          onOpenShipment={(shipmentId) => {
+            setShipmentFileTargetId(shipmentId);
+            setScreen("shipment360");
+          }}
           onLogout={() => setScreen("login")}
         />
       ) : screen === "incompleteShipments" ? (
