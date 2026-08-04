@@ -2784,6 +2784,7 @@ type CourierRatePlan = {
   couriers: Localized[];
   version: number;
   effectiveFrom?: string;
+  coveredAreaIds?: string[];
   rates: PriceMatrix;
 };
 
@@ -3427,6 +3428,63 @@ function normalizeCourierRatePlan(plan: CourierRatePlan): CourierRatePlan {
         : Math.max(0, isLegacyMixedPlan ? 1800 : (plan.fixedSalary ?? 0)),
     effectiveFrom: plan.effectiveFrom ?? "2026-08-01",
   };
+}
+
+function cloneCourierRateMatrix(rates: PriceMatrix): PriceMatrix {
+  return Object.fromEntries(
+    Object.entries(rates).map(([areaId, areaRates]) => [
+      areaId,
+      { ...areaRates },
+    ]),
+  );
+}
+
+function normalizeCourierPlans(
+  plans: CourierRatePlan[],
+  couriers: CourierRecord[],
+): CourierRatePlan[] {
+  const normalizedPlans = (plans.length ? plans : courierRatePlansData).map(
+    normalizeCourierRatePlan,
+  );
+  const activeCouriers = couriers.filter((courier) => courier.state === "active");
+
+  return activeCouriers.map((courier, index) => {
+    const individualAgreement = normalizedPlans.find(
+      (plan) =>
+        plan.couriers.length === 1 &&
+        (plan.couriers[0]?.en === courier.name.en ||
+          plan.couriers[0]?.ar === courier.name.ar),
+    );
+    const inheritedAgreement = normalizedPlans.find((plan) =>
+      plan.couriers.some(
+        (assignedCourier) =>
+          assignedCourier.en === courier.name.en ||
+          assignedCourier.ar === courier.name.ar,
+      ),
+    );
+    const source =
+      individualAgreement ??
+      inheritedAgreement ??
+      normalizedPlans.find((plan) => plan.isDefault) ??
+      normalizedPlans[index % Math.max(normalizedPlans.length, 1)] ??
+      courierRatePlansData[0];
+
+    return normalizeCourierRatePlan({
+      ...source,
+      id: `courier-agreement-${courier.id}`,
+      name: {
+        ar: `اتفاق أجر ${courier.name.ar}`,
+        en: `${courier.name.en} pay agreement`,
+      },
+      code: `PAY-${courier.code}`,
+      isDefault: false,
+      couriers: [courier.name],
+      coveredAreaIds: source.coveredAreaIds
+        ? [...source.coveredAreaIds]
+        : undefined,
+      rates: cloneCourierRateMatrix(source.rates),
+    });
+  });
 }
 
 function resolveCourierPayPlan(
@@ -11967,7 +12025,7 @@ function CourierPlanEditor({
   );
 }
 
-function CourierRatesScreen({
+function LegacyCourierRatesScreen({
   lang,
   theme,
   plans,
@@ -13153,6 +13211,1311 @@ function CourierRatesScreen({
             setIsNew(false);
           }}
           onSave={savePlan}
+        />
+      )}
+      {toast && (
+        <div className="toast" role="status">
+          <Check size={17} />
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CourierAgreementEditorV2({
+  plan,
+  courier,
+  plans,
+  couriers,
+  statuses,
+  governorates,
+  lang,
+  onClose,
+  onSave,
+}: {
+  plan: CourierRatePlan;
+  courier: CourierRecord;
+  plans: CourierRatePlan[];
+  couriers: CourierRecord[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  lang: Lang;
+  onClose: () => void;
+  onSave: (plan: CourierRatePlan) => void;
+}) {
+  const [draft, setDraft] = useState<CourierRatePlan>({
+    ...plan,
+    rates: cloneCourierRateMatrix(plan.rates),
+    coveredAreaIds: plan.coveredAreaIds
+      ? [...plan.coveredAreaIds]
+      : undefined,
+  });
+  const [copySourceId, setCopySourceId] = useState("");
+  const [preparedMessage, setPreparedMessage] = useState("");
+  const commissionStatuses = statuses.filter(
+    (status) =>
+      status.state === "published" && status.appearsInCourierRates,
+  );
+  const allAreas = governorates.flatMap((governorate) =>
+    governorate.areas.map((area) => ({ area, governorate })),
+  );
+  const allAreaIds = allAreas.map(({ area }) => area.id);
+  const coverageMode = draft.coveredAreaIds ? "selected" : "all";
+  const selectedAreaIds = new Set(draft.coveredAreaIds ?? allAreaIds);
+  const sourceOptions = plans
+    .map((sourcePlan) => {
+      const sourceCourier = couriers.find((record) =>
+        sourcePlan.couriers.some(
+          (assigned) =>
+            assigned.en === record.name.en || assigned.ar === record.name.ar,
+        ),
+      );
+      return { plan: sourcePlan, courier: sourceCourier };
+    })
+    .filter(
+      (
+        item,
+      ): item is { plan: CourierRatePlan; courier: CourierRecord } =>
+        Boolean(item.courier) && item.courier.id !== courier.id,
+    );
+
+  function buildRates(mode: "blank" | "company") {
+    return Object.fromEntries(
+      allAreas.map(({ area }) => [
+        area.id,
+        Object.fromEntries(
+          commissionStatuses.map((status) => {
+            const companyValue =
+              status.id === "status-delivered"
+                ? 20
+                : status.id === "status-partial"
+                  ? 15
+                  : status.id === "status-deferred"
+                    ? 5
+                    : status.id === "status-cancelled"
+                      ? 8
+                      : null;
+            return [status.id, mode === "company" ? companyValue : null];
+          }),
+        ),
+      ]),
+    );
+  }
+
+  function applyIndependentCopy(source: CourierRatePlan, message: string) {
+    setDraft((current) => ({
+      ...current,
+      state: "active",
+      compensationType: source.compensationType,
+      settlementCycle: source.settlementCycle,
+      fixedSalary: source.fixedSalary,
+      effectiveFrom: new Date().toISOString().slice(0, 10),
+      coveredAreaIds: source.coveredAreaIds
+        ? [...source.coveredAreaIds]
+        : undefined,
+      rates: cloneCourierRateMatrix(source.rates),
+    }));
+    setPreparedMessage(message);
+  }
+
+  function toggleArea(areaId: string) {
+    setDraft((current) => {
+      const currentIds = new Set(current.coveredAreaIds ?? allAreaIds);
+      if (currentIds.has(areaId)) currentIds.delete(areaId);
+      else currentIds.add(areaId);
+      return { ...current, coveredAreaIds: [...currentIds] };
+    });
+  }
+
+  function toggleGovernorate(governorate: GovernorateRecord) {
+    setDraft((current) => {
+      const currentIds = new Set(current.coveredAreaIds ?? allAreaIds);
+      const governorateIds = governorate.areas.map((area) => area.id);
+      const allSelected = governorateIds.every((id) => currentIds.has(id));
+      governorateIds.forEach((id) =>
+        allSelected ? currentIds.delete(id) : currentIds.add(id),
+      );
+      return { ...current, coveredAreaIds: [...currentIds] };
+    });
+  }
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (
+      draft.compensationType === "commission" &&
+      draft.coveredAreaIds &&
+      draft.coveredAreaIds.length === 0
+    ) {
+      setPreparedMessage(
+        lang === "ar"
+          ? "اختر منطقة واحدة على الأقل للمندوب."
+          : "Select at least one area for the courier.",
+      );
+      return;
+    }
+    onSave(
+      normalizeCourierRatePlan({
+        ...draft,
+        id: `courier-agreement-${courier.id}`,
+        name: {
+          ar: `اتفاق أجر ${courier.name.ar}`,
+          en: `${courier.name.en} pay agreement`,
+        },
+        code: `PAY-${courier.code}`,
+        isDefault: false,
+        couriers: [courier.name],
+        coveredAreaIds:
+          draft.compensationType === "salary"
+            ? undefined
+            : draft.coveredAreaIds,
+      }),
+    );
+  }
+
+  return (
+    <>
+      <button
+        className="drawer-backdrop"
+        type="button"
+        aria-label={lang === "ar" ? "إغلاق" : "Close"}
+        onClick={onClose}
+      />
+      <aside
+        className="policy-editor courier-agreement-editor-v3"
+        aria-label={
+          lang === "ar"
+            ? `اتفاق أجر ${courier.name.ar}`
+            : `${courier.name.en} pay agreement`
+        }
+      >
+        <form onSubmit={submit}>
+          <div className="drawer__header policy-editor__header">
+            <div>
+              <span className="courier-editor-badge">
+                <HandCoins size={20} />
+              </span>
+              <span>
+                <small>
+                  {lang === "ar" ? "اتفاق مستقل للمندوب" : "Independent courier agreement"}
+                </small>
+                <strong>{courier.name[lang]}</strong>
+              </span>
+            </div>
+            <button
+              className="square-button square-button--soft"
+              type="button"
+              onClick={onClose}
+              aria-label={lang === "ar" ? "إغلاق" : "Close"}
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="policy-editor__body">
+            <section className="courier-editor-identity">
+              <span>{courier.name[lang].slice(0, 1)}</span>
+              <div>
+                <strong>{courier.name[lang]}</strong>
+                <small dir="ltr">{courier.code} · {courier.phone}</small>
+              </div>
+              <em>
+                <ShieldCheck size={13} />
+                {lang === "ar" ? "لا يشارك اتفاقه مع أحد" : "Private agreement"}
+              </em>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Copy size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "ابدأ بالطريقة الأنسب" : "Choose a starting point"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "أي نسخ هنا يصبح مستقلًا لهذا المندوب."
+                      : "Every copied setup becomes independent for this courier."}
+                  </small>
+                </div>
+              </div>
+              <div className="agreement-start-actions">
+                <button
+                  type="button"
+                  onClick={() =>
+                    applyIndependentCopy(
+                      {
+                        ...draft,
+                        compensationType: "commission",
+                        settlementCycle: "weekly",
+                        fixedSalary: null,
+                        coveredAreaIds: undefined,
+                        rates: buildRates("company"),
+                      },
+                      lang === "ar"
+                        ? "تم تجهيز نسخة مستقلة من نموذج الشركة."
+                        : "Independent company template prepared.",
+                    )
+                  }
+                >
+                  <ShieldCheck size={16} />
+                  <span>
+                    <strong>{lang === "ar" ? "نموذج الشركة" : "Company template"}</strong>
+                    <small>{lang === "ar" ? "عمولة أسبوعية جاهزة" : "Ready weekly commission"}</small>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    applyIndependentCopy(
+                      {
+                        ...draft,
+                        compensationType: "commission",
+                        settlementCycle: "weekly",
+                        fixedSalary: null,
+                        coveredAreaIds: undefined,
+                        rates: buildRates("blank"),
+                      },
+                      lang === "ar"
+                        ? "تم تجهيز اتفاق فارغ؛ أدخل الأسعار قبل الحفظ."
+                        : "Blank agreement prepared; enter rates before saving.",
+                    )
+                  }
+                >
+                  <Pencil size={16} />
+                  <span>
+                    <strong>{lang === "ar" ? "اتفاق فارغ" : "Blank agreement"}</strong>
+                    <small>{lang === "ar" ? "ابدأ الأسعار من الصفر" : "Start rates from scratch"}</small>
+                  </span>
+                </button>
+              </div>
+              <div className="agreement-copy-row">
+                <label className="select-wrap">
+                  <select
+                    value={copySourceId}
+                    onChange={(event) => setCopySourceId(event.target.value)}
+                  >
+                    <option value="">
+                      {lang === "ar" ? "اختر مندوبًا للنسخ منه" : "Choose a courier to copy"}
+                    </option>
+                    {sourceOptions.map(({ plan: sourcePlan, courier: sourceCourier }) => (
+                      <option key={sourcePlan.id} value={sourcePlan.id}>
+                        {sourceCourier.name[lang]}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={!copySourceId}
+                  onClick={() => {
+                    const source = plans.find((item) => item.id === copySourceId);
+                    if (!source) return;
+                    applyIndependentCopy(
+                      source,
+                      lang === "ar"
+                        ? "تم نسخ الإعدادات كنسخة مستقلة؛ تعديلها لن يؤثر على المندوب الآخر."
+                        : "Copied as an independent setup; later edits will not affect the other courier.",
+                    );
+                  }}
+                >
+                  <Copy size={15} />
+                  {lang === "ar" ? "نسخ الاتفاق" : "Copy agreement"}
+                </button>
+              </div>
+              {preparedMessage && (
+                <p className="agreement-prepared-message">
+                  <CircleAlert size={14} />
+                  {preparedMessage}
+                </p>
+              )}
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><HandCoins size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "طريقة أجر المندوب" : "Courier pay method"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "اختيار واحد فقط يكون فعّالًا."
+                      : "Only one method can be active."}
+                  </small>
+                </div>
+              </div>
+              <div className="agreement-method-cards">
+                <button
+                  className={draft.compensationType === "commission" ? "is-selected" : ""}
+                  type="button"
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      compensationType: "commission",
+                      settlementCycle:
+                        current.settlementCycle === "monthly" ||
+                        current.settlementCycle === "weekly"
+                          ? current.settlementCycle
+                          : "instant",
+                      fixedSalary: null,
+                    }))
+                  }
+                >
+                  <span><HandCoins size={20} /></span>
+                  <strong>{lang === "ar" ? "عمولة على الشحنات" : "Shipment commission"}</strong>
+                  <small>{lang === "ar" ? "حسب المنطقة والحالة" : "By area and status"}</small>
+                  <i><Check size={14} /></i>
+                </button>
+                <button
+                  className={draft.compensationType === "salary" ? "is-selected" : ""}
+                  type="button"
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      compensationType: "salary",
+                      settlementCycle:
+                        current.settlementCycle === "weekly" ? "weekly" : "monthly",
+                      fixedSalary: current.fixedSalary ?? 0,
+                    }))
+                  }
+                >
+                  <span><CalendarDays size={20} /></span>
+                  <strong>{lang === "ar" ? "مرتب ثابت" : "Fixed salary"}</strong>
+                  <small>{lang === "ar" ? "أسبوعي أو شهري" : "Weekly or monthly"}</small>
+                  <i><Check size={14} /></i>
+                </button>
+              </div>
+
+              <div className="policy-form-grid agreement-method-fields">
+                <label className="select-field">
+                  <span>
+                    {draft.compensationType === "salary"
+                      ? lang === "ar" ? "دورية المرتب" : "Salary period"
+                      : lang === "ar" ? "موعد صرف العمولة" : "Commission payout"}
+                  </span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.settlementCycle}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          settlementCycle: event.target.value as CourierSettlementCycle,
+                        }))
+                      }
+                    >
+                      {draft.compensationType === "commission" && (
+                        <option value="instant">
+                          {lang === "ar" ? "فوري بعد التسوية" : "Instant after settlement"}
+                        </option>
+                      )}
+                      <option value="weekly">{lang === "ar" ? "أسبوعي" : "Weekly"}</option>
+                      <option value="monthly">{lang === "ar" ? "شهري" : "Monthly"}</option>
+                    </select>
+                    <ChevronDown size={15} />
+                  </span>
+                </label>
+                {draft.compensationType === "salary" && (
+                  <label className="field">
+                    <span>
+                      {draft.settlementCycle === "weekly"
+                        ? lang === "ar" ? "قيمة المرتب الأسبوعي" : "Weekly salary"
+                        : lang === "ar" ? "قيمة المرتب الشهري" : "Monthly salary"}
+                    </span>
+                    <span className="field__control">
+                      <input
+                        type="number"
+                        min="0"
+                        value={draft.fixedSalary ?? 0}
+                        onChange={(event) =>
+                          setDraft((current) => ({
+                            ...current,
+                            fixedSalary: Math.max(0, Number(event.target.value) || 0),
+                          }))
+                        }
+                      />
+                    </span>
+                  </label>
+                )}
+                <label className="field">
+                  <span>{lang === "ar" ? "يبدأ التطبيق من" : "Effective from"}</span>
+                  <span className="field__control">
+                    <input
+                      type="date"
+                      value={draft.effectiveFrom ?? ""}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          effectiveFrom: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+                <label className="select-field">
+                  <span>{lang === "ar" ? "حالة الاتفاق" : "Agreement status"}</span>
+                  <span className="select-wrap">
+                    <select
+                      value={draft.state}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          state: event.target.value as "active" | "draft",
+                        }))
+                      }
+                    >
+                      <option value="active">{lang === "ar" ? "مفعّل" : "Active"}</option>
+                      <option value="draft">{lang === "ar" ? "مسودة" : "Draft"}</option>
+                    </select>
+                    <ChevronDown size={15} />
+                  </span>
+                </label>
+              </div>
+            </section>
+
+            {draft.compensationType === "commission" && (
+              <section className="policy-form-section">
+                <div className="policy-form-section__title">
+                  <span><MapPin size={16} /></span>
+                  <div>
+                    <strong>{lang === "ar" ? "مناطق عمل المندوب" : "Courier coverage"}</strong>
+                    <small>
+                      {lang === "ar"
+                        ? "الصفحة ستعرض أسعار المناطق التي يعمل بها فقط."
+                        : "Only covered areas appear in the courier rate table."}
+                    </small>
+                  </div>
+                </div>
+                <div className="agreement-coverage-mode">
+                  <button
+                    className={coverageMode === "all" ? "is-selected" : ""}
+                    type="button"
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        coveredAreaIds: undefined,
+                      }))
+                    }
+                  >
+                    {lang === "ar" ? "كل المناطق" : "All areas"}
+                  </button>
+                  <button
+                    className={coverageMode === "selected" ? "is-selected" : ""}
+                    type="button"
+                    onClick={() =>
+                      setDraft((current) => ({
+                        ...current,
+                        coveredAreaIds: current.coveredAreaIds ?? [...allAreaIds],
+                      }))
+                    }
+                  >
+                    {lang === "ar" ? "مناطق محددة" : "Selected areas"}
+                  </button>
+                </div>
+                {coverageMode === "selected" && (
+                  <div className="agreement-coverage-list">
+                    {governorates.map((governorate) => {
+                      const selectedCount = governorate.areas.filter((area) =>
+                        selectedAreaIds.has(area.id),
+                      ).length;
+                      return (
+                        <article key={governorate.id}>
+                          <button
+                            type="button"
+                            onClick={() => toggleGovernorate(governorate)}
+                          >
+                            <strong>{governorate.name[lang]}</strong>
+                            <small>
+                              {selectedCount}/{governorate.areas.length}
+                            </small>
+                          </button>
+                          <div>
+                            {governorate.areas.map((area) => (
+                              <label key={area.id}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedAreaIds.has(area.id)}
+                                  onChange={() => toggleArea(area.id)}
+                                />
+                                <span><Check size={12} /></span>
+                                {area.name[lang]}
+                              </label>
+                            ))}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
+
+            <section className="agreement-history-note">
+              <ShieldCheck size={18} />
+              <div>
+                <strong>
+                  {lang === "ar"
+                    ? `سيُحفظ كإصدار جديد بعد الإصدار ${plan.version}`
+                    : `A new version will be saved after version ${plan.version}`}
+                </strong>
+                <p>
+                  {lang === "ar"
+                    ? "الشحنات القديمة تحتفظ بالعمولة التي تم تثبيتها وقت تسجيل حالتها."
+                    : "Older shipments keep the commission captured when their status was recorded."}
+                </p>
+              </div>
+            </section>
+          </div>
+
+          <div className="drawer__footer policy-editor__footer">
+            <button className="secondary-button" type="button" onClick={onClose}>
+              {lang === "ar" ? "إلغاء" : "Cancel"}
+            </button>
+            <button className="primary-button" type="submit">
+              <Check size={17} />
+              {lang === "ar" ? "حفظ اتفاق المندوب" : "Save courier agreement"}
+            </button>
+          </div>
+        </form>
+      </aside>
+    </>
+  );
+}
+
+function CourierRatesScreen({
+  lang,
+  theme,
+  plans,
+  couriers,
+  settlements,
+  payouts,
+  statuses,
+  governorates,
+  onLang,
+  onTheme,
+  onPlansChange,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  plans: CourierRatePlan[];
+  couriers: CourierRecord[];
+  settlements: CourierSettlement[];
+  payouts: CourierPayout[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  onLang: () => void;
+  onTheme: () => void;
+  onPlansChange: (
+    updater: (current: CourierRatePlan[]) => CourierRatePlan[],
+  ) => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const activeCouriers = useMemo(
+    () => couriers.filter((courier) => courier.state === "active"),
+    [couriers],
+  );
+  const [selectedCourierId, setSelectedCourierId] = useState(
+    activeCouriers[0]?.id ?? "",
+  );
+  const [courierSearch, setCourierSearch] = useState("");
+  const [areaSearch, setAreaSearch] = useState("");
+  const [governorateFilter, setGovernorateFilter] = useState("all");
+  const [editing, setEditing] = useState(false);
+  const [dirtyAgreementId, setDirtyAgreementId] = useState("");
+  const [toast, setToast] = useState("");
+  const [previewShippingFee, setPreviewShippingFee] = useState(70);
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
+
+  useEffect(() => {
+    const hasCourierWithoutAgreement = activeCouriers.some(
+      (courier) =>
+        !plans.some((plan) =>
+          plan.couriers.some(
+            (assigned) =>
+              assigned.en === courier.name.en ||
+              assigned.ar === courier.name.ar,
+          ),
+        ),
+    );
+    if (hasCourierWithoutAgreement) {
+      onPlansChange(() => normalizeCourierPlans(plans, couriers));
+    }
+  }, [activeCouriers, couriers, onPlansChange, plans]);
+
+  const commissionStatuses = statuses.filter(
+    (status) =>
+      status.state === "published" && status.appearsInCourierRates,
+  );
+  const allAreas = governorates.flatMap((governorate) =>
+    governorate.areas.map((area) => ({ area, governorate })),
+  );
+  const selectedCourier =
+    activeCouriers.find((courier) => courier.id === selectedCourierId) ??
+    activeCouriers[0];
+  const selectedAgreement = selectedCourier
+    ? plans.find((plan) =>
+        plan.couriers.some(
+          (courier) =>
+            courier.en === selectedCourier.name.en ||
+            courier.ar === selectedCourier.name.ar,
+        ),
+      )
+    : undefined;
+  const coveredAreaIds = new Set(
+    selectedAgreement?.coveredAreaIds ?? allAreas.map(({ area }) => area.id),
+  );
+  const agreementAreas = allAreas.filter(({ area }) => coveredAreaIds.has(area.id));
+  const filteredAreas = agreementAreas.filter(({ area, governorate }) => {
+    const normalized = areaSearch.trim().toLowerCase();
+    return (
+      (governorateFilter === "all" || governorate.id === governorateFilter) &&
+      (!normalized ||
+        [
+          area.name.ar,
+          area.name.en,
+          area.code,
+          governorate.name.ar,
+          governorate.name.en,
+          ...area.aliases,
+        ].some((value) => value.toLowerCase().includes(normalized)))
+    );
+  });
+  const visibleCouriers = activeCouriers.filter((courier) => {
+    const normalized = courierSearch.trim().toLowerCase();
+    return (
+      !normalized ||
+      [
+        courier.name.ar,
+        courier.name.en,
+        courier.code,
+        courier.phone,
+      ].some((value) => value.toLowerCase().includes(normalized))
+    );
+  });
+
+  function agreementForCourier(courier: CourierRecord) {
+    return plans.find((plan) =>
+      plan.couriers.some(
+        (assigned) =>
+          assigned.en === courier.name.en || assigned.ar === courier.name.ar,
+      ),
+    );
+  }
+
+  function completion(plan?: CourierRatePlan) {
+    if (!plan) return { filled: 0, total: 0, percent: 0 };
+    if (plan.compensationType === "salary") {
+      const ready = (plan.fixedSalary ?? 0) > 0;
+      return { filled: ready ? 1 : 0, total: 1, percent: ready ? 100 : 0 };
+    }
+    const ids = new Set(
+      plan.coveredAreaIds ?? allAreas.map(({ area }) => area.id),
+    );
+    const scopedAreas = allAreas.filter(({ area }) => ids.has(area.id));
+    const total = scopedAreas.length * commissionStatuses.length;
+    const filled = scopedAreas.reduce(
+      (sum, { area }) =>
+        sum +
+        commissionStatuses.filter(
+          (status) => plan.rates[area.id]?.[status.id] != null,
+        ).length,
+      0,
+    );
+    return {
+      filled,
+      total,
+      percent: total ? Math.round((filled / total) * 100) : 0,
+    };
+  }
+
+  function cycleLabel(cycle?: CourierSettlementCycle) {
+    if (cycle === "instant")
+      return lang === "ar" ? "فوري بعد التسوية" : "Instant after settlement";
+    if (cycle === "weekly") return lang === "ar" ? "أسبوعي" : "Weekly";
+    return lang === "ar" ? "شهري" : "Monthly";
+  }
+
+  function setRate(areaId: string, statusId: string, rawValue: string) {
+    if (!selectedAgreement) return;
+    const value = rawValue === "" ? null : Math.max(0, Number(rawValue));
+    onPlansChange((current) =>
+      current.map((plan) =>
+        plan.id === selectedAgreement.id
+          ? {
+              ...plan,
+              rates: {
+                ...plan.rates,
+                [areaId]: {
+                  ...(plan.rates[areaId] ?? {}),
+                  [statusId]: Number.isNaN(value) ? null : value,
+                },
+              },
+            }
+          : plan,
+      ),
+    );
+    setDirtyAgreementId(selectedAgreement.id);
+  }
+
+  function saveRates() {
+    if (!selectedAgreement) return;
+    onPlansChange((current) =>
+      current.map((plan) =>
+        plan.id === selectedAgreement.id
+          ? { ...plan, version: plan.version + 1 }
+          : plan,
+      ),
+    );
+    setDirtyAgreementId("");
+    setToast(
+      lang === "ar"
+        ? `تم حفظ عمولات ${selectedCourier?.name.ar}`
+        : `${selectedCourier?.name.en} commissions saved`,
+    );
+    window.setTimeout(() => setToast(""), 2500);
+  }
+
+  function saveAgreement(next: CourierRatePlan) {
+    onPlansChange((current) =>
+      current.map((plan) =>
+        plan.id === next.id
+          ? {
+              ...next,
+              version: Math.max(plan.version + 1, next.version + 1),
+              rates: cloneCourierRateMatrix(next.rates),
+            }
+          : plan,
+      ),
+    );
+    setEditing(false);
+    setDirtyAgreementId("");
+    setToast(
+      lang === "ar"
+        ? `تم حفظ اتفاق ${selectedCourier?.name.ar} كنسخة مستقلة`
+        : `${selectedCourier?.name.en} agreement saved independently`,
+    );
+    window.setTimeout(() => setToast(""), 2500);
+  }
+
+  const selectedCompletion = completion(selectedAgreement);
+  const missingAgreements = activeCouriers.filter(
+    (courier) => completion(agreementForCourier(courier)).percent < 100,
+  ).length;
+  const commissionCount = activeCouriers.filter(
+    (courier) =>
+      agreementForCourier(courier)?.compensationType === "commission",
+  ).length;
+  const salaryCount = activeCouriers.filter(
+    (courier) => agreementForCourier(courier)?.compensationType === "salary",
+  ).length;
+  const selectedCourierKeys = new Set(
+    selectedAgreement?.couriers.map((courier) => courier.en) ?? [],
+  );
+  const deferredBeforePayout = settlements
+    .filter((settlement) => selectedCourierKeys.has(settlement.courier.en))
+    .reduce(
+      (sum, settlement) =>
+        sum +
+        Math.max(
+          0,
+          settlement.commissionDeferred ??
+            settlement.commissionEarned - settlement.commissionPaidNow,
+        ),
+      0,
+    );
+  const deferredPaid = payouts
+    .filter((payout) => selectedCourierKeys.has(payout.courier.en))
+    .flatMap((payout) => payout.allocations)
+    .filter((allocation) => allocation.sourceType === "commission")
+    .reduce((sum, allocation) => sum + allocation.amount, 0);
+  const deferredDue = Math.max(0, deferredBeforePayout - deferredPaid);
+  const previewArea = agreementAreas[0]?.area;
+  const previewStatus = commissionStatuses[0];
+  const previewCommission =
+    previewArea && previewStatus
+      ? selectedAgreement?.rates[previewArea.id]?.[previewStatus.id] ?? null
+      : null;
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="courierRates"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><HandCoins size={20} /></span>
+            <span>
+              <strong>{t.workspace}</strong>
+              <small>{t.branch}</small>
+            </span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button
+              className="square-button notification-button"
+              type="button"
+              aria-label={t.notifications}
+            >
+              <Bell size={19} />
+              <i />
+            </button>
+            <button className="topbar-user" type="button">
+              <span className="avatar">أح</span>
+              <ChevronDown size={16} />
+            </button>
+          </div>
+        </header>
+
+        <main className="page-content courier-agreements-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "أجور وعمولات المناديب" : "Courier pay & commissions"}</h1>
+                <span className="demo-chip">{t.demoData}</span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "كل مندوب له اتفاق مستقل؛ تعديل مندوب لا يغيّر حساب أي مندوب آخر."
+                  : "Every courier has an independent agreement; editing one never changes another."}
+              </p>
+            </div>
+            {selectedAgreement && (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => setEditing(true)}
+              >
+                <Pencil size={17} />
+                {lang === "ar" ? "تعديل اتفاق المندوب" : "Edit courier agreement"}
+              </button>
+            )}
+          </div>
+
+          <section className="status-summary-grid courier-agreement-summary">
+            <article>
+              <span className="status-summary-icon status-summary-icon--blue"><UserRound size={18} /></span>
+              <div><small>{lang === "ar" ? "مناديب لهم اتفاق" : "Couriers with agreements"}</small><strong>{activeCouriers.length}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--green"><HandCoins size={18} /></span>
+              <div><small>{lang === "ar" ? "نظام عمولة" : "Commission"}</small><strong>{commissionCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--gray"><CalendarDays size={18} /></span>
+              <div><small>{lang === "ar" ? "مرتب ثابت" : "Fixed salary"}</small><strong>{salaryCount}</strong></div>
+            </article>
+            <article>
+              <span className="status-summary-icon status-summary-icon--orange"><CircleAlert size={18} /></span>
+              <div><small>{lang === "ar" ? "تحتاج استكمال" : "Need completion"}</small><strong>{missingAgreements}</strong></div>
+            </article>
+          </section>
+
+          <section className="courier-agreements-workspace">
+            <aside className="courier-agreement-directory">
+              <div className="courier-agreement-directory__head">
+                <span>
+                  <strong>{lang === "ar" ? "المناديب" : "Couriers"}</strong>
+                  <small>{lang === "ar" ? "اختر مندوبًا لفتح اتفاقه" : "Choose a courier"}</small>
+                </span>
+                <em>{activeCouriers.length}</em>
+              </div>
+              <label className="shipment-search">
+                <Search size={17} />
+                <input
+                  value={courierSearch}
+                  onChange={(event) => setCourierSearch(event.target.value)}
+                  placeholder={lang === "ar" ? "ابحث بالاسم أو الهاتف..." : "Search name or phone..."}
+                />
+              </label>
+              <div className="courier-agreement-directory__list">
+                {visibleCouriers.map((courier) => {
+                  const agreement = agreementForCourier(courier);
+                  const agreementCompletion = completion(agreement);
+                  const selected = courier.id === selectedCourier?.id;
+                  return (
+                    <button
+                      className={selected ? "is-selected" : ""}
+                      type="button"
+                      key={courier.id}
+                      onClick={() => {
+                        setSelectedCourierId(courier.id);
+                        setDirtyAgreementId("");
+                      }}
+                    >
+                      <i>{courier.name[lang].slice(0, 1)}</i>
+                      <span>
+                        <strong>{courier.name[lang]}</strong>
+                        <small dir="ltr">{courier.code} · {courier.phone}</small>
+                        <b>
+                          {agreement?.compensationType === "salary"
+                            ? lang === "ar" ? "مرتب ثابت" : "Fixed salary"
+                            : lang === "ar" ? "عمولة خاصة" : "Private commission"}
+                          <em className={agreementCompletion.percent === 100 ? "is-ready" : "needs-attention"}>
+                            {agreementCompletion.percent === 100
+                              ? lang === "ar" ? "مكتمل" : "Ready"
+                              : `${agreementCompletion.percent}%`}
+                          </em>
+                        </b>
+                      </span>
+                      <ChevronLeft size={16} />
+                    </button>
+                  );
+                })}
+              </div>
+            </aside>
+
+            <div className="courier-agreement-detail">
+              {selectedCourier && selectedAgreement ? (
+                <>
+                  <section className="courier-agreement-hero">
+                    <div className="courier-agreement-hero__person">
+                      <i>{selectedCourier.name[lang].slice(0, 1)}</i>
+                      <span>
+                        <small>{lang === "ar" ? "اتفاق أجر مستقل" : "Independent pay agreement"}</small>
+                        <strong>{selectedCourier.name[lang]}</strong>
+                        <em dir="ltr">{selectedCourier.code} · {selectedCourier.phone}</em>
+                      </span>
+                    </div>
+                    <div className="courier-agreement-hero__badges">
+                      <span>
+                        <ShieldCheck size={14} />
+                        {lang === "ar" ? "خاص بهذا المندوب فقط" : "Private to this courier"}
+                      </span>
+                      <em className={selectedAgreement.state === "active" ? "is-active" : ""}>
+                        {selectedAgreement.state === "active"
+                          ? lang === "ar" ? "مفعّل" : "Active"
+                          : lang === "ar" ? "مسودة" : "Draft"}
+                      </em>
+                    </div>
+                  </section>
+
+                  <section className="courier-agreement-facts">
+                    <article>
+                      <small>{lang === "ar" ? "طريقة الأجر" : "Pay method"}</small>
+                      <strong>
+                        {selectedAgreement.compensationType === "salary"
+                          ? lang === "ar" ? "مرتب ثابت" : "Fixed salary"
+                          : lang === "ar" ? "عمولة على الشحنات" : "Shipment commission"}
+                      </strong>
+                      <span>
+                        {selectedAgreement.compensationType === "salary"
+                          ? lang === "ar" ? "لا تستخدم أسعار الحالات" : "No status rates"
+                          : lang === "ar" ? "حسب المنطقة والحالة" : "By area and status"}
+                      </span>
+                    </article>
+                    <article>
+                      <small>
+                        {selectedAgreement.compensationType === "salary"
+                          ? lang === "ar" ? "دورية المرتب" : "Salary period"
+                          : lang === "ar" ? "موعد الصرف" : "Payout timing"}
+                      </small>
+                      <strong>{cycleLabel(selectedAgreement.settlementCycle)}</strong>
+                      <span>{lang === "ar" ? "لا يغيّر طريقة الحساب" : "Does not change calculation"}</span>
+                    </article>
+                    <article>
+                      <small>{lang === "ar" ? "القيمة أو التغطية" : "Value or coverage"}</small>
+                      <strong>
+                        {selectedAgreement.compensationType === "salary"
+                          ? money.format(selectedAgreement.fixedSalary ?? 0)
+                          : `${selectedCompletion.filled}/${selectedCompletion.total}`}
+                      </strong>
+                      <span>
+                        {selectedAgreement.compensationType === "salary"
+                          ? lang === "ar" ? "لكل دورة" : "Per period"
+                          : lang === "ar" ? "سعر عمولة محدد" : "Rates configured"}
+                      </span>
+                    </article>
+                    <article>
+                      <small>{lang === "ar" ? "السريان والإصدار" : "Effective & version"}</small>
+                      <strong>{selectedAgreement.effectiveFrom || "—"}</strong>
+                      <span>
+                        {lang === "ar"
+                          ? `الإصدار ${selectedAgreement.version}`
+                          : `Version ${selectedAgreement.version}`}
+                      </span>
+                    </article>
+                    <article>
+                      <small>{lang === "ar" ? "مستحق مؤجل" : "Deferred due"}</small>
+                      <strong>{money.format(deferredDue)}</strong>
+                      <button type="button" onClick={() => onNavigate("courierPayouts")}>
+                        {lang === "ar" ? "فتح المستحقات" : "Open payouts"}
+                      </button>
+                    </article>
+                  </section>
+
+                  {selectedAgreement.compensationType === "salary" ? (
+                    <section className="courier-salary-agreement-v3">
+                      <span><CalendarDays size={28} /></span>
+                      <div>
+                        <small>
+                          {selectedAgreement.settlementCycle === "weekly"
+                            ? lang === "ar" ? "المرتب الأسبوعي" : "Weekly salary"
+                            : lang === "ar" ? "المرتب الشهري" : "Monthly salary"}
+                        </small>
+                        <strong>{money.format(selectedAgreement.fixedSalary ?? 0)}</strong>
+                        <p>
+                          {lang === "ar"
+                            ? "المرتب مصروف ثابت على الشركة، ولا يحتاج جدول مناطق أو حالات."
+                            : "Salary is a fixed company expense and does not use an area/status matrix."}
+                        </p>
+                      </div>
+                      <button className="secondary-button" type="button" onClick={() => setEditing(true)}>
+                        <Pencil size={15} />
+                        {lang === "ar" ? "تعديل المرتب" : "Edit salary"}
+                      </button>
+                    </section>
+                  ) : (
+                    <>
+                      <section className="courier-rate-safety-v3">
+                        <span className={selectedCompletion.percent === 100 ? "is-ready" : "needs-attention"}>
+                          {selectedCompletion.percent === 100 ? <ShieldCheck size={18} /> : <CircleAlert size={18} />}
+                        </span>
+                        <div>
+                          <strong>
+                            {selectedCompletion.percent === 100
+                              ? lang === "ar" ? "قائمة عمولة المندوب مكتملة" : "Courier commission list is complete"
+                              : lang === "ar" ? "هناك أسعار عمولة غير محددة" : "Some commission rates are missing"}
+                          </strong>
+                          <small>
+                            {lang === "ar"
+                              ? "القيمة غير المحددة لا تُحسب صفرًا، وتمنع إغلاق التسوية المتأثرة."
+                              : "Missing values are never treated as zero and block the affected settlement."}
+                          </small>
+                        </div>
+                        <em>{selectedCompletion.percent}%</em>
+                      </section>
+
+                      <section className="courier-rate-preview-v3">
+                        <div>
+                          <strong>{lang === "ar" ? "معاينة سريعة" : "Quick preview"}</strong>
+                          <small>
+                            {previewArea?.name[lang]} · {previewStatus?.name[lang]}
+                          </small>
+                        </div>
+                        <label>
+                          <span>{lang === "ar" ? "مصاريف شحن الشركة" : "Company shipping fee"}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={previewShippingFee}
+                            onChange={(event) =>
+                              setPreviewShippingFee(
+                                Math.max(0, Number(event.target.value) || 0),
+                              )
+                            }
+                          />
+                        </label>
+                        <article>
+                          <small>{lang === "ar" ? "عمولة المندوب" : "Courier commission"}</small>
+                          <strong>
+                            {previewCommission == null
+                              ? lang === "ar" ? "غير محددة" : "Not set"
+                              : money.format(previewCommission)}
+                          </strong>
+                        </article>
+                        <article className={previewCommission != null && previewCommission > previewShippingFee ? "danger" : ""}>
+                          <small>{lang === "ar" ? "المتبقي للشركة" : "Company remainder"}</small>
+                          <strong>
+                            {previewCommission == null
+                              ? "—"
+                              : money.format(previewShippingFee - previewCommission)}
+                          </strong>
+                        </article>
+                      </section>
+
+                      <section className="courier-private-rate-list">
+                        <div className="courier-private-rate-list__head">
+                          <div>
+                            <strong>{lang === "ar" ? `قائمة عمولة ${selectedCourier.name.ar}` : `${selectedCourier.name.en} commission list`}</strong>
+                            <small>
+                              {lang === "ar"
+                                ? `${agreementAreas.length} منطقة · أي تعديل يخص هذا المندوب فقط`
+                                : `${agreementAreas.length} areas · edits affect only this courier`}
+                            </small>
+                          </div>
+                          <div>
+                            <button className="secondary-button" type="button" onClick={() => setEditing(true)}>
+                              <Settings2 size={15} />
+                              {lang === "ar" ? "طريقة الأجر والمناطق" : "Method & coverage"}
+                            </button>
+                            <button
+                              className="primary-button"
+                              type="button"
+                              disabled={dirtyAgreementId !== selectedAgreement.id}
+                              onClick={saveRates}
+                            >
+                              <Save size={15} />
+                              {lang === "ar" ? "حفظ عمولات المندوب" : "Save courier rates"}
+                            </button>
+                          </div>
+                        </div>
+                        <div className="pricing-toolbar">
+                          <label className="shipment-search">
+                            <Search size={17} />
+                            <input
+                              value={areaSearch}
+                              onChange={(event) => setAreaSearch(event.target.value)}
+                              placeholder={lang === "ar" ? "ابحث عن منطقة..." : "Search area..."}
+                            />
+                          </label>
+                          <label className="select-wrap status-filter">
+                            <select
+                              value={governorateFilter}
+                              onChange={(event) => setGovernorateFilter(event.target.value)}
+                            >
+                              <option value="all">{lang === "ar" ? "كل المحافظات" : "All governorates"}</option>
+                              {governorates.map((governorate) => (
+                                <option key={governorate.id} value={governorate.id}>
+                                  {governorate.name[lang]}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown size={15} />
+                          </label>
+                        </div>
+                        <div
+                          className="pricing-matrix courier-rate-matrix"
+                          style={
+                            {
+                              "--pricing-column-count": Math.max(
+                                commissionStatuses.length,
+                                1,
+                              ),
+                            } as CSSProperties
+                          }
+                        >
+                          <div className="pricing-matrix__head">
+                            <span>{lang === "ar" ? "المنطقة" : "Area"}</span>
+                            {commissionStatuses.map((status) => (
+                              <span key={status.id}>
+                                <i style={{ backgroundColor: status.color }} />
+                                {status.name[lang]}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="pricing-matrix__body">
+                            {filteredAreas.map(({ area, governorate }) => (
+                              <article className="pricing-row" key={area.id}>
+                                <div className="pricing-area">
+                                  <span className="geo-area-pin"><MapPin size={15} /></span>
+                                  <span>
+                                    <strong>{area.name[lang]}</strong>
+                                    <small>{governorate.name[lang]}</small>
+                                  </span>
+                                </div>
+                                {commissionStatuses.map((status) => {
+                                  const value = selectedAgreement.rates[area.id]?.[status.id];
+                                  return (
+                                    <label
+                                      className={`price-cell ${value == null ? "price-cell--missing" : ""}`}
+                                      key={status.id}
+                                    >
+                                      <span className="price-cell__mobile-label">
+                                        <i style={{ backgroundColor: status.color }} />
+                                        {status.name[lang]}
+                                      </span>
+                                      <span>
+                                        <input
+                                          type="number"
+                                          min="0"
+                                          inputMode="decimal"
+                                          value={value ?? ""}
+                                          placeholder={lang === "ar" ? "غير محدد" : "Not set"}
+                                          onChange={(event) =>
+                                            setRate(area.id, status.id, event.target.value)
+                                          }
+                                          aria-label={`${area.name[lang]} - ${status.name[lang]}`}
+                                        />
+                                        <small>{lang === "ar" ? "ج.م" : "EGP"}</small>
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </article>
+                            ))}
+                          </div>
+                        </div>
+                      </section>
+                    </>
+                  )}
+
+                  <section className="courier-agreement-version-v3">
+                    <ShieldCheck size={18} />
+                    <div>
+                      <strong>
+                        {lang === "ar"
+                          ? `الاتفاق الحالي — الإصدار ${selectedAgreement.version}`
+                          : `Current agreement — version ${selectedAgreement.version}`}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "أي حفظ جديد ينشئ إصدارًا جديدًا، ولا يعيد حساب الشحنات القديمة."
+                          : "Every save creates a new version and never recalculates old shipments."}
+                      </small>
+                    </div>
+                    <em>{selectedAgreement.effectiveFrom || "—"}</em>
+                  </section>
+                </>
+              ) : (
+                <div className="status-empty">
+                  <UserRound size={28} />
+                  <strong>{lang === "ar" ? "لا يوجد اتفاق لهذا المندوب" : "No courier agreement"}</strong>
+                </div>
+              )}
+            </div>
+          </section>
+        </main>
+      </div>
+
+      {editing && selectedAgreement && selectedCourier && (
+        <CourierAgreementEditorV2
+          key={`${selectedAgreement.id}-${selectedAgreement.version}`}
+          plan={selectedAgreement}
+          courier={selectedCourier}
+          plans={plans}
+          couriers={couriers}
+          statuses={statuses}
+          governorates={governorates}
+          lang={lang}
+          onClose={() => setEditing(false)}
+          onSave={saveAgreement}
         />
       )}
       {toast && (
@@ -35314,7 +36677,7 @@ export default function Home() {
   const [sharedGovernorates, setSharedGovernorates] = useState(governoratesData);
   const [sharedPriceLists, setSharedPriceLists] = useState(priceListsData);
   const [sharedCourierPlans, setSharedCourierPlans] = useState(
-    courierRatePlansData,
+    normalizeCourierPlans(courierRatePlansData, courierRecordsData),
   );
   const [sharedShipmentFields, setSharedShipmentFields] = useState(
     shipmentFieldPoliciesData,
@@ -35464,7 +36827,14 @@ export default function Home() {
         }
         if (Array.isArray(parsed.priceLists)) setSharedPriceLists(parsed.priceLists);
         if (Array.isArray(parsed.courierPlans)) {
-          setSharedCourierPlans(parsed.courierPlans.map(normalizeCourierRatePlan));
+          setSharedCourierPlans(
+            normalizeCourierPlans(
+              parsed.courierPlans,
+              Array.isArray(parsed.couriers) && parsed.couriers.length > 0
+                ? parsed.couriers
+                : courierRecordsData,
+            ),
+          );
         }
         if (Array.isArray(parsed.shipmentFields)) {
           const normalizedSavedFields =
