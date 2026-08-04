@@ -671,6 +671,36 @@ type TreasuryMovement = {
   linkedMovementId?: string;
 };
 
+type TreasuryCashSession = {
+  id: string;
+  accountId: TreasuryAccount["id"];
+  state: "open" | "closed";
+  responsible: Localized;
+  openedAt: Localized;
+  openingBalance: number;
+  closedAt?: Localized;
+  expectedBalance?: number;
+  actualBalance?: number;
+  variance?: number;
+  closingNote?: string;
+};
+
+type FinancialDayCloseSnapshot = {
+  id: string;
+  businessDate: string;
+  state: "closed";
+  movementCount: number;
+  totalIn: number;
+  totalOut: number;
+  totalTreasuryBalance: number;
+  cashExpected: number;
+  cashActual: number;
+  cashVariance: number;
+  closedAt: Localized;
+  closedBy: Localized;
+  note: string;
+};
+
 const copy = {
   ar: {
     product: "تسليم",
@@ -3683,6 +3713,17 @@ const treasuryMovementsData: TreasuryMovement[] = [
     sequence: 1,
   },
 ];
+
+const treasuryCashSessionDefault: TreasuryCashSession = {
+  id: "TCS-20260804-01",
+  accountId: "main-cash",
+  state: "open",
+  responsible: { ar: "منى علي", en: "Mona Ali" },
+  openedAt: { ar: "اليوم، 8:00 ص", en: "Today, 8:00 AM" },
+  openingBalance: 20000,
+};
+
+const financialDayCloseSnapshotsData: FinancialDayCloseSnapshot[] = [];
 
 const courierRateCopy = {
   ar: {
@@ -20466,7 +20507,11 @@ function TreasuryScreen({
   theme,
   accounts,
   movements,
+  cashSession,
+  dayCloseSnapshots,
   onMovementsChange,
+  onCashSessionChange,
+  onDayCloseSnapshotsChange,
   onLang,
   onTheme,
   onNavigate,
@@ -20476,7 +20521,11 @@ function TreasuryScreen({
   theme: Theme;
   accounts: TreasuryAccount[];
   movements: TreasuryMovement[];
+  cashSession: TreasuryCashSession;
+  dayCloseSnapshots: FinancialDayCloseSnapshot[];
   onMovementsChange: (movements: TreasuryMovement[]) => void;
+  onCashSessionChange: (session: TreasuryCashSession) => void;
+  onDayCloseSnapshotsChange: (snapshots: FinancialDayCloseSnapshot[]) => void;
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -20484,6 +20533,8 @@ function TreasuryScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeTab, setActiveTab] =
+    useState<"ledger" | "session" | "day">("ledger");
   const [accountId, setAccountId] =
     useState<TreasuryAccount["id"]>("main-cash");
   const [search, setSearch] = useState("");
@@ -20491,7 +20542,9 @@ function TreasuryScreen({
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [selectedMovement, setSelectedMovement] =
     useState<TreasuryMovement | null>(null);
-  const [dialog, setDialog] = useState<"movement" | "transfer" | null>(null);
+  const [dialog, setDialog] = useState<
+    "movement" | "transfer" | "close-session" | "close-day" | null
+  >(null);
   const [manualDirection, setManualDirection] =
     useState<TreasuryMovement["direction"]>("out");
   const [manualCategory, setManualCategory] =
@@ -20502,6 +20555,8 @@ function TreasuryScreen({
   const [manualDescription, setManualDescription] = useState("");
   const [transferTo, setTransferTo] =
     useState<TreasuryAccount["id"]>("bank");
+  const [actualCash, setActualCash] = useState("");
+  const [closingNote, setClosingNote] = useState("");
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -20560,6 +20615,29 @@ function TreasuryScreen({
       );
     return total + accountTotal;
   }, 0);
+  const businessDate = new Date().toISOString().slice(0, 10);
+  const cashAccount =
+    accounts.find((account) => account.id === cashSession.accountId) ??
+    accounts.find((account) => account.kind === "cash") ??
+    accounts[0];
+  const cashExpectedBalance = accountBalance(cashAccount);
+  const latestDayClose =
+    dayCloseSnapshots.find(
+      (snapshot) => snapshot.businessDate === businessDate,
+    ) ?? null;
+  const dayTotalIn = movements
+    .filter((movement) => movement.direction === "in")
+    .reduce((sum, movement) => sum + movement.amount, 0);
+  const dayTotalOut = movements
+    .filter((movement) => movement.direction === "out")
+    .reduce((sum, movement) => sum + movement.amount, 0);
+  const sessionVariance =
+    cashSession.state === "closed"
+      ? (cashSession.variance ?? 0)
+      : actualCash
+        ? Number(actualCash) - cashExpectedBalance
+        : 0;
+  const dayCloseBlocked = cashSession.state === "open";
   const normalizedSearch = search.trim().toLowerCase();
   const filteredMovements = [...accountMovements]
     .sort((a, b) => b.sequence - a.sequence)
@@ -20613,6 +20691,8 @@ function TreasuryScreen({
     setManualParty("");
     setManualReference("");
     setManualDescription("");
+    setActualCash("");
+    setClosingNote("");
   }
 
   function openMovementDialog() {
@@ -20631,9 +20711,35 @@ function TreasuryScreen({
     setDialog("transfer");
   }
 
+  function openCloseSessionDialog() {
+    if (cashSession.state === "closed") return;
+    setActualCash(String(cashExpectedBalance));
+    setClosingNote("");
+    setFormError("");
+    setDialog("close-session");
+  }
+
+  function openCloseDayDialog() {
+    if (latestDayClose || dayCloseBlocked) return;
+    setClosingNote("");
+    setFormError("");
+    setDialog("close-day");
+  }
+
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = Number(manualAmount);
+    if (
+      selectedAccount.kind === "cash" &&
+      cashSession.state !== "open"
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "الخزنة النقدية مغلقة. افتح جلسة نقد جديدة قبل إثبات حركة عليها."
+          : "The cash treasury is closed. Open a new cash session before posting.",
+      );
+      return;
+    }
     if (!Number.isFinite(amount) || amount <= 0) {
       setFormError(
         lang === "ar" ? "أدخل مبلغًا صحيحًا أكبر من صفر." : "Enter a valid amount above zero.",
@@ -20703,6 +20809,21 @@ function TreasuryScreen({
   function submitTransfer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = Number(manualAmount);
+    const destinationAccount = accounts.find(
+      (account) => account.id === transferTo,
+    );
+    if (
+      cashSession.state !== "open" &&
+      (selectedAccount.kind === "cash" ||
+        destinationAccount?.kind === "cash")
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "لا يمكن التحويل من أو إلى خزنة نقدية مغلقة."
+          : "Transfers cannot use a closed cash treasury.",
+      );
+      return;
+    }
     if (transferTo === selectedAccount.id) {
       setFormError(
         lang === "ar"
@@ -20799,6 +20920,112 @@ function TreasuryScreen({
     );
   }
 
+  function submitSessionClose(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const counted = Number(actualCash);
+    if (!Number.isFinite(counted) || counted < 0) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب قيمة النقد الموجود فعليًا بعد العد."
+          : "Enter the actual counted cash.",
+      );
+      return;
+    }
+    const variance = counted - cashExpectedBalance;
+    if (variance !== 0 && !closingNote.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب ملاحظة عن فرق العد؛ الفرق سيظل للمراجعة ولن يصبح مصروفًا أو دينًا تلقائيًا."
+          : "Add a note for the count variance; it remains under review.",
+      );
+      return;
+    }
+    const now = new Date();
+    onCashSessionChange({
+      ...cashSession,
+      state: "closed",
+      closedAt: {
+        ar: now.toLocaleString("ar-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        en: now.toLocaleString("en-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+      },
+      expectedBalance: cashExpectedBalance,
+      actualBalance: counted,
+      variance,
+      closingNote: closingNote.trim(),
+    });
+    resetDialog();
+    showToast(
+      variance === 0
+        ? lang === "ar"
+          ? "أُغلقت جلسة النقد متطابقة"
+          : "Cash session closed as matched"
+        : lang === "ar"
+          ? "أُغلقت الجلسة وسُجل فرق العد للمراجعة"
+          : "Session closed and variance recorded for review",
+    );
+  }
+
+  function submitDayClose(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (cashSession.state === "open") {
+      setFormError(
+        lang === "ar"
+          ? "أغلق جلسة الخزنة النقدية أولًا."
+          : "Close the cash treasury session first.",
+      );
+      return;
+    }
+    if (latestDayClose) {
+      setFormError(
+        lang === "ar"
+          ? "اليوم المالي مغلق بالفعل ولا يعاد فتح Snapshot قديمة."
+          : "The financial day is already closed.",
+      );
+      return;
+    }
+    const now = new Date();
+    const snapshot: FinancialDayCloseSnapshot = {
+      id: `FDC-${businessDate.replaceAll("-", "")}`,
+      businessDate,
+      state: "closed",
+      movementCount: movements.length,
+      totalIn: dayTotalIn,
+      totalOut: dayTotalOut,
+      totalTreasuryBalance,
+      cashExpected: cashSession.expectedBalance ?? cashExpectedBalance,
+      cashActual:
+        cashSession.actualBalance ??
+        cashSession.expectedBalance ??
+        cashExpectedBalance,
+      cashVariance: cashSession.variance ?? 0,
+      closedAt: {
+        ar: now.toLocaleString("ar-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        en: now.toLocaleString("en-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+      },
+      closedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      note: closingNote.trim(),
+    };
+    onDayCloseSnapshotsChange([snapshot, ...dayCloseSnapshots]);
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? "تم حفظ Snapshot إغلاق اليوم دون تغيير أي حساب أو دين"
+        : "Day-close snapshot saved without changing any account or debt",
+    );
+  }
+
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
       <Sidebar
@@ -20883,25 +21110,117 @@ function TreasuryScreen({
               </p>
             </div>
             <div className="treasury-heading__actions">
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={openTransferDialog}
-              >
-                <GitBranch size={17} />
-                {lang === "ar" ? "تحويل بين الخزن" : "Transfer funds"}
-              </button>
-              <button
-                className="primary-button"
-                type="button"
-                onClick={openMovementDialog}
-              >
-                <Plus size={17} />
-                {lang === "ar" ? "تسجيل حركة يدوية" : "Record manual movement"}
-              </button>
+              {activeTab === "ledger" ? (
+                <>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={openTransferDialog}
+                  >
+                    <GitBranch size={17} />
+                    {lang === "ar" ? "تحويل فوري بين المصادر" : "Immediate transfer"}
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={openMovementDialog}
+                  >
+                    <Plus size={17} />
+                    {lang === "ar" ? "مصروف أو إيداع فعلي" : "Expense or deposit"}
+                  </button>
+                </>
+              ) : activeTab === "session" ? (
+                cashSession.state === "open" ? (
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={openCloseSessionDialog}
+                  >
+                    <Calculator size={17} />
+                    {lang === "ar" ? "عد وإغلاق الجلسة" : "Count & close session"}
+                  </button>
+                ) : (
+                  <span className="treasury-complete-badge">
+                    <Check size={16} />
+                    {lang === "ar" ? "الجلسة مغلقة" : "Session closed"}
+                  </span>
+                )
+              ) : latestDayClose ? (
+                <span className="treasury-complete-badge">
+                  <LockKeyhole size={16} />
+                  {lang === "ar" ? "اليوم مغلق" : "Day closed"}
+                </span>
+              ) : (
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={openCloseDayDialog}
+                  disabled={dayCloseBlocked}
+                >
+                  <LockKeyhole size={17} />
+                  {lang === "ar" ? "إغلاق اليوم المالي" : "Close financial day"}
+                </button>
+              )}
             </div>
           </div>
 
+          <nav
+            className="treasury-tabs"
+            aria-label={lang === "ar" ? "مساحات الخزنة" : "Treasury spaces"}
+          >
+            <button
+              type="button"
+              className={activeTab === "ledger" ? "active" : ""}
+              onClick={() => setActiveTab("ledger")}
+            >
+              <ReceiptText size={18} />
+              <span>
+                <strong>{lang === "ar" ? "دفتر الحركة" : "Movement ledger"}</strong>
+                <small>{lang === "ar" ? "ما دخل وخرج فعليًا" : "Actual money movements"}</small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "session" ? "active" : ""}
+              onClick={() => setActiveTab("session")}
+            >
+              <Banknote size={18} />
+              <span>
+                <strong>{lang === "ar" ? "جلسة الخزنة" : "Cash session"}</strong>
+                <small>
+                  {cashSession.state === "open"
+                    ? lang === "ar"
+                      ? "مفتوحة مع منى علي"
+                      : "Open with Mona Ali"
+                    : lang === "ar"
+                      ? "مغلقة"
+                      : "Closed"}
+                </small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "day" ? "active" : ""}
+              onClick={() => setActiveTab("day")}
+            >
+              <CalendarDays size={18} />
+              <span>
+                <strong>{lang === "ar" ? "ملخص وإغلاق اليوم" : "Day summary & close"}</strong>
+                <small>
+                  {latestDayClose
+                    ? lang === "ar"
+                      ? "Snapshot محفوظة"
+                      : "Snapshot saved"
+                    : lang === "ar"
+                      ? "ملخص حي"
+                      : "Live summary"}
+                </small>
+              </span>
+            </button>
+          </nav>
+
+          {activeTab === "ledger" && (
+            <>
           <section className="treasury-truth">
             <ShieldCheck size={19} />
             <span>
@@ -21096,6 +21415,374 @@ function TreasuryScreen({
               )}
             </div>
           </section>
+            </>
+          )}
+
+          {activeTab === "session" && (
+            <section className="cash-session-space">
+              <div
+                className={`cash-session-hero cash-session-hero--${cashSession.state}`}
+              >
+                <span className="cash-session-hero__icon">
+                  {cashSession.state === "open" ? (
+                    <Clock3 size={24} />
+                  ) : (
+                    <Check size={24} />
+                  )}
+                </span>
+                <div>
+                  <small>{cashSession.id}</small>
+                  <h2>
+                    {cashSession.state === "open"
+                      ? lang === "ar"
+                        ? "جلسة النقد مفتوحة"
+                        : "Cash session is open"
+                      : lang === "ar"
+                        ? "جلسة النقد مغلقة"
+                        : "Cash session is closed"}
+                  </h2>
+                  <p>
+                    {lang === "ar"
+                      ? `المسؤولة: ${cashSession.responsible.ar} · بدأت ${cashSession.openedAt.ar}`
+                      : `Responsible: ${cashSession.responsible.en} · Opened ${cashSession.openedAt.en}`}
+                  </p>
+                </div>
+                <strong>{cashAccount.name[lang]}</strong>
+              </div>
+
+              <div className="cash-session-metrics">
+                <article>
+                  <small>{lang === "ar" ? "رصيد بداية الجلسة" : "Session opening"}</small>
+                  <strong>{money.format(cashSession.openingBalance)}</strong>
+                  <span>{lang === "ar" ? "مثبت عند الاستلام" : "Confirmed at handover"}</span>
+                </article>
+                <article className="is-in">
+                  <small>{lang === "ar" ? "الحركة الداخلة" : "Cash inflow"}</small>
+                  <strong>+ {money.format(
+                    movements
+                      .filter(
+                        (movement) =>
+                          movement.accountId === cashAccount.id &&
+                          movement.direction === "in",
+                      )
+                      .reduce((sum, movement) => sum + movement.amount, 0),
+                  )}</strong>
+                  <span>{lang === "ar" ? "من الحركات المثبتة" : "From posted movements"}</span>
+                </article>
+                <article className="is-out">
+                  <small>{lang === "ar" ? "الحركة الخارجة" : "Cash outflow"}</small>
+                  <strong>− {money.format(
+                    movements
+                      .filter(
+                        (movement) =>
+                          movement.accountId === cashAccount.id &&
+                          movement.direction === "out",
+                      )
+                      .reduce((sum, movement) => sum + movement.amount, 0),
+                  )}</strong>
+                  <span>{lang === "ar" ? "من الحركات المثبتة" : "From posted movements"}</span>
+                </article>
+                <article className="is-expected">
+                  <small>{lang === "ar" ? "المتوقع داخل الخزنة" : "Expected cash"}</small>
+                  <strong>
+                    {money.format(
+                      cashSession.state === "closed"
+                        ? cashSession.expectedBalance ?? cashExpectedBalance
+                        : cashExpectedBalance,
+                    )}
+                  </strong>
+                  <span>{lang === "ar" ? "للقراءة فقط" : "Read only"}</span>
+                </article>
+              </div>
+
+              {cashSession.state === "open" ? (
+                <div className="cash-session-workspace">
+                  <div className="cash-session-process">
+                    <div className="cash-session-process__head">
+                      <span>
+                        <Calculator size={19} />
+                        <strong>{lang === "ar" ? "إغلاق يطابق الواقع" : "Reality-based close"}</strong>
+                      </span>
+                      <small>{lang === "ar" ? "العد الفعلي مطلوب" : "Actual count required"}</small>
+                    </div>
+                    <ol>
+                      <li className="done">
+                        <span>1</span>
+                        <div>
+                          <strong>{lang === "ar" ? "رصيد البداية مثبت" : "Opening confirmed"}</strong>
+                          <small>{money.format(cashSession.openingBalance)}</small>
+                        </div>
+                      </li>
+                      <li className="done">
+                        <span>2</span>
+                        <div>
+                          <strong>{lang === "ar" ? "الحركات دخلت الدفتر" : "Movements posted"}</strong>
+                          <small>
+                            {movements.filter((movement) => movement.accountId === cashAccount.id).length}{" "}
+                            {lang === "ar" ? "حركة" : "movements"}
+                          </small>
+                        </div>
+                      </li>
+                      <li>
+                        <span>3</span>
+                        <div>
+                          <strong>{lang === "ar" ? "عد النقد الموجود" : "Count actual cash"}</strong>
+                          <small>{lang === "ar" ? "يكتبه الموظف عند الإغلاق" : "Entered by the cashier at close"}</small>
+                        </div>
+                      </li>
+                    </ol>
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={openCloseSessionDialog}
+                    >
+                      <Calculator size={17} />
+                      {lang === "ar" ? "ابدأ العد والإغلاق" : "Start count & close"}
+                    </button>
+                  </div>
+                  <div className="cash-session-rules">
+                    <ShieldCheck size={20} />
+                    <div>
+                      <strong>{lang === "ar" ? "الفرق لا يغيّر الرصيد" : "Variance does not alter the ledger"}</strong>
+                      <p>
+                        {lang === "ar"
+                          ? "أي عجز أو زيادة يُسجل كفرق مستقل للمراجعة، ولا يتحول تلقائيًا إلى مصروف أو إيراد أو مديونية على الموظف."
+                          : "A shortage or surplus is recorded for review and never becomes an expense, income, or employee debt automatically."}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="cash-session-close-result">
+                  <div>
+                    <small>{lang === "ar" ? "المتوقع" : "Expected"}</small>
+                    <strong>{money.format(cashSession.expectedBalance ?? 0)}</strong>
+                  </div>
+                  <div>
+                    <small>{lang === "ar" ? "المعدود فعليًا" : "Actual counted"}</small>
+                    <strong>{money.format(cashSession.actualBalance ?? 0)}</strong>
+                  </div>
+                  <div className={(cashSession.variance ?? 0) === 0 ? "matched" : "variance"}>
+                    <small>{lang === "ar" ? "نتيجة المطابقة" : "Reconciliation"}</small>
+                    <strong>
+                      {(cashSession.variance ?? 0) === 0
+                        ? lang === "ar"
+                          ? "متطابق"
+                          : "Matched"
+                        : money.format(cashSession.variance ?? 0)}
+                    </strong>
+                  </div>
+                  <p>
+                    <LockKeyhole size={16} />
+                    {cashSession.closedAt?.[lang]}{" "}
+                    {cashSession.closingNote ? `· ${cashSession.closingNote}` : ""}
+                  </p>
+                </div>
+              )}
+
+              <div className="non-cash-note">
+                <Landmark size={19} />
+                <span>
+                  <strong>{lang === "ar" ? "البنك والمحفظة لا يخضعان لعد نقدي" : "Bank and wallet do not use cash count"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "لهما رصيد دفتري ومطابقة كشف مستقلة، وليس جلسة درج خزنة."
+                      : "They use ledger balances and separate statement reconciliation."}
+                  </small>
+                </span>
+              </div>
+            </section>
+          )}
+
+          {activeTab === "day" && (
+            <section className="financial-day-space">
+              <div className="financial-day-status">
+                <span className={latestDayClose ? "closed" : "live"}>
+                  {latestDayClose ? <LockKeyhole size={20} /> : <Clock3 size={20} />}
+                </span>
+                <div>
+                  <small>{businessDate}</small>
+                  <h2>
+                    {latestDayClose
+                      ? lang === "ar"
+                        ? "اليوم المالي مغلق"
+                        : "Financial day closed"
+                      : lang === "ar"
+                        ? "ملخص اليوم المالي"
+                        : "Financial day summary"}
+                  </h2>
+                  <p>
+                    {latestDayClose
+                      ? lang === "ar"
+                        ? "هذه Snapshot تاريخية لا تعيد فتح الحسابات أو تغيّر الحركات."
+                        : "This is an immutable snapshot and does not reopen accounts."
+                      : lang === "ar"
+                        ? "يتحدث تلقائيًا من الحركات المثبتة حسب توقيت الشركة."
+                        : "Updates automatically from posted movements in company time."}
+                  </p>
+                </div>
+                <strong>
+                  {latestDayClose
+                    ? latestDayClose.id
+                    : lang === "ar"
+                      ? "ملخص حي"
+                      : "Live summary"}
+                </strong>
+              </div>
+
+              <div className="financial-day-metrics">
+                <article>
+                  <small>{lang === "ar" ? "الحركات المثبتة" : "Posted movements"}</small>
+                  <strong>{latestDayClose?.movementCount ?? movements.length}</strong>
+                  <span>{lang === "ar" ? "لا تشمل الطلبات غير المنفذة" : "Excludes unexecuted requests"}</span>
+                </article>
+                <article className="is-in">
+                  <small>{lang === "ar" ? "إجمالي الداخل" : "Total inflow"}</small>
+                  <strong>{money.format(latestDayClose?.totalIn ?? dayTotalIn)}</strong>
+                  <span>{lang === "ar" ? "تدفق نقدي وليس ربحًا" : "Cash flow, not profit"}</span>
+                </article>
+                <article className="is-out">
+                  <small>{lang === "ar" ? "إجمالي الخارج" : "Total outflow"}</small>
+                  <strong>{money.format(latestDayClose?.totalOut ?? dayTotalOut)}</strong>
+                  <span>{lang === "ar" ? "مدفوعات ومصروفات مثبتة" : "Posted payments & expenses"}</span>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "أرصدة المصادر" : "Source balances"}</small>
+                  <strong>{money.format(latestDayClose?.totalTreasuryBalance ?? totalTreasuryBalance)}</strong>
+                  <span>{lang === "ar" ? "لا تساوي ربح الشركة" : "Not company profit"}</span>
+                </article>
+              </div>
+
+              <div className="financial-day-grid">
+                <div className="day-readiness-card">
+                  <div className="day-card-head">
+                    <span>
+                      <ClipboardCheck size={19} />
+                      <strong>{lang === "ar" ? "جاهزية الإغلاق" : "Close readiness"}</strong>
+                    </span>
+                    <b className={dayCloseBlocked ? "blocked" : "ready"}>
+                      {latestDayClose
+                        ? lang === "ar"
+                          ? "مغلق"
+                          : "Closed"
+                        : dayCloseBlocked
+                          ? lang === "ar"
+                            ? "يوجد مانع"
+                            : "Blocked"
+                          : lang === "ar"
+                            ? "جاهز"
+                            : "Ready"}
+                    </b>
+                  </div>
+                  <ul>
+                    <li className={cashSession.state === "closed" ? "done" : "blocked"}>
+                      {cashSession.state === "closed" ? <Check size={17} /> : <CircleAlert size={17} />}
+                      <span>
+                        <strong>{lang === "ar" ? "جلسة الخزنة النقدية" : "Cash treasury session"}</strong>
+                        <small>
+                          {cashSession.state === "closed"
+                            ? lang === "ar"
+                              ? "مغلقة وتم إدخال العد الفعلي"
+                              : "Closed with actual count"
+                            : lang === "ar"
+                              ? "مفتوحة — أغلقها قبل إغلاق اليوم"
+                              : "Open — close it before day close"}
+                        </small>
+                      </span>
+                    </li>
+                    <li className="done">
+                      <Check size={17} />
+                      <span>
+                        <strong>{lang === "ar" ? "الحركات المالية" : "Financial movements"}</strong>
+                        <small>{lang === "ar" ? "كل الظاهر حركات مثبتة وليست طلبات" : "All visible rows are posted movements"}</small>
+                      </span>
+                    </li>
+                    <li className={(cashSession.variance ?? 0) === 0 ? "done" : "review"}>
+                      {(cashSession.variance ?? 0) === 0 ? <Check size={17} /> : <CircleAlert size={17} />}
+                      <span>
+                        <strong>{lang === "ar" ? "فرق عد الخزنة" : "Cash count variance"}</strong>
+                        <small>
+                          {(cashSession.variance ?? 0) === 0
+                            ? lang === "ar"
+                              ? "لا يوجد فرق مفتوح"
+                              : "No open variance"
+                            : lang === "ar"
+                              ? `${money.format(cashSession.variance ?? 0)} للمراجعة`
+                              : `${money.format(cashSession.variance ?? 0)} under review`}
+                        </small>
+                      </span>
+                    </li>
+                  </ul>
+                  {!latestDayClose && (
+                    <button
+                      className="primary-button"
+                      type="button"
+                      disabled={dayCloseBlocked}
+                      onClick={openCloseDayDialog}
+                    >
+                      <LockKeyhole size={17} />
+                      {dayCloseBlocked
+                        ? lang === "ar"
+                          ? "أغلق جلسة النقد أولًا"
+                          : "Close cash session first"
+                        : lang === "ar"
+                          ? "مراجعة وإغلاق اليوم"
+                          : "Review & close day"}
+                    </button>
+                  )}
+                </div>
+
+                <div className="day-sources-card">
+                  <div className="day-card-head">
+                    <span>
+                      <Landmark size={19} />
+                      <strong>{lang === "ar" ? "حالة المصادر المالية" : "Financial sources"}</strong>
+                    </span>
+                    <small>{accounts.length} {lang === "ar" ? "مصادر" : "sources"}</small>
+                  </div>
+                  {accounts.map((account) => (
+                    <article key={account.id}>
+                      <span className="source-icon">{accountIcon(account)}</span>
+                      <span>
+                        <strong>{account.name[lang]}</strong>
+                        <small>
+                          {account.kind === "cash"
+                            ? cashSession.state === "open"
+                              ? lang === "ar"
+                                ? "جلسة نقد مفتوحة"
+                                : "Open cash session"
+                              : lang === "ar"
+                                ? "جلسة نقد مغلقة"
+                                : "Cash session closed"
+                            : lang === "ar"
+                              ? "رصيد دفتري — لا عد نقدي"
+                              : "Ledger balance — no cash count"}
+                        </small>
+                      </span>
+                      <b>{money.format(accountBalance(account))}</b>
+                    </article>
+                  ))}
+                </div>
+              </div>
+
+              <div className="day-close-truth">
+                <ShieldCheck size={20} />
+                <span>
+                  <strong>{lang === "ar" ? "إغلاق اليوم Snapshot فقط" : "Day close is a snapshot only"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "لا يسدد دينًا، ولا يدفع مستحقًا، ولا يكمل تحويلًا أو مصروفًا، ولا يغيّر حركة قديمة."
+                      : "It does not settle debt, pay entitlements, complete transfers or expenses, or alter history."}
+                  </small>
+                </span>
+                {latestDayClose && (
+                  <b>
+                    {latestDayClose.closedAt[lang]} · {latestDayClose.closedBy[lang]}
+                  </b>
+                )}
+              </div>
+            </section>
+          )}
         </main>
       </div>
 
@@ -21209,7 +21896,15 @@ function TreasuryScreen({
         <div className="treasury-overlay" role="presentation" onClick={resetDialog}>
           <form
             className="treasury-dialog"
-            onSubmit={dialog === "transfer" ? submitTransfer : submitManualMovement}
+            onSubmit={
+              dialog === "transfer"
+                ? submitTransfer
+                : dialog === "movement"
+                  ? submitManualMovement
+                  : dialog === "close-session"
+                    ? submitSessionClose
+                    : submitDayClose
+            }
             onClick={(event) => event.stopPropagation()}
           >
             <div className="treasury-dialog__head">
@@ -21219,6 +21914,14 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "حركتان مرتبطتان"
                       : "Two linked movements"
+                    : dialog === "close-session"
+                      ? lang === "ar"
+                        ? "مطابقة النقد الفعلي"
+                        : "Actual cash reconciliation"
+                      : dialog === "close-day"
+                        ? lang === "ar"
+                          ? "Snapshot غير قابلة للتعديل"
+                          : "Immutable snapshot"
                     : lang === "ar"
                       ? "إثبات مالي جديد"
                       : "New financial record"}
@@ -21228,8 +21931,16 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "تحويل بين الخزن"
                       : "Transfer between accounts"
+                    : dialog === "close-session"
+                      ? lang === "ar"
+                        ? "عد وإغلاق جلسة الخزنة"
+                        : "Count and close cash session"
+                      : dialog === "close-day"
+                        ? lang === "ar"
+                          ? "مراجعة وإغلاق اليوم المالي"
+                          : "Review and close financial day"
                     : lang === "ar"
-                      ? "تسجيل حركة يدوية"
+                      ? "تسجيل مصروف أو إيداع فعلي"
                       : "Record manual movement"}
                 </h2>
               </span>
@@ -21243,6 +21954,125 @@ function TreasuryScreen({
               </button>
             </div>
 
+            {dialog === "close-session" ? (
+              <div className="cash-close-dialog">
+                <div className="cash-close-summary">
+                  <article>
+                    <small>{lang === "ar" ? "رصيد البداية" : "Opening balance"}</small>
+                    <strong>{money.format(cashSession.openingBalance)}</strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "المتوقع بعد الحركات" : "Expected after movements"}</small>
+                    <strong>{money.format(cashExpectedBalance)}</strong>
+                  </article>
+                </div>
+                <label className="treasury-form-field cash-actual-field">
+                  <span>{lang === "ar" ? "النقد الموجود فعليًا بعد العد" : "Actual cash after count"}</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={actualCash}
+                    onChange={(event) => setActualCash(event.target.value)}
+                    placeholder="0"
+                    autoFocus
+                  />
+                  <small>{lang === "ar" ? "اكتب ما وجدته بيدك؛ المتوقع للقراءة فقط." : "Enter what is physically present; expected is read only."}</small>
+                </label>
+                <div
+                  className={`cash-variance-preview ${
+                    sessionVariance === 0 ? "matched" : "different"
+                  }`}
+                >
+                  <span>
+                    {sessionVariance === 0 ? (
+                      <Check size={18} />
+                    ) : (
+                      <CircleAlert size={18} />
+                    )}
+                    <strong>
+                      {sessionVariance === 0
+                        ? lang === "ar"
+                          ? "متطابق"
+                          : "Matched"
+                        : sessionVariance > 0
+                          ? lang === "ar"
+                            ? "زيادة في العد"
+                            : "Cash surplus"
+                          : lang === "ar"
+                            ? "عجز في العد"
+                            : "Cash shortage"}
+                    </strong>
+                  </span>
+                  <b>{money.format(sessionVariance)}</b>
+                </div>
+                <label className="treasury-form-field">
+                  <span>
+                    {lang === "ar"
+                      ? sessionVariance === 0
+                        ? "ملاحظة الإغلاق — اختيارية"
+                        : "ملاحظة فرق العد — مطلوبة"
+                      : sessionVariance === 0
+                        ? "Close note — optional"
+                        : "Variance note — required"}
+                  </span>
+                  <textarea
+                    value={closingNote}
+                    onChange={(event) => setClosingNote(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "اكتب ما يساعد المراجعة من غير تغيير الحركات..."
+                        : "Add review context without changing movements..."
+                    }
+                  />
+                </label>
+              </div>
+            ) : dialog === "close-day" ? (
+              <div className="day-close-dialog">
+                <div className="day-close-review">
+                  <article>
+                    <small>{lang === "ar" ? "الحركات المثبتة" : "Posted movements"}</small>
+                    <strong>{movements.length}</strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "إجمالي الداخل" : "Total inflow"}</small>
+                    <strong>{money.format(dayTotalIn)}</strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "إجمالي الخارج" : "Total outflow"}</small>
+                    <strong>{money.format(dayTotalOut)}</strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "فرق عد النقد" : "Cash variance"}</small>
+                    <strong>{money.format(cashSession.variance ?? 0)}</strong>
+                  </article>
+                </div>
+                <div className="day-close-ready">
+                  <Check size={18} />
+                  <span>
+                    <strong>{lang === "ar" ? "جلسة النقد مغلقة" : "Cash session is closed"}</strong>
+                    <small>
+                      {lang === "ar"
+                        ? "الإغلاق سيحفظ صورة اليوم فقط ولن ينفذ أي حركة جديدة."
+                        : "Closing saves a snapshot only and creates no new movement."}
+                    </small>
+                  </span>
+                </div>
+                <label className="treasury-form-field">
+                  <span>{lang === "ar" ? "ملاحظة اليوم — اختيارية" : "Day note — optional"}</span>
+                  <textarea
+                    value={closingNote}
+                    onChange={(event) => setClosingNote(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "ملاحظة إدارية تظهر مع Snapshot الإغلاق..."
+                        : "Administrative note stored with the snapshot..."
+                    }
+                  />
+                </label>
+              </div>
+            ) : (
+              <>
             {dialog === "movement" ? (
               <>
                 <div className="treasury-direction-control">
@@ -21374,6 +22204,8 @@ function TreasuryScreen({
                 }
               />
             </label>
+              </>
+            )}
             <div className="treasury-dialog__notice">
               <LockKeyhole size={16} />
               <span>
@@ -21381,6 +22213,14 @@ function TreasuryScreen({
                   ? lang === "ar"
                     ? "التأكيد ينشئ حركة خروج وحركة دخول بنفس المرجع."
                     : "Confirmation creates linked outflow and inflow movements."
+                  : dialog === "close-session"
+                    ? lang === "ar"
+                      ? "الإغلاق يثبت العد والفرق فقط؛ لا يغيّر حركة قديمة ولا يصنع مصروفًا أو دينًا."
+                      : "Close records the count and variance only; it changes no movement or debt."
+                    : dialog === "close-day"
+                      ? lang === "ar"
+                        ? "Snapshot الإغلاق لا تسدد دينًا أو مستحقًا ولا تكمل عملية معلقة."
+                        : "The close snapshot settles no debt, entitlement, or pending operation."
                   : lang === "ar"
                     ? "بعد التأكيد لن تُعدّل الحركة أو تُحذف."
                     : "After confirmation, the movement cannot be edited or deleted."}
@@ -21402,6 +22242,14 @@ function TreasuryScreen({
                   ? lang === "ar"
                     ? "تأكيد التحويل"
                     : "Confirm transfer"
+                  : dialog === "close-session"
+                    ? lang === "ar"
+                      ? "تأكيد العد وإغلاق الجلسة"
+                      : "Confirm count & close"
+                    : dialog === "close-day"
+                      ? lang === "ar"
+                        ? "حفظ Snapshot وإغلاق اليوم"
+                        : "Save snapshot & close day"
                   : lang === "ar"
                     ? "تأكيد وإثبات"
                     : "Confirm and post"}
@@ -34179,6 +35027,11 @@ export default function Home() {
   const [sharedTreasuryMovements, setSharedTreasuryMovements] = useState(
     treasuryMovementsData,
   );
+  const [sharedTreasuryCashSession, setSharedTreasuryCashSession] =
+    useState<TreasuryCashSession>(treasuryCashSessionDefault);
+  const [sharedFinancialDayCloses, setSharedFinancialDayCloses] = useState<
+    FinancialDayCloseSnapshot[]
+  >(financialDayCloseSnapshotsData);
   const [sharedTrusts, setSharedTrusts] = useState(trustRecordsDemoData);
   const [sharedTrustPolicy, setSharedTrustPolicy] =
     useState<TrustPolicy>(trustPolicyDefault);
@@ -34227,6 +35080,8 @@ export default function Home() {
           senderDrafts?: SenderSettlementDraft[];
           senderReceipts?: SenderSettlementReceipt[];
           treasuryMovements?: TreasuryMovement[];
+          treasuryCashSession?: TreasuryCashSession;
+          financialDayCloses?: FinancialDayCloseSnapshot[];
           trusts?: TrustRecord[];
           trustPolicy?: TrustPolicy;
         };
@@ -34405,6 +35260,12 @@ export default function Home() {
           parsed.treasuryMovements.length > 0
         ) {
           setSharedTreasuryMovements(parsed.treasuryMovements);
+        }
+        if (parsed.treasuryCashSession) {
+          setSharedTreasuryCashSession(parsed.treasuryCashSession);
+        }
+        if (Array.isArray(parsed.financialDayCloses)) {
+          setSharedFinancialDayCloses(parsed.financialDayCloses);
         }
         if (Array.isArray(parsed.trusts)) {
           setSharedTrusts(parsed.trusts);
@@ -34692,6 +35553,8 @@ export default function Home() {
         senderDrafts: sharedSenderDrafts,
         senderReceipts: sharedSenderReceipts,
         treasuryMovements: sharedTreasuryMovements,
+        treasuryCashSession: sharedTreasuryCashSession,
+        financialDayCloses: sharedFinancialDayCloses,
         trusts: sharedTrusts,
         trustPolicy: sharedTrustPolicy,
       }),
@@ -34710,6 +35573,8 @@ export default function Home() {
     sharedSenderDrafts,
     sharedSenderReceipts,
     sharedTreasuryMovements,
+    sharedTreasuryCashSession,
+    sharedFinancialDayCloses,
     sharedTrustPolicy,
     sharedTrusts,
     sharedShipmentFields,
@@ -35086,7 +35951,11 @@ export default function Home() {
           theme={theme}
           accounts={treasuryAccountsData}
           movements={sharedTreasuryMovements}
+          cashSession={sharedTreasuryCashSession}
+          dayCloseSnapshots={sharedFinancialDayCloses}
           onMovementsChange={setSharedTreasuryMovements}
+          onCashSessionChange={setSharedTreasuryCashSession}
+          onDayCloseSnapshotsChange={setSharedFinancialDayCloses}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
