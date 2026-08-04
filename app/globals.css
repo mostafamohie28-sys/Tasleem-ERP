@@ -27638,3 +27638,605 @@ table td small,
     grid-column: 2;
   }
 }
+
+/* Courier agreements V2 */
+.courier-rates-page .courier-plan-facts,
+.courier-rates-page .courier-agreement,
+.courier-rates-page .courier-salary-panel {
+  display: none;
+}
+
+.courier-editor-explainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(37, 81, 185, 0.2);
+  border-radius: 11px;
+  background: rgba(37, 81, 185, 0.055);
+  color: var(--blue-600);
+}
+
+.courier-editor-explainer > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.courier-editor-explainer strong {
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.courier-editor-explainer small {
+  color: var(--text-soft);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.courier-contract-v2 {
+  display: grid;
+  gap: 12px;
+  margin: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 15px;
+  background:
+    linear-gradient(135deg, rgba(37, 81, 185, 0.06), transparent 38%),
+    var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.courier-contract-v2__head,
+.courier-contract-v2__head > span,
+.courier-contract-v2__couriers,
+.courier-contract-v2__couriers > span {
+  display: flex;
+  align-items: center;
+}
+
+.courier-contract-v2__head,
+.courier-contract-v2__couriers {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.courier-contract-v2__head > span {
+  min-width: 0;
+  gap: 9px;
+}
+
+.courier-contract-v2__head > span > i {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(37, 81, 185, 0.1);
+  color: var(--blue-600);
+  font-style: normal;
+}
+
+.courier-contract-v2__head > span > span,
+.courier-contract-v2__couriers > span {
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.courier-contract-v2__head small,
+.courier-contract-v2__couriers small {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.courier-contract-v2__head strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.courier-contract-v2__facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.courier-contract-v2__facts article {
+  min-width: 0;
+  min-height: 84px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.courier-contract-v2__facts small,
+.courier-contract-v2__facts span {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.courier-contract-v2__facts strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.4;
+}
+
+.courier-contract-v2__rule {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 12px;
+  border: 1px solid rgba(7, 131, 90, 0.18);
+  border-radius: 11px;
+  background: rgba(7, 131, 90, 0.065);
+  color: var(--green-600);
+}
+
+.courier-contract-v2__rule > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.courier-contract-v2__rule strong {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.courier-contract-v2__rule small {
+  color: var(--text-soft);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.courier-contract-v2__couriers {
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+}
+
+.courier-contract-v2__couriers > span strong {
+  font-size: 11px;
+  font-weight: 950;
+}
+
+.courier-contract-v2__couriers > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.courier-contract-v2__couriers > div > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.courier-contract-v2__couriers > div i {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(37, 81, 185, 0.1);
+  color: var(--blue-600);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.courier-contract-v2__couriers > div b {
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.courier-contract-v2__couriers > div em {
+  color: var(--text-faint);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.courier-contract-v2__preview {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.8fr) minmax(95px, 0.6fr) minmax(150px, 1fr) minmax(135px, 0.9fr) minmax(110px, 0.7fr) minmax(110px, 0.7fr);
+  gap: 7px;
+  padding: 10px;
+  border: 1px dashed rgba(37, 81, 185, 0.24);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--surface-soft) 72%, transparent);
+}
+
+.courier-contract-v2__preview > div,
+.courier-contract-v2__preview > label,
+.courier-contract-v2__preview > article {
+  min-width: 0;
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.courier-contract-v2__preview > label,
+.courier-contract-v2__preview > article {
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.courier-contract-v2__preview small,
+.courier-contract-v2__preview label > span:first-child {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.courier-contract-v2__preview strong {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 950;
+}
+
+.courier-contract-v2__preview input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.courier-contract-v2__preview .select-wrap {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+}
+
+.courier-contract-v2__preview select {
+  padding-inline: 0 21px;
+  font-size: 9px;
+}
+
+.courier-contract-v2__preview article:nth-last-child(2) {
+  background: rgba(233, 95, 0, 0.07);
+}
+
+.courier-contract-v2__preview article:last-child {
+  background: rgba(7, 131, 90, 0.07);
+}
+
+.courier-contract-v2__preview article.danger {
+  background: rgba(196, 55, 55, 0.08);
+}
+
+.courier-contract-v2__preview article.danger strong {
+  color: var(--red-600);
+}
+
+.courier-quick-selector {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1fr) minmax(300px, 1.35fr);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.courier-quick-selector > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.courier-quick-selector > span > i {
+  width: 35px;
+  height: 35px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(37, 81, 185, 0.1);
+  color: var(--blue-600);
+  font-style: normal;
+}
+
+.courier-quick-selector > span > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.courier-quick-selector > span small {
+  color: var(--text-faint);
+  font-size: 8px;
+}
+
+.courier-quick-selector > span strong {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.courier-quick-selector > label {
+  width: 100%;
+  min-height: 42px;
+}
+
+.courier-quick-selector > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.courier-quick-selector > div span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.courier-quick-selector > div strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.courier-quick-selector > div small {
+  color: var(--text-faint);
+  font-size: 7px;
+}
+
+.courier-status-payer {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(37, 81, 185, 0.2);
+  border-radius: 11px;
+  background: rgba(37, 81, 185, 0.045);
+}
+
+.courier-status-payer.has-change {
+  border-color: rgba(233, 95, 0, 0.32);
+  background: rgba(233, 95, 0, 0.055);
+}
+
+.courier-status-payer__head,
+.courier-status-payer__head > span {
+  display: flex;
+  align-items: center;
+}
+
+.courier-status-payer__head {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.courier-status-payer__head > span {
+  min-width: 0;
+  gap: 7px;
+  color: var(--blue-600);
+}
+
+.courier-status-payer__head > span > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.courier-status-payer__head strong {
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.courier-status-payer__head small {
+  color: var(--text-faint);
+  font-size: 7px;
+}
+
+.courier-status-payer__head > em {
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 850;
+}
+
+.courier-status-payer__choices {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.courier-status-payer__choices button {
+  min-width: 0;
+  min-height: 49px;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 15px;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+  color: var(--text-soft);
+  text-align: start;
+}
+
+.courier-status-payer__choices button.is-active {
+  border-color: rgba(37, 81, 185, 0.48);
+  background: rgba(37, 81, 185, 0.09);
+  color: var(--blue-600);
+  box-shadow: inset 0 0 0 1px rgba(37, 81, 185, 0.12);
+}
+
+.courier-status-payer__choices button > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.courier-status-payer__choices strong {
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 950;
+}
+
+.courier-status-payer__choices small {
+  color: var(--text-faint);
+  font-size: 7px;
+}
+
+.courier-status-payer__money {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.courier-status-payer__money span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px;
+  border-radius: 8px;
+  background: var(--surface-raised);
+}
+
+.courier-status-payer__money small {
+  color: var(--text-faint);
+  font-size: 6.5px;
+}
+
+.courier-status-payer__money strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 8px;
+  font-weight: 950;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.courier-status-payer__reason {
+  display: grid;
+  gap: 5px;
+}
+
+.courier-status-payer__reason > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--orange-600);
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.courier-status-payer__reason em {
+  color: var(--red-600);
+  font-style: normal;
+}
+
+.courier-status-payer__reason input {
+  width: 100%;
+  height: 38px;
+  padding: 0 9px;
+  border: 1px solid rgba(233, 95, 0, 0.32);
+  border-radius: 8px;
+  outline: 0;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 9px;
+}
+
+.courier-status-payer__reason small {
+  color: var(--text-faint);
+  font-size: 7px;
+}
+
+@media (max-width: 1200px) {
+  .courier-contract-v2__facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .courier-contract-v2__preview {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .courier-quick-selector {
+    grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1fr);
+  }
+
+  .courier-quick-selector > div {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .courier-contract-v2__head,
+  .courier-contract-v2__couriers {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .courier-contract-v2__couriers > div {
+    justify-content: flex-start;
+  }
+
+  .courier-contract-v2__preview,
+  .courier-quick-selector {
+    grid-template-columns: 1fr;
+  }
+
+  .courier-quick-selector > div {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 520px) {
+  .courier-contract-v2__facts,
+  .courier-contract-v2__preview,
+  .courier-status-payer__money {
+    grid-template-columns: 1fr;
+  }
+}

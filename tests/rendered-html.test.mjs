@@ -70,6 +70,11 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /submitSessionClose/);
   assert.match(page, /submitDayClose/);
   assert.match(page, /financialDayCloses:\s*sharedFinancialDayCloses/);
+  assert.match(page, /normalizeCourierRatePlan/);
+  assert.match(page, /courier-quick-selector/);
+  assert.match(page, /courier-status-payer/);
+  assert.match(page, /courier-contract-v2/);
+  assert.doesNotMatch(page, /className="courier-payer-review"/);
   assert.match(page, /سعر المنطقة غير مكتمل للراسل البديل/);
   assert.match(page, /tasleem-control-center-v2/);
   assert.match(css, /courier-payer-review/);
@@ -83,6 +88,9 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /treasury-tabs/);
   assert.match(css, /cash-session-space/);
   assert.match(css, /financial-day-space/);
+  assert.match(css, /courier-quick-selector/);
+  assert.match(css, /courier-status-payer/);
+  assert.match(css, /courier-contract-v2/);
   assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.sidebar\s*\{[\s\S]*?z-index:\s*75/);
   assert.match(layout, /Tasleem ERP/);
   assert.match(packageJson, /"build":\s*"vinext build"/);

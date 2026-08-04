@@ -2783,6 +2783,7 @@ type CourierRatePlan = {
   fixedSalary: number | null;
   couriers: Localized[];
   version: number;
+  effectiveFrom?: string;
   rates: PriceMatrix;
 };
 
@@ -3347,6 +3348,7 @@ const courierRatePlansData: CourierRatePlan[] = [
       availableCouriers[2],
     ],
     version: 6,
+    effectiveFrom: "2026-08-01",
     rates: createCourierRateMatrix(20, [
       "area-talkha:status-partial",
       "area-agami:status-deferred",
@@ -3359,10 +3361,11 @@ const courierRatePlansData: CourierRatePlan[] = [
     state: "active",
     isDefault: false,
     compensationType: "commission",
-    settlementCycle: "daily",
+    settlementCycle: "instant",
     fixedSalary: null,
     couriers: [availableCouriers[3]],
     version: 3,
+    effectiveFrom: "2026-08-01",
     rates: createCourierRateMatrix(27),
   },
   {
@@ -3376,25 +3379,55 @@ const courierRatePlansData: CourierRatePlan[] = [
     fixedSalary: 6500,
     couriers: [availableCouriers[4]],
     version: 2,
+    effectiveFrom: "2026-08-01",
     rates: createCourierRateMatrix(0),
   },
   {
     id: "courier-plan-mixed",
-    name: { ar: "راتب مع عمولة", en: "Salary plus commission" },
-    code: "COURIER-MIXED",
-    state: "draft",
+    name: { ar: "مرتب أسبوعي ثابت", en: "Fixed weekly salary" },
+    code: "COURIER-WEEKLY-SALARY",
+    state: "active",
     isDefault: false,
-    compensationType: "mixed",
-    settlementCycle: "monthly",
-    fixedSalary: 3000,
+    compensationType: "salary",
+    settlementCycle: "weekly",
+    fixedSalary: 1800,
     couriers: [availableCouriers[5]],
     version: 1,
-    rates: createCourierRateMatrix(10, [
-      "area-new-cairo:status-delivered",
-      "area-agami:status-delivered",
-    ]),
+    effectiveFrom: "2026-08-01",
+    rates: createCourierRateMatrix(0),
   },
 ];
+
+function normalizeCourierRatePlan(plan: CourierRatePlan): CourierRatePlan {
+  const isLegacyMixedPlan =
+    plan.compensationType === "mixed" || plan.code === "COURIER-MIXED";
+  const compensationType = isLegacyMixedPlan ? "salary" : plan.compensationType;
+  const settlementCycle =
+    isLegacyMixedPlan
+      ? "weekly"
+      : compensationType === "salary"
+      ? plan.settlementCycle === "weekly"
+        ? "weekly"
+        : "monthly"
+      : plan.settlementCycle === "daily"
+        ? "instant"
+        : plan.settlementCycle;
+  return {
+    ...plan,
+    name: isLegacyMixedPlan
+      ? { ar: "مرتب أسبوعي ثابت", en: "Fixed weekly salary" }
+      : plan.name,
+    code: isLegacyMixedPlan ? "COURIER-WEEKLY-SALARY" : plan.code,
+    state: isLegacyMixedPlan ? "active" : plan.state,
+    compensationType,
+    settlementCycle,
+    fixedSalary:
+      compensationType === "commission"
+        ? null
+        : Math.max(0, isLegacyMixedPlan ? 1800 : (plan.fixedSalary ?? 0)),
+    effectiveFrom: plan.effectiveFrom ?? "2026-08-01",
+  };
+}
 
 function resolveCourierPayPlan(
   courier: Localized,
@@ -11724,7 +11757,9 @@ function CourierPlanEditor({
                   </span>
                 </label>
                 <label className="select-field">
-                  <span>{c.compensationType}</span>
+                  <span>
+                    {lang === "ar" ? "طريقة حساب حق المندوب" : "Courier pay method"}
+                  </span>
                   <span className="select-wrap">
                     <select
                       value={draft.compensationType}
@@ -11733,6 +11768,12 @@ function CourierPlanEditor({
                           ...current,
                           compensationType:
                             event.target.value as CourierCompensationType,
+                          settlementCycle:
+                            event.target.value === "salary" &&
+                            (current.settlementCycle === "instant" ||
+                              current.settlementCycle === "daily")
+                              ? "monthly"
+                              : current.settlementCycle,
                           fixedSalary:
                             event.target.value === "commission"
                               ? null
@@ -11742,13 +11783,20 @@ function CourierPlanEditor({
                     >
                       <option value="commission">{c.commission}</option>
                       <option value="salary">{c.salary}</option>
-                      <option value="mixed">{c.mixed}</option>
                     </select>
                     <ChevronDown size={16} />
                   </span>
                 </label>
                 <label className="select-field">
-                  <span>{c.settlementCycle}</span>
+                  <span>
+                    {draft.compensationType === "salary"
+                      ? lang === "ar"
+                        ? "دورية المرتب"
+                        : "Salary period"
+                      : lang === "ar"
+                        ? "موعد صرف العمولة"
+                        : "Commission payout"}
+                  </span>
                   <span className="select-wrap">
                     <select
                       value={draft.settlementCycle}
@@ -11760,8 +11808,9 @@ function CourierPlanEditor({
                         }))
                       }
                     >
-                      <option value="instant">{c.instant}</option>
-                      <option value="daily">{c.daily}</option>
+                      {draft.compensationType === "commission" && (
+                        <option value="instant">{c.instant}</option>
+                      )}
                       <option value="weekly">{c.weekly}</option>
                       <option value="monthly">{c.monthly}</option>
                     </select>
@@ -11770,7 +11819,15 @@ function CourierPlanEditor({
                 </label>
                 {draft.compensationType !== "commission" && (
                   <label className="field">
-                    <span>{c.fixedSalary}</span>
+                    <span>
+                      {draft.settlementCycle === "weekly"
+                        ? lang === "ar"
+                          ? "قيمة المرتب الأسبوعي"
+                          : "Weekly salary amount"
+                        : lang === "ar"
+                          ? "قيمة المرتب الشهري"
+                          : "Monthly salary amount"}
+                    </span>
                     <span className="field__control">
                       <input
                         type="number"
@@ -11786,6 +11843,46 @@ function CourierPlanEditor({
                     </span>
                   </label>
                 )}
+                <label className="field">
+                  <span>{lang === "ar" ? "يبدأ تطبيق الاتفاق من" : "Effective from"}</span>
+                  <span className="field__control">
+                    <input
+                      type="date"
+                      value={draft.effectiveFrom ?? ""}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          effectiveFrom: event.target.value,
+                        }))
+                      }
+                      required
+                    />
+                  </span>
+                </label>
+              </div>
+
+              <div className="courier-editor-explainer">
+                <ShieldCheck size={17} />
+                <span>
+                  <strong>
+                    {draft.compensationType === "commission"
+                      ? lang === "ar"
+                        ? "الحق يُحسب من المنطقة والحالة"
+                        : "Entitlement comes from area and status"
+                      : lang === "ar"
+                        ? "المرتب مصروف ثابت على الشركة"
+                        : "Salary is a fixed company expense"}
+                  </strong>
+                  <small>
+                    {draft.compensationType === "commission"
+                      ? lang === "ar"
+                        ? "اختيار أسبوعي أو شهري يحدد موعد الصرف فقط، ولا يغيّر طريقة حساب العمولة."
+                        : "Weekly or monthly controls payout timing only; it does not change commission calculation."
+                      : lang === "ar"
+                        ? "لن تظهر لهذا الاتفاق أسعار عمولة حسب الحالات، وتظل الشحنات القديمة على الاتفاق المحفوظ وقتها."
+                        : "No status-rate matrix is used, and older shipments retain their recorded agreement."}
+                  </small>
+                </span>
               </div>
 
               <button
@@ -11903,6 +12000,11 @@ function CourierRatesScreen({
 }) {
   const t = copy[lang];
   const c = courierRateCopy[lang];
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
+    style: "currency",
+    currency: "EGP",
+    maximumFractionDigits: 0,
+  });
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(plans[0]?.id ?? "");
@@ -12063,19 +12165,23 @@ function CourierRatesScreen({
       fixedSalary: null,
       couriers: [],
       version: 1,
+      effectiveFrom: new Date().toISOString().slice(0, 10),
       rates,
     });
   }
 
   function savePlan(next: CourierRatePlan) {
+    const normalizedNext = normalizeCourierRatePlan(next);
     onPlansChange((current) => {
-      const chosenCouriers = new Set(next.couriers.map((courier) => courier.en));
-      const exists = current.some((plan) => plan.id === next.id);
+      const chosenCouriers = new Set(
+        normalizedNext.couriers.map((courier) => courier.en),
+      );
+      const exists = current.some((plan) => plan.id === normalizedNext.id);
       const prepared = current.map((plan) => ({
         ...plan,
-        isDefault: next.isDefault ? false : plan.isDefault,
+        isDefault: normalizedNext.isDefault ? false : plan.isDefault,
         couriers:
-          plan.id === next.id
+          plan.id === normalizedNext.id
             ? plan.couriers
             : plan.couriers.filter(
                 (courier) => !chosenCouriers.has(courier.en),
@@ -12083,14 +12189,14 @@ function CourierRatesScreen({
       }));
       if (exists) {
         return prepared.map((plan) =>
-          plan.id === next.id
-            ? { ...next, version: plan.version + 1 }
+          plan.id === normalizedNext.id
+            ? { ...normalizedNext, version: plan.version + 1 }
             : plan,
         );
       }
-      return [next, ...prepared];
+      return [normalizedNext, ...prepared];
     });
-    setSelectedId(next.id);
+    setSelectedId(normalizedNext.id);
     setEditing(null);
     setToast(isNew ? c.createdPlan : c.savedPlan);
     setIsNew(false);
@@ -12389,6 +12495,234 @@ function CourierRatesScreen({
                       )}
                     </div>
                   </div>
+
+                  <section className="courier-contract-v2">
+                    <div className="courier-contract-v2__head">
+                      <span>
+                        <i><HandCoins size={20} /></i>
+                        <span>
+                          <small>
+                            {lang === "ar" ? "اتفاق المندوب الفعّال" : "Active courier agreement"}
+                          </small>
+                          <strong>{selected.name[lang]}</strong>
+                        </span>
+                      </span>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={() => {
+                          setIsNew(false);
+                          setEditing(selected);
+                        }}
+                      >
+                        <Settings2 size={15} />
+                        {lang === "ar" ? "تعديل الاتفاق" : "Edit agreement"}
+                      </button>
+                    </div>
+
+                    <div className="courier-contract-v2__facts">
+                      <article>
+                        <small>{lang === "ar" ? "طريقة الحساب" : "Pay method"}</small>
+                        <strong>
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "مرتب ثابت"
+                              : "Fixed salary"
+                            : lang === "ar"
+                              ? "عمولة على الشحنات"
+                              : "Per-shipment commission"}
+                        </strong>
+                        <span>
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "مصروف على الشركة"
+                              : "Company expense"
+                            : lang === "ar"
+                              ? "من مصاريف الشحن"
+                              : "From shipping revenue"}
+                        </span>
+                      </article>
+                      <article>
+                        <small>
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "دورية المرتب"
+                              : "Salary period"
+                            : lang === "ar"
+                              ? "موعد صرف العمولة"
+                              : "Commission payout"}
+                        </small>
+                        <strong>{cycleLabel(selected.settlementCycle)}</strong>
+                        <span>
+                          {selected.compensationType === "commission"
+                            ? lang === "ar"
+                              ? "الحساب يظل حسب كل شحنة"
+                              : "Still calculated per shipment"
+                            : lang === "ar"
+                              ? "قيمة ثابتة لكل دورة"
+                              : "Fixed amount per period"}
+                        </span>
+                      </article>
+                      <article>
+                        <small>{lang === "ar" ? "قيمة الاتفاق" : "Agreement value"}</small>
+                        <strong>
+                          {selected.compensationType === "salary"
+                            ? `${(selected.fixedSalary ?? 0).toLocaleString(
+                                lang === "ar" ? "ar-EG" : "en-EG",
+                              )} ${c.priceCurrency}`
+                            : lang === "ar"
+                              ? "حسب المنطقة والحالة"
+                              : "By area and status"}
+                        </strong>
+                        <span>
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "لا تستخدم مصفوفة عمولات"
+                              : "No commission matrix"
+                            : `${selectedCompletion.filled}/${selectedCompletion.total} ${
+                                lang === "ar" ? "سعر محدد" : "rates set"
+                              }`}
+                        </span>
+                      </article>
+                      <article>
+                        <small>{lang === "ar" ? "سريان الاتفاق" : "Effective from"}</small>
+                        <strong>{selected.effectiveFrom || "—"}</strong>
+                        <span>
+                          {lang === "ar"
+                            ? `إصدار ${selected.version} · لا يغيّر الماضي`
+                            : `Version ${selected.version} · history protected`}
+                        </span>
+                      </article>
+                    </div>
+
+                    <div className="courier-contract-v2__rule">
+                      <ShieldCheck size={18} />
+                      <span>
+                        <strong>
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "المرتب مستقل عن حالات الشحنات"
+                              : "Salary is independent from shipment statuses"
+                            : lang === "ar"
+                              ? "العمولة تُثبت عند الحالة المالية التي حددتها الشركة"
+                              : "Commission is recorded at the configured financial status"}
+                        </strong>
+                        <small>
+                          {selected.compensationType === "salary"
+                            ? lang === "ar"
+                              ? "يظهر الاستحقاق الثابت في مستحقات المندوب عند موعده، ولا تُنشأ عمولة صفرية للشحنات."
+                              : "The fixed entitlement appears when due; shipments do not receive zero commission records."
+                            : lang === "ar"
+                              ? "فوري أو أسبوعي أو شهري يحدد وقت الصرف فقط، وتظل قيمة العمولة محفوظة مع الشحنة."
+                              : "Instant, weekly or monthly controls payout timing only; the shipment keeps its commission snapshot."}
+                        </small>
+                      </span>
+                    </div>
+
+                    <div className="courier-contract-v2__couriers">
+                      <span>
+                        <strong>
+                          {lang === "ar" ? "المناديب المرتبطون" : "Assigned couriers"}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "كل مندوب له اتفاق فعّال واحد فقط."
+                            : "Each courier has one active agreement."}
+                        </small>
+                      </span>
+                      <div>
+                        {selectedCourierRecords.map((courier) => (
+                          <span key={courier.id}>
+                            <i>{courier.name[lang].slice(0, 1)}</i>
+                            <b>{courier.name[lang]}</b>
+                          </span>
+                        ))}
+                        {selectedCourierRecords.length === 0 && (
+                          <em>
+                            {lang === "ar"
+                              ? "لا يوجد مندوب مرتبط"
+                              : "No assigned courier"}
+                          </em>
+                        )}
+                      </div>
+                    </div>
+
+                    {selected.compensationType === "commission" && (
+                      <div className="courier-contract-v2__preview">
+                        <div>
+                          <strong>{lang === "ar" ? "مثال سريع" : "Quick example"}</strong>
+                          <small>
+                            {lang === "ar"
+                              ? "للفهم فقط، ولا يغيّر أي حساب."
+                              : "For clarity only; no account is changed."}
+                          </small>
+                        </div>
+                        <label>
+                          <span>{lang === "ar" ? "مصاريف الشحن" : "Shipping fee"}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={previewShippingFee}
+                            onChange={(event) =>
+                              setPreviewShippingFee(
+                                Math.max(0, Number(event.target.value) || 0),
+                              )
+                            }
+                          />
+                        </label>
+                        <label>
+                          <span>{lang === "ar" ? "المنطقة" : "Area"}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={previewAreaId}
+                              onChange={(event) => setPreviewAreaId(event.target.value)}
+                            >
+                              {areasWithGovernorates.map(({ area, governorate }) => (
+                                <option key={area.id} value={area.id}>
+                                  {area.name[lang]} · {governorate.name[lang]}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown size={14} />
+                          </span>
+                        </label>
+                        <label>
+                          <span>{lang === "ar" ? "الحالة" : "Status"}</span>
+                          <span className="select-wrap">
+                            <select
+                              value={previewStatusId}
+                              onChange={(event) => setPreviewStatusId(event.target.value)}
+                            >
+                              {courierStatuses.map((status) => (
+                                <option key={status.id} value={status.id}>
+                                  {status.name[lang]}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown size={14} />
+                          </span>
+                        </label>
+                        <article>
+                          <small>{lang === "ar" ? "عمولة المندوب" : "Courier commission"}</small>
+                          <strong>
+                            {previewCommission == null
+                              ? lang === "ar"
+                                ? "غير محددة"
+                                : "Not set"
+                              : money.format(previewCommission)}
+                          </strong>
+                        </article>
+                        <article className={previewCompanyShare != null && previewCompanyShare < 0 ? "danger" : ""}>
+                          <small>{lang === "ar" ? "المتبقي للشركة" : "Company remainder"}</small>
+                          <strong>
+                            {previewCompanyShare == null
+                              ? "—"
+                              : money.format(previewCompanyShare)}
+                          </strong>
+                        </article>
+                      </div>
+                    )}
+                  </section>
 
                   <div className="courier-plan-facts">
                     <span>
@@ -19074,6 +19408,12 @@ function CourierShipmentsScreen({
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [nextDate, setNextDate] = useState("");
+  const [finalShippingPayer, setFinalShippingPayer] = useState<
+    "recipient" | "sender"
+  >(firstShipment ? shipmentFinalShippingPayer(firstShipment) : "recipient");
+  const [finalShippingPayerReason, setFinalShippingPayerReason] = useState(
+    firstShipment?.finalShippingPayerReason ?? "",
+  );
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
 
@@ -19114,6 +19454,21 @@ function CourierShipmentsScreen({
   );
   const selectedStatus =
     courierStatuses.find((status) => status.id === selectedStatusId) ?? null;
+  const payerChangedFromRegistration = Boolean(
+    selectedShipment &&
+      finalShippingPayer !== selectedShipment.shippingPayer,
+  );
+  const approvedRecipientShipping = selectedShipment
+    ? finalShippingPayer === "recipient"
+      ? shipmentRecipientShippingRate(selectedShipment)
+      : 0
+    : 0;
+  const approvedSenderDue = selectedShipment
+    ? selectedShipment.amount +
+      approvedRecipientShipping -
+      shipmentCompanyShippingFee(selectedShipment) -
+      (selectedShipment.customFinancialSnapshot?.senderDeductions ?? 0)
+    : 0;
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
     style: "currency",
     currency: "EGP",
@@ -19147,11 +19502,22 @@ function CourierShipmentsScreen({
     setSelectedId(nextShipment?.id ?? "");
     setSearch("");
     resetStatusForm();
+    syncFinalPayer(nextShipment ?? null);
   }
 
   function chooseShipment(id: string) {
     setSelectedId(id);
     resetStatusForm();
+    syncFinalPayer(
+      courierShipments.find((shipment) => shipment.id === id) ?? null,
+    );
+  }
+
+  function syncFinalPayer(shipment: Shipment | null) {
+    setFinalShippingPayer(
+      shipment ? shipmentFinalShippingPayer(shipment) : "recipient",
+    );
+    setFinalShippingPayerReason(shipment?.finalShippingPayerReason ?? "");
   }
 
   function resetStatusForm() {
@@ -19183,6 +19549,7 @@ function CourierShipmentsScreen({
     setReason("");
     setNote("");
     setNextDate("");
+    syncFinalPayer(selectedShipment);
     setError("");
   }
 
@@ -19203,6 +19570,16 @@ function CourierShipmentsScreen({
     }
     if (statusNeeds("New date") && !nextDate) {
       missing.push(lang === "ar" ? "الموعد الجديد" : "New date");
+    }
+    if (
+      finalShippingPayer !== selectedShipment.shippingPayer &&
+      !finalShippingPayerReason.trim()
+    ) {
+      missing.push(
+        lang === "ar"
+          ? "سبب تغيير متحمل الشحن"
+          : "Shipping payer change reason",
+      );
     }
     const delivered = deliveredPieces === "" ? null : Number(deliveredPieces);
     if (
@@ -19311,6 +19688,20 @@ function CourierShipmentsScreen({
             ? `Courier recorded “${selectedStatus.name.en}” just now`
             : `Courier recorded “${selectedStatus.name.en}”; company has not received the return yet`,
         },
+        finalShippingPayer,
+        finalShippingPayerSource:
+          finalShippingPayer === shipment.shippingPayer
+            ? ("registered" as const)
+            : ("accountant_correction" as const),
+        finalShippingPayerReason:
+          finalShippingPayer === shipment.shippingPayer
+            ? ""
+            : finalShippingPayerReason.trim(),
+        finalShippingPayerBy: {
+          ar: "محاسب التشغيل",
+          en: "Operations accountant",
+        },
+        finalShippingPayerAt: timestamp,
         statusHistory: [
           {
             id: `status-event-${Date.now()}`,
@@ -19336,6 +19727,7 @@ function CourierShipmentsScreen({
     onShipmentsChange(nextRecords);
     setSelectedId(remaining[0]?.id ?? "");
     resetStatusForm();
+    syncFinalPayer(remaining[0] ?? null);
     setToast(
       lang === "ar"
         ? "تم تسجيل الحالة وخرجت الشحنة من حيازة المندوب"
@@ -19450,6 +19842,43 @@ function CourierShipmentsScreen({
                   : "Even deferral removes it from this list; no status means it stays with the courier."}
               </small>
             </span>
+          </section>
+
+          <section className="courier-quick-selector">
+            <span>
+              <i><UserRound size={19} /></i>
+              <span>
+                <small>{lang === "ar" ? "المندوب المختار" : "Selected courier"}</small>
+                <strong>{selectedCourier.courier[lang]}</strong>
+              </span>
+            </span>
+            <label className="select-wrap">
+              <select
+                value={courierKey}
+                onChange={(event) => chooseCourier(event.target.value)}
+                aria-label={lang === "ar" ? "اختر المندوب" : "Choose courier"}
+              >
+                {assignmentCourierProfiles.map((profile) => {
+                  const load = shipmentRecords.filter(
+                    (shipment) =>
+                      shipment.custodyType === "courier" &&
+                      shipment.courier?.en === profile.courier.en,
+                  ).length;
+                  return (
+                    <option key={profile.code} value={profile.courier.en}>
+                      {profile.courier[lang]} · {load}{" "}
+                      {lang === "ar" ? "شحنة" : "shipments"}
+                    </option>
+                  );
+                })}
+              </select>
+              <ChevronDown size={16} />
+            </label>
+            <div>
+              <span><strong>{courierShipments.length}</strong><small>{lang === "ar" ? "شحنة معه" : "held shipments"}</small></span>
+              <span><strong>{totalPieces}</strong><small>{lang === "ar" ? "قطعة" : "pieces"}</small></span>
+              <span><strong>{money.format(totalCollection)}</strong><small>{lang === "ar" ? "تحصيل متوقع" : "expected collection"}</small></span>
+            </div>
           </section>
 
           <section className="courier-custody-metrics">
@@ -19769,6 +20198,138 @@ function CourierShipmentsScreen({
                           </small>
                         </span>
                       </div>
+
+                      <section
+                        className={`courier-status-payer ${
+                          payerChangedFromRegistration ? "has-change" : ""
+                        }`}
+                      >
+                        <div className="courier-status-payer__head">
+                          <span>
+                            <LockKeyhole size={17} />
+                            <span>
+                              <strong>
+                                {lang === "ar"
+                                  ? "اعتماد محاسب التشغيل لمتحمّل الشحن"
+                                  : "Operations accountant shipping-payer approval"}
+                              </strong>
+                              <small>
+                                {lang === "ar"
+                                  ? "قرار خاص بهذه الشحنة ويُحفظ مع الحالة."
+                                  : "A shipment-level decision saved with this status."}
+                              </small>
+                            </span>
+                          </span>
+                          <em>
+                            {lang === "ar" ? "المسجل: " : "Registered: "}
+                            {selectedShipment.shippingPayer === "recipient"
+                              ? lang === "ar"
+                                ? "المستلم"
+                                : "recipient"
+                              : lang === "ar"
+                                ? "الراسل"
+                                : "sender"}
+                          </em>
+                        </div>
+
+                        <div className="courier-status-payer__choices">
+                          <button
+                            type="button"
+                            className={
+                              finalShippingPayer === "recipient"
+                                ? "is-active"
+                                : ""
+                            }
+                            onClick={() => {
+                              setFinalShippingPayer("recipient");
+                              setError("");
+                            }}
+                          >
+                            <UserRound size={16} />
+                            <span>
+                              <strong>{lang === "ar" ? "المستلم" : "Recipient"}</strong>
+                              <small>
+                                {lang === "ar"
+                                  ? "يدفع مصاريف الشحن"
+                                  : "Pays shipping"}
+                              </small>
+                            </span>
+                            {finalShippingPayer === "recipient" && <Check size={15} />}
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              finalShippingPayer === "sender" ? "is-active" : ""
+                            }
+                            onClick={() => {
+                              setFinalShippingPayer("sender");
+                              setError("");
+                            }}
+                          >
+                            <UsersRound size={16} />
+                            <span>
+                              <strong>{lang === "ar" ? "الراسل" : "Sender"}</strong>
+                              <small>
+                                {lang === "ar"
+                                  ? "تُخصم من حسابه"
+                                  : "Deducted from account"}
+                              </small>
+                            </span>
+                            {finalShippingPayer === "sender" && <Check size={15} />}
+                          </button>
+                        </div>
+
+                        <div className="courier-status-payer__money">
+                          <span>
+                            <small>{lang === "ar" ? "المحصل المسجل" : "Recorded collection"}</small>
+                            <strong>
+                              {money.format(
+                                collectedAmount === ""
+                                  ? shipmentTotalToCollect(selectedShipment)
+                                  : Number(collectedAmount) || 0,
+                              )}
+                            </strong>
+                          </span>
+                          <span>
+                            <small>{lang === "ar" ? "شحن المستلم المعتمد" : "Approved recipient shipping"}</small>
+                            <strong>{money.format(approvedRecipientShipping)}</strong>
+                          </span>
+                          <span>
+                            <small>{lang === "ar" ? "مستحق الراسل المتوقع" : "Expected sender due"}</small>
+                            <strong>{money.format(approvedSenderDue)}</strong>
+                          </span>
+                        </div>
+
+                        {payerChangedFromRegistration && (
+                          <label className="courier-status-payer__reason">
+                            <span>
+                              <CircleAlert size={14} />
+                              {lang === "ar"
+                                ? "سبب الاختلاف عن التسجيل"
+                                : "Reason for changing registration"}
+                              <em>*</em>
+                            </span>
+                            <input
+                              value={finalShippingPayerReason}
+                              onChange={(event) => {
+                                setFinalShippingPayerReason(event.target.value);
+                                setError("");
+                              }}
+                              placeholder={
+                                lang === "ar"
+                                  ? "اكتب سبب اعتماد المتحمل المختلف..."
+                                  : "Enter why the payer was changed..."
+                              }
+                            />
+                            <small>
+                              {lang === "ar"
+                                ? "سيظهر الاختلاف في التنبيهات وملف الشحنة."
+                                : "The difference appears in alerts and shipment history."}
+                            </small>
+                          </label>
+                        )}
+                      </section>
+
                       <div className="courier-dynamic-fields">
                         {statusNeeds("Collected amount") && (
                           <label>
@@ -25893,15 +26454,6 @@ function CourierAccountScreen({
   const [customAmountOpen, setCustomAmountOpen] = useState(false);
   const [actualCashInput, setActualCashInput] = useState("");
   const [adjustmentReason, setAdjustmentReason] = useState("");
-  const [payerDecisions, setPayerDecisions] = useState<
-    Record<
-      string,
-      {
-        finalPayer: "recipient" | "sender";
-        reason: string;
-      }
-    >
-  >({});
   const [debtMode, setDebtMode] = useState<"none" | "full" | "partial">(
     "none",
   );
@@ -26014,40 +26566,6 @@ function CourierAccountScreen({
     return lang === "ar" ? "شهري" : "Monthly";
   }
 
-  function payerDecision(item: {
-    shipment: Shipment;
-    event: NonNullable<Shipment["statusHistory"]>[number];
-  }) {
-    return (
-      payerDecisions[item.event.id] ?? {
-        finalPayer:
-          item.shipment.finalShippingPayer ?? item.shipment.shippingPayer,
-        reason: item.shipment.finalShippingPayerReason ?? "",
-      }
-    );
-  }
-
-  function updatePayerDecision(
-    eventId: string,
-    update: Partial<{
-      finalPayer: "recipient" | "sender";
-      reason: string;
-    }>,
-    fallbackPayer: "recipient" | "sender",
-  ) {
-    setPayerDecisions((current) => ({
-      ...current,
-      [eventId]: {
-        finalPayer:
-          update.finalPayer ??
-          current[eventId]?.finalPayer ??
-          fallbackPayer,
-        reason: update.reason ?? current[eventId]?.reason ?? "",
-      },
-    }));
-    setError("");
-  }
-
   const totalCollected = pendingItems.reduce(
     (sum, item) => sum + (item.event.collectedAmount ?? 0),
     0,
@@ -26143,7 +26661,6 @@ function CourierAccountScreen({
     setAdjustmentReason("");
     setDebtMode("none");
     setPartialDebtInput("");
-    setPayerDecisions({});
     setError("");
   }
 
@@ -26178,21 +26695,6 @@ function CourierAccountScreen({
         lang === "ar"
           ? `لا يمكن إغلاق الحساب: توجد ${commissionGaps.length} شحنة بلا عمولة محددة. راجع قائمة عمولات المندوب أولًا.`
           : `The account cannot be closed: ${commissionGaps.length} shipment(s) have no defined courier commission. Review the courier commission list first.`,
-      );
-      return;
-    }
-    const payerDecisionWithoutReason = pendingItems.find((item) => {
-      const decision = payerDecision(item);
-      return (
-        decision.finalPayer !== item.shipment.shippingPayer &&
-        !decision.reason.trim()
-      );
-    });
-    if (payerDecisionWithoutReason) {
-      setError(
-        lang === "ar"
-          ? `سبب تغيير متحمّل الشحن إجباري للشحنة ${payerDecisionWithoutReason.shipment.id}.`
-          : `A reason is required for changing the shipping payer on ${payerDecisionWithoutReason.shipment.id}.`,
       );
       return;
     }
@@ -26249,14 +26751,6 @@ function CourierAccountScreen({
     const pendingIds = new Set(pendingItems.map((item) => item.event.id));
     onShipmentsChange(
       shipmentRecords.map((shipment) => {
-        const pendingShipmentItem = pendingItems.find(
-          (item) =>
-            item.shipment.id === shipment.id &&
-            pendingIds.has(item.event.id),
-        );
-        const decision = pendingShipmentItem
-          ? payerDecision(pendingShipmentItem)
-          : null;
         const receivedReturn = pendingItems.find(
           (item) =>
             item.shipment.id === shipment.id &&
@@ -26282,24 +26776,6 @@ function CourierAccountScreen({
 
         return {
           ...shipment,
-          ...(decision
-            ? {
-                finalShippingPayer: decision.finalPayer,
-                finalShippingPayerSource:
-                  decision.finalPayer === shipment.shippingPayer
-                    ? ("registered" as const)
-                    : ("accountant_correction" as const),
-                finalShippingPayerReason:
-                  decision.finalPayer === shipment.shippingPayer
-                    ? ""
-                    : decision.reason.trim(),
-                finalShippingPayerBy: {
-                  ar: "محاسب التشغيل",
-                  en: "Operations accountant",
-                },
-                finalShippingPayerAt: timestamp,
-              }
-            : {}),
           ...(receivedReturn
             ? {
                 custody: {
@@ -26425,18 +26901,16 @@ function CourierAccountScreen({
         actualCash,
         difference: actualCash - expectedCash,
         adjustmentReason: adjustmentReason.trim(),
-        shippingPayerDecisions: pendingItems.map((item) => {
-          const decision = payerDecision(item);
-          return {
-            shipmentId: item.shipment.id,
-            registeredPayer: item.shipment.shippingPayer,
-            finalPayer: decision.finalPayer,
-            reason:
-              decision.finalPayer === item.shipment.shippingPayer
-                ? ""
-                : decision.reason.trim(),
-          };
-        }),
+        shippingPayerDecisions: pendingItems.map((item) => ({
+          shipmentId: item.shipment.id,
+          registeredPayer: item.shipment.shippingPayer,
+          finalPayer: shipmentFinalShippingPayer(item.shipment),
+          reason:
+            shipmentFinalShippingPayer(item.shipment) ===
+            item.shipment.shippingPayer
+              ? ""
+              : item.shipment.finalShippingPayerReason ?? "",
+        })),
         timestamp,
       },
     ]);
@@ -26673,159 +27147,6 @@ function CourierAccountScreen({
                 <Settings2 size={15} />
                 {lang === "ar" ? "فتح قوائم العمولات" : "Open commission lists"}
               </button>
-            </section>
-          )}
-
-          {pendingItems.length > 0 && (
-            <section className="courier-payer-review">
-              <div className="courier-payer-review__heading">
-                <span>
-                  <LockKeyhole size={18} />
-                  <span>
-                    <strong>
-                      {lang === "ar"
-                        ? "اعتماد محاسب التشغيل لمتحمّل الشحن"
-                        : "Operations accounting shipping-payer approval"}
-                    </strong>
-                    <small>
-                      {lang === "ar"
-                        ? "المسجل تعليمات تحصيل، والاختيار هنا هو الحكم المالي النهائي لحساب الراسل."
-                        : "Registration stores collection instructions; this approval is final for sender accounting."}
-                    </small>
-                  </span>
-                </span>
-                <em>
-                  {pendingItems.length}{" "}
-                  {lang === "ar" ? "قرار إلزامي" : "mandatory decisions"}
-                </em>
-              </div>
-              <div className="courier-payer-review__list">
-                {pendingItems.map((item) => {
-                  const decision = payerDecision(item);
-                  const changed =
-                    decision.finalPayer !== item.shipment.shippingPayer;
-                  const finalRecipientShipping =
-                    decision.finalPayer === "recipient"
-                      ? shipmentRecipientShippingRate(item.shipment)
-                      : 0;
-                  const finalSenderDue =
-                    item.shipment.amount +
-                    finalRecipientShipping -
-                    item.shipment.shippingFee -
-                    (item.shipment.customFinancialSnapshot?.senderDeductions ??
-                      0);
-                  return (
-                    <article
-                      className={changed ? "has-change" : ""}
-                      key={item.event.id}
-                    >
-                      <div className="courier-payer-review__identity">
-                        <span>
-                          <strong>{item.shipment.id}</strong>
-                          <small>
-                            {item.shipment.recipient[lang]} ·{" "}
-                            {item.shipment.reference ||
-                              (lang === "ar" ? "مرجع غير مسجل" : "No sender reference")}
-                          </small>
-                        </span>
-                        <span className="policy-scope-chip">
-                          {lang === "ar" ? "المسجل: " : "Registered: "}
-                          {item.shipment.shippingPayer === "recipient"
-                            ? lang === "ar"
-                              ? "المستلم"
-                              : "recipient"
-                            : lang === "ar"
-                              ? "الراسل"
-                              : "sender"}
-                        </span>
-                      </div>
-                      <div className="courier-payer-review__controls">
-                        <span>
-                          <button
-                            type="button"
-                            className={
-                              decision.finalPayer === "recipient"
-                                ? "is-active"
-                                : ""
-                            }
-                            onClick={() =>
-                              updatePayerDecision(
-                                item.event.id,
-                                { finalPayer: "recipient" },
-                                item.shipment.shippingPayer,
-                              )
-                            }
-                          >
-                            {lang === "ar" ? "المستلم" : "Recipient"}
-                          </button>
-                          <button
-                            type="button"
-                            className={
-                              decision.finalPayer === "sender"
-                                ? "is-active"
-                                : ""
-                            }
-                            onClick={() =>
-                              updatePayerDecision(
-                                item.event.id,
-                                { finalPayer: "sender" },
-                                item.shipment.shippingPayer,
-                              )
-                            }
-                          >
-                            {lang === "ar" ? "الراسل" : "Sender"}
-                          </button>
-                        </span>
-                        <dl>
-                          <div>
-                            <dt>{lang === "ar" ? "المحصل فعليًا" : "Actually collected"}</dt>
-                            <dd>{money.format(item.event.collectedAmount ?? 0)}</dd>
-                          </div>
-                          <div>
-                            <dt>{lang === "ar" ? "شحن المستلم المعتمد" : "Approved recipient shipping"}</dt>
-                            <dd>{money.format(finalRecipientShipping)}</dd>
-                          </div>
-                          <div>
-                            <dt>{lang === "ar" ? "مستحق الراسل" : "Sender due"}</dt>
-                            <dd>{money.format(finalSenderDue)}</dd>
-                          </div>
-                        </dl>
-                      </div>
-                      {changed && (
-                        <label className="courier-payer-review__reason">
-                          <span>
-                            <CircleAlert size={14} />
-                            {lang === "ar"
-                              ? "سبب الاختلاف عن التسجيل"
-                              : "Reason for differing from registration"}
-                            <em>*</em>
-                          </span>
-                          <input
-                            value={decision.reason}
-                            onChange={(event) =>
-                              updatePayerDecision(
-                                item.event.id,
-                                { reason: event.target.value },
-                                item.shipment.shippingPayer,
-                              )
-                            }
-                            placeholder={
-                              lang === "ar"
-                                ? "مثال: الاتفاق الصحيح أن الشحن على الراسل"
-                                : "e.g. Contract confirms sender pays shipping"
-                            }
-                          />
-                          <small>
-                            {lang === "ar"
-                              ? "سيظهر هذا التغيير في التنبيهات وسجل الشحنة."
-                              : "This change will appear in alerts and shipment history."}
-                          </small>
-                        </label>
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
             </section>
           )}
 
@@ -35143,7 +35464,7 @@ export default function Home() {
         }
         if (Array.isArray(parsed.priceLists)) setSharedPriceLists(parsed.priceLists);
         if (Array.isArray(parsed.courierPlans)) {
-          setSharedCourierPlans(parsed.courierPlans);
+          setSharedCourierPlans(parsed.courierPlans.map(normalizeCourierRatePlan));
         }
         if (Array.isArray(parsed.shipmentFields)) {
           const normalizedSavedFields =
