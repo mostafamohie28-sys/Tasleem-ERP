@@ -71,6 +71,7 @@ type Screen =
   | "login"
   | "shipments"
   | "shipment360"
+  | "services"
   | "statuses"
   | "areas"
   | "priceLists"
@@ -342,6 +343,7 @@ type CourierCommissionSnapshot = {
 
 type Shipment = {
   id: string;
+  serviceTypeId?: string;
   recipientProfileId?: string;
   reference: string;
   recipient: Localized;
@@ -387,6 +389,7 @@ type Shipment = {
     reason: string;
     note: string;
     nextDate: string;
+    customValues?: Record<string, string>;
     timestamp: Localized;
     settlementStatus?: "pending" | "settled";
     settlementId?: string;
@@ -1642,9 +1645,251 @@ type StatusPolicy = {
   appearsInPricing: boolean;
   appearsInCourierRates: boolean;
   requiredFields: Localized[];
+  customInputFields?: {
+    id: string;
+    label: Localized;
+    type: "text" | "number" | "date" | "select" | "barcode";
+    required: boolean;
+    options: Localized[];
+  }[];
+  serviceTypeIds?: string[];
+  operationalCategory?: "success" | "follow_up" | "failure" | "return" | "neutral";
+  shippingPayerDecision?: "hidden" | "registered" | "confirm" | "allow_override";
+  operationalActions?: (
+    | "end_assignment"
+    | "keep_assignment"
+    | "follow_up_queue"
+    | "create_return"
+    | "deliver_to_recipient"
+    | "return_to_sender"
+  )[];
+  requiresApproval?: boolean;
+  senderVisible?: boolean;
+  recipientVisible?: boolean;
   usage: number;
   version: number;
 };
+
+type ShipmentServiceType = {
+  id: string;
+  code: string;
+  name: Localized;
+  description: Localized;
+  state: "published" | "draft" | "archived";
+  movement: "outbound" | "inbound" | "exchange" | "money_only";
+  defaultPieces: number;
+  allowsPartial: boolean;
+  requiresConfirmation: boolean;
+  hasCollection: boolean;
+  hasShippingFee: boolean;
+  hasPriceDifference: boolean;
+  createsReturnParcel: boolean;
+  requiredFieldCodes: string[];
+  allowedStatusIds: string[];
+  senderIds: string[];
+  isCompanyDefault?: boolean;
+  defaultForSenderIds?: string[];
+  version: number;
+};
+
+const shipmentServiceTypesData: ShipmentServiceType[] = [
+  {
+    id: "service-standard",
+    code: "STANDARD_DELIVERY",
+    name: { ar: "توصيل عادي", en: "Standard delivery" },
+    description: {
+      ar: "طرد يخرج من الشركة إلى المستلم مع تحصيل اختياري.",
+      en: "An outbound parcel delivered to the recipient with optional collection.",
+    },
+    state: "published",
+    movement: "outbound",
+    defaultPieces: 1,
+    allowsPartial: true,
+    requiresConfirmation: false,
+    hasCollection: true,
+    hasShippingFee: true,
+    hasPriceDifference: true,
+    createsReturnParcel: false,
+    requiredFieldCodes: ["RECIPIENT_PHONE", "RECIPIENT_NAME", "DELIVERY_ADDRESS"],
+    allowedStatusIds: [
+      "status-delivered",
+      "status-partial",
+      "status-deferred",
+      "status-cancelled",
+      "status-no-answer",
+      "status-address-review",
+    ],
+    senderIds: [],
+    isCompanyDefault: true,
+    defaultForSenderIds: [],
+    version: 1,
+  },
+  {
+    id: "service-exchange",
+    code: "EXCHANGE",
+    name: { ar: "استبدال", en: "Exchange" },
+    description: {
+      ar: "تسليم طرد جديد واستلام طرد مرتجع من المستلم في نفس الزيارة.",
+      en: "Deliver a new parcel and receive a return parcel in the same visit.",
+    },
+    state: "published",
+    movement: "exchange",
+    defaultPieces: 1,
+    allowsPartial: false,
+    requiresConfirmation: true,
+    hasCollection: true,
+    hasShippingFee: true,
+    hasPriceDifference: true,
+    createsReturnParcel: true,
+    requiredFieldCodes: [
+      "RECIPIENT_PHONE",
+      "RECIPIENT_NAME",
+      "DELIVERY_ADDRESS",
+      "CONTENTS",
+    ],
+    allowedStatusIds: [
+      "status-exchanged",
+      "status-deferred",
+      "status-cancelled",
+      "status-no-answer",
+    ],
+    senderIds: [],
+    defaultForSenderIds: [],
+    version: 1,
+  },
+  {
+    id: "service-return-pickup",
+    code: "RETURN_PICKUP",
+    name: { ar: "استلام مرتجع", en: "Return pickup" },
+    description: {
+      ar: "استلام طرد من المستلم وإعادته إلى الراسل دون تسليم طرد جديد.",
+      en: "Collect a parcel from the recipient and return it to the sender.",
+    },
+    state: "published",
+    movement: "inbound",
+    defaultPieces: 1,
+    allowsPartial: true,
+    requiresConfirmation: false,
+    hasCollection: false,
+    hasShippingFee: true,
+    hasPriceDifference: false,
+    createsReturnParcel: true,
+    requiredFieldCodes: ["RECIPIENT_PHONE", "RECIPIENT_NAME", "DELIVERY_ADDRESS"],
+    allowedStatusIds: [
+      "status-return-collected",
+      "status-deferred",
+      "status-no-answer",
+      "status-cancelled",
+    ],
+    senderIds: [],
+    defaultForSenderIds: [],
+    version: 1,
+  },
+  {
+    id: "service-cash-collection",
+    code: "CASH_COLLECTION",
+    name: { ar: "تحصيل فقط", en: "Cash collection only" },
+    description: {
+      ar: "زيارة لتحصيل مبلغ فقط دون تسليم أو استلام طرد.",
+      en: "Collect money without delivering or receiving a parcel.",
+    },
+    state: "draft",
+    movement: "money_only",
+    defaultPieces: 0,
+    allowsPartial: false,
+    requiresConfirmation: true,
+    hasCollection: true,
+    hasShippingFee: true,
+    hasPriceDifference: false,
+    createsReturnParcel: false,
+    requiredFieldCodes: ["RECIPIENT_PHONE", "RECIPIENT_NAME", "DELIVERY_ADDRESS"],
+    allowedStatusIds: ["status-delivered", "status-deferred", "status-no-answer"],
+    senderIds: [],
+    defaultForSenderIds: [],
+    version: 1,
+  },
+];
+
+function normalizeShipmentServiceType(
+  service: ShipmentServiceType,
+): ShipmentServiceType {
+  return {
+    ...service,
+    requiredFieldCodes: service.requiredFieldCodes ?? [],
+    allowedStatusIds: service.allowedStatusIds ?? [],
+    senderIds: service.senderIds ?? [],
+    defaultForSenderIds: service.defaultForSenderIds ?? [],
+    isCompanyDefault: service.isCompanyDefault ?? false,
+    version: service.version ?? 1,
+  };
+}
+
+function normalizeStatusPolicy(status: StatusPolicy): StatusPolicy {
+  const financial = status.financialEffect.en;
+  const isDelivered = status.code === "DELIVERED";
+  const isPartial = status.code === "PARTIAL";
+  const isDeferred = status.code === "DEFERRED";
+  const isCancelled = status.code === "CANCELLED";
+  return {
+    ...status,
+    serviceTypeIds: status.serviceTypeIds ?? [],
+    customInputFields: (status.customInputFields ?? []).map((field) => ({
+      ...field,
+      options: field.options ?? [],
+    })),
+    operationalCategory:
+      status.operationalCategory ??
+      (isDelivered
+        ? "success"
+        : isDeferred
+          ? "follow_up"
+          : isCancelled
+            ? "failure"
+            : isPartial
+              ? "return"
+              : "neutral"),
+    shippingPayerDecision:
+      status.shippingPayerDecision ??
+      (financial === "Money only" || financial === "Money and return"
+        ? "allow_override"
+        : "hidden"),
+    operationalActions:
+      status.operationalActions ??
+      (isDelivered
+        ? ["end_assignment", "deliver_to_recipient"]
+        : isDeferred
+          ? ["end_assignment", "follow_up_queue"]
+          : isCancelled
+            ? ["end_assignment", "create_return", "return_to_sender"]
+            : isPartial
+              ? ["end_assignment", "create_return"]
+              : ["end_assignment"]),
+    requiresApproval: status.requiresApproval ?? false,
+    senderVisible:
+      status.senderVisible ??
+      status.visibility.some((item) => item.en === "Sender"),
+    recipientVisible: status.recipientVisible ?? false,
+  };
+}
+
+function statusUsesShippingPayer(status: StatusPolicy | null) {
+  if (!status) return false;
+  return normalizeStatusPolicy(status).shippingPayerDecision !== "hidden";
+}
+
+function statusAllowedForService(
+  status: StatusPolicy,
+  service: ShipmentServiceType | undefined,
+) {
+  if (!service) return !(status.serviceTypeIds ?? []).length;
+  const statusAllows =
+    !(status.serviceTypeIds ?? []).length ||
+    (status.serviceTypeIds ?? []).includes(service.id);
+  const serviceAllows =
+    !service.allowedStatusIds.length ||
+    service.allowedStatusIds.includes(status.id);
+  return statusAllows && serviceAllows;
+}
 
 const statusPolicies: StatusPolicy[] = [
   {
@@ -1712,7 +1957,7 @@ const statusPolicies: StatusPolicy[] = [
     ],
     assignmentEffect: { ar: "إنهاء + قائمة متابعة", en: "End + follow-up queue" },
     pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
-    financialEffect: { ar: "مبلغ فقط", en: "Money only" },
+    financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
     appearsInAssignment: false,
     appearsInPricing: true,
     appearsInCourierRates: true,
@@ -1720,6 +1965,9 @@ const statusPolicies: StatusPolicy[] = [
       { ar: "الموعد الجديد", en: "New date" },
       { ar: "سبب الحالة", en: "Status reason" },
     ],
+    operationalCategory: "follow_up",
+    shippingPayerDecision: "hidden",
+    operationalActions: ["end_assignment", "follow_up_queue"],
     usage: 486,
     version: 5,
   },
@@ -1765,6 +2013,9 @@ const statusPolicies: StatusPolicy[] = [
     appearsInPricing: false,
     appearsInCourierRates: false,
     requiredFields: [{ ar: "ملاحظة", en: "Note" }],
+    operationalCategory: "follow_up",
+    shippingPayerDecision: "hidden",
+    operationalActions: ["end_assignment", "follow_up_queue"],
     usage: 671,
     version: 2,
   },
@@ -1792,12 +2043,80 @@ const statusPolicies: StatusPolicy[] = [
     usage: 0,
     version: 1,
   },
+  {
+    id: "status-exchanged",
+    name: { ar: "تم الاستبدال", en: "Exchange completed" },
+    code: "EXCHANGE_COMPLETED",
+    color: "#0f766e",
+    state: "draft",
+    executors: { ar: "المندوب والعمليات", en: "Courier & operations" },
+    visibility: [
+      { ar: "العمليات", en: "Operations" },
+      { ar: "الراسل", en: "Sender" },
+      { ar: "المندوب", en: "Courier" },
+    ],
+    assignmentEffect: { ar: "إنهاء التكليف", en: "End assignment" },
+    pieceEffect: {
+      ar: "تسليم الجديد واستلام المرتجع",
+      en: "Deliver replacement and receive return",
+    },
+    financialEffect: { ar: "مبلغ ومرتجع", en: "Money and return" },
+    appearsInAssignment: false,
+    appearsInPricing: true,
+    appearsInCourierRates: true,
+    requiredFields: [
+      { ar: "المبلغ المحصل", en: "Collected amount" },
+      { ar: "عدد القطع المسلمة", en: "Delivered pieces" },
+      { ar: "ملاحظة", en: "Note" },
+    ],
+    serviceTypeIds: ["service-exchange"],
+    operationalCategory: "success",
+    shippingPayerDecision: "allow_override",
+    operationalActions: [
+      "end_assignment",
+      "deliver_to_recipient",
+      "create_return",
+    ],
+    senderVisible: true,
+    recipientVisible: false,
+    usage: 0,
+    version: 1,
+  },
+  {
+    id: "status-return-collected",
+    name: { ar: "تم استلام المرتجع", en: "Return collected" },
+    code: "RETURN_COLLECTED",
+    color: "#7c3aed",
+    state: "draft",
+    executors: { ar: "المندوب والعمليات", en: "Courier & operations" },
+    visibility: [
+      { ar: "العمليات", en: "Operations" },
+      { ar: "الراسل", en: "Sender" },
+      { ar: "المندوب", en: "Courier" },
+    ],
+    assignmentEffect: { ar: "إنهاء التكليف", en: "End assignment" },
+    pieceEffect: { ar: "كل القطع مرتجعة", en: "All pieces returned" },
+    financialEffect: { ar: "مرتجع فقط", en: "Return only" },
+    appearsInAssignment: false,
+    appearsInPricing: true,
+    appearsInCourierRates: true,
+    requiredFields: [{ ar: "ملاحظة", en: "Note" }],
+    serviceTypeIds: ["service-return-pickup"],
+    operationalCategory: "return",
+    shippingPayerDecision: "hidden",
+    operationalActions: ["end_assignment", "create_return", "return_to_sender"],
+    senderVisible: true,
+    recipientVisible: false,
+    usage: 0,
+    version: 1,
+  },
 ];
 
 const statusCopy = {
   ar: {
-    title: "حالات الشحنات",
-    subtitle: "أنشئ أي حالة وحدد سياستها التشغيلية والمالية بدون تعديل الأكواد.",
+    title: "حالات الشحنات والإجراءات",
+    subtitle:
+      "أنشئ أي حالة وحدد أين تظهر وما تطلبه وما تنفذه تشغيليًا وماليًا بدون تعديل الأكواد.",
     add: "إضافة حالة",
     active: "حالات منشورة",
     financial: "لها أثر مالي",
@@ -1825,7 +2144,7 @@ const statusCopy = {
     noCourierRates: "خارج عمولات المناديب",
     noResults: "لا توجد حالات تطابق البحث الحالي.",
     controlNote:
-      "لا توجد حالة مفروضة داخل النظام؛ كل حالة بالأسفل هي سياسة قابلة للتعديل أو التعطيل حسب طريقة عمل شركتك.",
+      "لا توجد حالة أو نتيجة مفروضة داخل النظام؛ اربط الحالة بنوع الشحنة ثم اختر حقولها وإجراءاتها وظهورها حسب واقع شركتك.",
     editorTitle: "سياسة الحالة",
     newTitle: "إضافة حالة جديدة",
     basics: "التعريف الأساسي",
@@ -1880,8 +2199,9 @@ const statusCopy = {
     demo: "تغييرات تجريبية داخل نموذج التصميم فقط",
   },
   en: {
-    title: "Shipment statuses",
-    subtitle: "Create any status and define its operational and financial policy without code changes.",
+    title: "Shipment statuses & actions",
+    subtitle:
+      "Create any status and control where it appears, what it asks for, and what it executes without code changes.",
     add: "Add status",
     active: "Published statuses",
     financial: "Financial statuses",
@@ -1909,7 +2229,7 @@ const statusCopy = {
     noCourierRates: "Outside courier commissions",
     noResults: "No statuses match the current search.",
     controlNote:
-      "The system imposes no built-in status; every status below is a policy you can edit or disable to match your company.",
+      "The system imposes no status or outcome: link it to shipment types, then choose its inputs, actions, and visibility to match reality.",
     editorTitle: "Status policy",
     newTitle: "Add a new status",
     basics: "Basic definition",
@@ -5216,7 +5536,18 @@ function Sidebar({
       label: t.policies,
       items: [
         {
-          label: lang === "ar" ? "حالات الشحنات" : "Shipment statuses",
+          label:
+            lang === "ar"
+              ? "أنواع الشحنات والخدمات"
+              : "Shipment types & services",
+          icon: Boxes,
+          screen: "services" as const,
+        },
+        {
+          label:
+            lang === "ar"
+              ? "حالات الشحنات والإجراءات"
+              : "Statuses & actions",
           icon: SlidersHorizontal,
           screen: "statuses" as const,
         },
@@ -5807,21 +6138,442 @@ function FilterDrawer({
   );
 }
 
+function ShipmentServicesScreen({
+  lang,
+  theme,
+  services,
+  statuses,
+  fields,
+  senders,
+  onServicesChange,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  services: ShipmentServiceType[];
+  statuses: StatusPolicy[];
+  fields: ShipmentFieldPolicy[];
+  senders: SenderRecord[];
+  onServicesChange: (
+    updater: (current: ShipmentServiceType[]) => ShipmentServiceType[],
+  ) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const t = copy[lang];
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState(
+    services.find((service) => service.state === "published")?.id ??
+      services[0]?.id ??
+      "",
+  );
+  const selected =
+    services.find((service) => service.id === selectedId) ?? services[0];
+  const [draft, setDraft] = useState<ShipmentServiceType | null>(
+    selected ? { ...selected } : null,
+  );
+  const [toast, setToast] = useState("");
+
+  useEffect(() => {
+    const next = services.find((service) => service.id === selectedId);
+    if (next) setDraft({ ...next });
+  }, [selectedId, services]);
+
+  const movementLabels: Record<ShipmentServiceType["movement"], Localized> = {
+    outbound: { ar: "تسليم للمستلم", en: "Outbound delivery" },
+    inbound: { ar: "استلام من المستلم", en: "Inbound pickup" },
+    exchange: { ar: "تسليم + مرتجع", en: "Delivery + return" },
+    money_only: { ar: "تحصيل مالي فقط", en: "Money collection only" },
+  };
+
+  function updateDraft<K extends keyof ShipmentServiceType>(
+    key: K,
+    value: ShipmentServiceType[K],
+  ) {
+    setDraft((current) => (current ? { ...current, [key]: value } : current));
+  }
+
+  function addService() {
+    const service: ShipmentServiceType = {
+      id: `service-${Date.now()}`,
+      code: "NEW_SERVICE",
+      name: { ar: "خدمة جديدة", en: "New service" },
+      description: {
+        ar: "عرّف الحركة والحقول والحالات المسموحة لهذه الخدمة.",
+        en: "Define the movement, fields, and allowed statuses for this service.",
+      },
+      state: "draft",
+      movement: "outbound",
+      defaultPieces: 1,
+      allowsPartial: false,
+      requiresConfirmation: false,
+      hasCollection: true,
+      hasShippingFee: true,
+      hasPriceDifference: false,
+      createsReturnParcel: false,
+      requiredFieldCodes: ["RECIPIENT_PHONE", "RECIPIENT_NAME"],
+      allowedStatusIds: [],
+      senderIds: [],
+      isCompanyDefault: false,
+      defaultForSenderIds: [],
+      version: 1,
+    };
+    onServicesChange((current) => [service, ...current]);
+    setSelectedId(service.id);
+    setDraft(service);
+  }
+
+  function saveService() {
+    if (!draft) return;
+    onServicesChange((current) =>
+      current.map((service) =>
+        service.id === draft.id
+          ? { ...draft, version: service.version + 1 }
+          : {
+              ...service,
+              isCompanyDefault: draft.isCompanyDefault
+                ? false
+                : service.isCompanyDefault,
+              defaultForSenderIds: (service.defaultForSenderIds ?? []).filter(
+                (senderId) =>
+                  !(draft.defaultForSenderIds ?? []).includes(senderId),
+              ),
+            },
+      ),
+    );
+    setToast(
+      lang === "ar"
+        ? "تم حفظ نوع الشحنة وإصدار نسخة جديدة."
+        : "Shipment type saved as a new version.",
+    );
+    window.setTimeout(() => setToast(""), 2400);
+  }
+
+  function toggleList(
+    key:
+      | "requiredFieldCodes"
+      | "allowedStatusIds"
+      | "senderIds"
+      | "defaultForSenderIds",
+    value: string,
+  ) {
+    if (!draft) return;
+    const current = draft[key] ?? [];
+    updateDraft(
+      key,
+      (current.includes(value)
+        ? current.filter((item) => item !== value)
+        : [...current, value]) as ShipmentServiceType[typeof key],
+    );
+  }
+
+  return (
+    <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
+      <Sidebar
+        lang={lang}
+        activeScreen="services"
+        collapsed={collapsed}
+        mobileOpen={mobileOpen}
+        onCollapse={() => setCollapsed((value) => !value)}
+        onMobileClose={() => setMobileOpen(false)}
+        onNavigate={onNavigate}
+        onLogout={onLogout}
+      />
+      <div className="erp-main">
+        <header className="topbar">
+          <div className="topbar__workspace">
+            <button
+              className="mobile-menu square-button"
+              type="button"
+              onClick={() => setMobileOpen(true)}
+              aria-label={t.mobileNav}
+            >
+              <Menu size={20} />
+            </button>
+            <span className="workspace-icon"><Boxes size={20} /></span>
+            <span><strong>{t.workspace}</strong><small>{t.branch}</small></span>
+          </div>
+          <label className="command-search">
+            <Search size={17} />
+            <input placeholder={t.globalSearch} />
+            <kbd>⌘ K</kbd>
+          </label>
+          <div className="topbar__actions">
+            <LanguageThemeControls
+              lang={lang}
+              theme={theme}
+              onLang={onLang}
+              onTheme={onTheme}
+              subtle
+            />
+            <button className="square-button notification-button" type="button">
+              <Bell size={19} /><i />
+            </button>
+          </div>
+        </header>
+        <main className="page-content service-builder-page">
+          <div className="welcome-row page-heading-row">
+            <div>
+              <div className="page-title-line">
+                <h1>{lang === "ar" ? "أنواع الشحنات والخدمات" : "Shipment types & services"}</h1>
+                <span className="demo-chip">
+                  {lang === "ar" ? "مركز قيادة" : "Control center"}
+                </span>
+              </div>
+              <p>
+                {lang === "ar"
+                  ? "عرّف معنى الشحنة من لحظة التسجيل: توصيل، استبدال، مرتجع أو أي خدمة تنشئها الشركة."
+                  : "Define what a shipment means at intake: delivery, exchange, return, or any company-defined service."}
+              </p>
+            </div>
+            <button className="primary-button" type="button" onClick={addService}>
+              <Plus size={18} />
+              {lang === "ar" ? "إضافة نوع شحنة" : "Add shipment type"}
+            </button>
+          </div>
+
+          <section className="service-summary-grid">
+            <article><Boxes size={19} /><span><small>{lang === "ar" ? "كل الخدمات" : "All services"}</small><strong>{services.length}</strong></span></article>
+            <article><PackageCheck size={19} /><span><small>{lang === "ar" ? "منشورة" : "Published"}</small><strong>{services.filter((item) => item.state === "published").length}</strong></span></article>
+            <article><ArrowLeftRight size={19} /><span><small>{lang === "ar" ? "تُنشئ مرتجعًا" : "Create returns"}</small><strong>{services.filter((item) => item.createsReturnParcel).length}</strong></span></article>
+            <article><HandCoins size={19} /><span><small>{lang === "ar" ? "بها تحصيل" : "With collection"}</small><strong>{services.filter((item) => item.hasCollection).length}</strong></span></article>
+          </section>
+
+          <div className="service-builder-layout">
+            <section className="service-catalog">
+              <div className="service-catalog__head">
+                <strong>{lang === "ar" ? "الخدمات المسجلة" : "Configured services"}</strong>
+                <small>{lang === "ar" ? "اختر خدمة لمراجعة حقيقتها التشغيلية" : "Choose a service to review its operational truth"}</small>
+              </div>
+              {services.map((service) => (
+                <button
+                  type="button"
+                  key={service.id}
+                  className={selectedId === service.id ? "active" : ""}
+                  onClick={() => setSelectedId(service.id)}
+                >
+                  <span className="service-catalog__icon">
+                    {service.movement === "exchange" ? <ArrowLeftRight size={18} /> : <PackageCheck size={18} />}
+                  </span>
+                  <span>
+                    <strong>{service.name[lang]}</strong>
+                    <small>{movementLabels[service.movement][lang]} · v{service.version}</small>
+                  </span>
+                  <em className={`service-state service-state--${service.state}`}>
+                    {service.state === "published"
+                      ? lang === "ar" ? "منشورة" : "Published"
+                      : service.state === "draft"
+                        ? lang === "ar" ? "مسودة" : "Draft"
+                        : lang === "ar" ? "مؤرشفة" : "Archived"}
+                  </em>
+                </button>
+              ))}
+            </section>
+
+            {draft && (
+              <section className="service-editor-card">
+                <div className="service-editor-card__head">
+                  <span>
+                    <strong>{draft.name[lang]}</strong>
+                    <small dir="ltr">{draft.code} · v{draft.version}</small>
+                  </span>
+                  <button className="primary-button" type="button" onClick={saveService}>
+                    <Save size={17} />
+                    {lang === "ar" ? "حفظ وإصدار نسخة" : "Save new version"}
+                  </button>
+                </div>
+
+                <div className="policy-form-grid">
+                  <label className="field">
+                    <span>{lang === "ar" ? "الاسم بالعربية" : "Arabic name"}</span>
+                    <span className="field__control">
+                      <input value={draft.name.ar} onChange={(event) => updateDraft("name", { ...draft.name, ar: event.target.value })} />
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span>{lang === "ar" ? "الاسم بالإنجليزية" : "English name"}</span>
+                    <span className="field__control">
+                      <input dir="ltr" value={draft.name.en} onChange={(event) => updateDraft("name", { ...draft.name, en: event.target.value })} />
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span>{lang === "ar" ? "كود الخدمة" : "Service code"}</span>
+                    <span className="field__control">
+                      <input dir="ltr" value={draft.code} onChange={(event) => updateDraft("code", event.target.value.toUpperCase().replace(/\s+/g, "_"))} />
+                    </span>
+                  </label>
+                  <label className="select-field">
+                    <span>{lang === "ar" ? "الحركة الحقيقية" : "Real movement"}</span>
+                    <span className="select-wrap">
+                      <select value={draft.movement} onChange={(event) => updateDraft("movement", event.target.value as ShipmentServiceType["movement"])}>
+                        {Object.entries(movementLabels).map(([value, label]) => <option key={value} value={value}>{label[lang]}</option>)}
+                      </select>
+                      <ChevronDown size={16} />
+                    </span>
+                  </label>
+                  <label className="select-field">
+                    <span>{lang === "ar" ? "حالة الاستخدام" : "Usage state"}</span>
+                    <span className="select-wrap">
+                      <select value={draft.state} onChange={(event) => updateDraft("state", event.target.value as ShipmentServiceType["state"])}>
+                        <option value="published">{lang === "ar" ? "منشورة" : "Published"}</option>
+                        <option value="draft">{lang === "ar" ? "مسودة للاختبار" : "Test draft"}</option>
+                        <option value="archived">{lang === "ar" ? "مؤرشفة" : "Archived"}</option>
+                      </select>
+                      <ChevronDown size={16} />
+                    </span>
+                  </label>
+                  <label className="field">
+                    <span>{lang === "ar" ? "عدد القطع الافتراضي" : "Default pieces"}</span>
+                    <span className="field__control">
+                      <input type="number" min="0" value={draft.defaultPieces} onChange={(event) => updateDraft("defaultPieces", Math.max(0, Number(event.target.value) || 0))} />
+                    </span>
+                  </label>
+                </div>
+
+                <label className="service-description">
+                  <span>{lang === "ar" ? "وصف الخدمة للموظف" : "Employee-facing description"}</span>
+                  <textarea value={draft.description[lang]} onChange={(event) => updateDraft("description", { ...draft.description, [lang]: event.target.value })} />
+                </label>
+
+                <div className="service-rule-grid">
+                  {([
+                    ["allowsPartial", "تسمح بالتسليم الجزئي", "Allow partial"],
+                    ["requiresConfirmation", "تحتاج تأكيد المستلم", "Require confirmation"],
+                    ["hasCollection", "لها تحصيل مالي", "Has collection"],
+                    ["hasShippingFee", "لها مصاريف شحن", "Has shipping fee"],
+                    ["hasPriceDifference", "تسمح بفرق شحن للراسل", "Allow sender price difference"],
+                    ["createsReturnParcel", "تُنشئ مسار مرتجع", "Create return route"],
+                  ] as const).map(([key, ar, en]) => (
+                    <button
+                      type="button"
+                      key={key}
+                      className={draft[key] ? "active" : ""}
+                      onClick={() => updateDraft(key, !draft[key])}
+                    >
+                      <span>{draft[key] ? <Check size={15} /> : <Plus size={15} />}</span>
+                      {lang === "ar" ? ar : en}
+                    </button>
+                  ))}
+                </div>
+
+                <button
+                  className="policy-switch-row"
+                  type="button"
+                  role="switch"
+                  aria-checked={draft.isCompanyDefault ?? false}
+                  onClick={() => updateDraft("isCompanyDefault", !(draft.isCompanyDefault ?? false))}
+                >
+                  <span>
+                    <strong>{lang === "ar" ? "الخدمة الافتراضية للشركة" : "Company default service"}</strong>
+                    <small>{lang === "ar" ? "تظهر محددة تلقائيًا عند تسجيل شحنة، ويمكن للموظف تغييرها." : "Preselected at intake and can still be changed by the employee."}</small>
+                  </span>
+                  <i className={draft.isCompanyDefault ? "switch switch--on" : "switch"}><b /></i>
+                </button>
+
+                <div className="service-relations-grid">
+                  <section>
+                    <div><strong>{lang === "ar" ? "الحقول الإلزامية للخدمة" : "Required service fields"}</strong><small>{draft.requiredFieldCodes.length}</small></div>
+                    <div className="service-check-list">
+                      {fields.filter((field) => field.mode !== "hidden").map((field) => (
+                        <label key={field.code}>
+                          <input type="checkbox" checked={draft.requiredFieldCodes.includes(field.code)} onChange={() => toggleList("requiredFieldCodes", field.code)} />
+                          <span><Check size={12} /></span>{field.name[lang]}
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+                  <section>
+                    <div><strong>{lang === "ar" ? "الحالات المسموحة لهذه الخدمة" : "Allowed statuses"}</strong><small>{draft.allowedStatusIds.length}</small></div>
+                    <div className="service-check-list">
+                      {statuses.map((status) => (
+                        <label key={status.id}>
+                          <input type="checkbox" checked={draft.allowedStatusIds.includes(status.id)} onChange={() => toggleList("allowedStatusIds", status.id)} />
+                          <span><Check size={12} /></span>{status.name[lang]}
+                        </label>
+                      ))}
+                    </div>
+                  </section>
+                </div>
+
+                <section className="service-sender-scope">
+                  <div>
+                    <strong>{lang === "ar" ? "نطاق الرسل" : "Sender scope"}</strong>
+                    <small>
+                      {draft.senderIds.length
+                        ? lang === "ar"
+                          ? `مخصصة لـ ${draft.senderIds.length} راسل`
+                          : `Limited to ${draft.senderIds.length} senders`
+                        : lang === "ar"
+                          ? "متاحة لكل الرسل — ويمكن تخصيصها دون التأثير على الباقي"
+                          : "Available to all senders — it can be limited without affecting others"}
+                    </small>
+                  </div>
+                  <div className="service-check-list service-check-list--senders">
+                    {senders.filter((sender) => sender.state === "active").map((sender) => (
+                      <label key={sender.id}>
+                        <input type="checkbox" checked={draft.senderIds.includes(sender.id)} onChange={() => toggleList("senderIds", sender.id)} />
+                        <span><Check size={12} /></span>{sender.name[lang]}
+                      </label>
+                    ))}
+                  </div>
+                  <div className="service-default-senders">
+                    <strong>{lang === "ar" ? "افتراضية لرسل محددين" : "Default for selected senders"}</strong>
+                    <small>{lang === "ar" ? "لا تمنع باقي الخدمات؛ تحدد فقط الاختيار الأول عند التسجيل." : "Does not block other services; it only controls the initial selection."}</small>
+                    <div className="service-check-list service-check-list--senders">
+                      {senders.filter((sender) => sender.state === "active").map((sender) => (
+                        <label key={sender.id}>
+                          <input type="checkbox" checked={(draft.defaultForSenderIds ?? []).includes(sender.id)} onChange={() => toggleList("defaultForSenderIds", sender.id)} />
+                          <span><Check size={12} /></span>{sender.name[lang]}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                <div className="service-impact-preview">
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>{lang === "ar" ? "معاينة قبل النشر" : "Pre-publish preview"}</strong>
+                    <small>
+                      {lang === "ar"
+                        ? `ستظهر في التسجيل، وتسمح بـ ${draft.allowedStatusIds.length} حالة، وتطلب ${draft.requiredFieldCodes.length} حقول. الشحنات القديمة تظل على نسختها المحفوظة.`
+                        : `Appears at intake, allows ${draft.allowedStatusIds.length} statuses, and requires ${draft.requiredFieldCodes.length} fields. Existing shipments keep their saved version.`}
+                    </small>
+                  </span>
+                </div>
+              </section>
+            )}
+          </div>
+        </main>
+      </div>
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
+    </div>
+  );
+}
+
 function StatusPolicyDrawer({
   policy,
   isNew,
   lang,
+  services,
   onClose,
   onSave,
 }: {
   policy: StatusPolicy;
   isNew: boolean;
   lang: Lang;
+  services: ShipmentServiceType[];
   onClose: () => void;
   onSave: (policy: StatusPolicy) => void;
 }) {
   const s = statusCopy[lang];
-  const [draft, setDraft] = useState(policy);
+  const [draft, setDraft] = useState(normalizeStatusPolicy(policy));
   const visibilityOptions: Localized[] = [
     { ar: "العمليات", en: "Operations" },
     { ar: "الراسل", en: "Sender" },
@@ -5844,6 +6596,21 @@ function StatusPolicyDrawer({
         [field]: exists
           ? current[field].filter((value) => value.en !== item.en)
           : [...current[field], item],
+      };
+    });
+  }
+
+  function toggleStringList(
+    field: "serviceTypeIds" | "operationalActions",
+    value: string,
+  ) {
+    setDraft((current) => {
+      const values = (current[field] ?? []) as string[];
+      return {
+        ...current,
+        [field]: values.includes(value)
+          ? values.filter((item) => item !== value)
+          : [...values, value],
       };
     });
   }
@@ -5972,6 +6739,41 @@ function StatusPolicyDrawer({
               </div>
             </section>
 
+            <section className="policy-form-section status-builder-section">
+              <div className="policy-form-section__title">
+                <span><Boxes size={16} /></span>
+                <div>
+                  <strong>
+                    {lang === "ar"
+                      ? "أنواع الشحنات التي تستخدم الحالة"
+                      : "Shipment types using this status"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "اترك الكل غير محدد لتكون الحالة متاحة لكل الأنواع."
+                      : "Leave all unchecked to make the status available to every type."}
+                  </small>
+                </div>
+              </div>
+              <div className="policy-choice-grid policy-choice-grid--services">
+                {services.map((service) => {
+                  const checked = (draft.serviceTypeIds ?? []).includes(service.id);
+                  return (
+                    <label className="policy-check" key={service.id}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleStringList("serviceTypeIds", service.id)}
+                      />
+                      <span><Check size={13} /></span>
+                      <b>{service.name[lang]}</b>
+                      <small>{service.code}</small>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+
             <section className="policy-form-section">
               <div className="policy-form-section__title">
                 <span><Eye size={16} /></span>
@@ -6035,6 +6837,84 @@ function StatusPolicyDrawer({
                   );
                 })}
               </div>
+            </section>
+
+            <section className="policy-form-section status-builder-section">
+              <div className="policy-form-section__title">
+                <span><GitBranch size={16} /></span>
+                <div>
+                  <strong>
+                    {lang === "ar" ? "الإجراءات التي تنفذها الحالة" : "Actions executed by this status"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "يمكن جمع أكثر من إجراء في حالة واحدة دون كتابة كود."
+                      : "Combine multiple actions in one status without writing code."}
+                  </small>
+                </div>
+              </div>
+              <label className="select-field">
+                <span>{lang === "ar" ? "التصنيف التشغيلي" : "Operational category"}</span>
+                <span className="select-wrap">
+                  <select
+                    value={draft.operationalCategory ?? "neutral"}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        operationalCategory: event.target.value as NonNullable<StatusPolicy["operationalCategory"]>,
+                      }))
+                    }
+                  >
+                    <option value="success">{lang === "ar" ? "نجاح" : "Success"}</option>
+                    <option value="follow_up">{lang === "ar" ? "متابعة" : "Follow-up"}</option>
+                    <option value="failure">{lang === "ar" ? "عدم تنفيذ" : "Failure"}</option>
+                    <option value="return">{lang === "ar" ? "مرتجع" : "Return"}</option>
+                    <option value="neutral">{lang === "ar" ? "محايدة" : "Neutral"}</option>
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
+              <div className="status-action-grid">
+                {([
+                  ["end_assignment", "إنهاء حيازة المندوب", "End courier custody"],
+                  ["keep_assignment", "إبقاء الشحنة مع المندوب", "Keep with courier"],
+                  ["follow_up_queue", "إرسال إلى قائمة المتابعة", "Send to follow-up"],
+                  ["deliver_to_recipient", "نقل الحيازة للمستلم", "Move custody to recipient"],
+                  ["create_return", "إنشاء مرتجع مطلوب", "Create required return"],
+                  ["return_to_sender", "توجيه المرتجع للراسل", "Route return to sender"],
+                ] as const).map(([value, ar, en]) => {
+                  const checked = (draft.operationalActions ?? []).includes(value);
+                  return (
+                    <button
+                      type="button"
+                      key={value}
+                      className={checked ? "active" : ""}
+                      onClick={() => toggleStringList("operationalActions", value)}
+                    >
+                      <span>{checked ? <Check size={14} /> : <Plus size={14} />}</span>
+                      {lang === "ar" ? ar : en}
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                className="policy-switch-row"
+                type="button"
+                role="switch"
+                aria-checked={draft.requiresApproval ?? false}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    requiresApproval: !(current.requiresApproval ?? false),
+                  }))
+                }
+              >
+                <span>
+                  <strong>{lang === "ar" ? "تحتاج اعتماد مسؤول" : "Requires supervisor approval"}</strong>
+                  <small>{lang === "ar" ? "تُسجل كطلب معلق ولا تنفذ آثارها حتى الاعتماد." : "Saved as pending and actions wait for approval."}</small>
+                </span>
+                <i className={draft.requiresApproval ? "switch switch--on" : "switch"}><b /></i>
+              </button>
             </section>
 
             <section className="policy-form-section">
@@ -6180,6 +7060,30 @@ function StatusPolicyDrawer({
                   <ChevronDown size={16} />
                 </span>
               </label>
+              <label className="select-field">
+                <span>
+                  {lang === "ar"
+                    ? "قرار متحمل مصاريف الشحن عند تسجيل الحالة"
+                    : "Shipping payer decision when recording status"}
+                </span>
+                <span className="select-wrap">
+                  <select
+                    value={draft.shippingPayerDecision ?? "hidden"}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        shippingPayerDecision: event.target.value as NonNullable<StatusPolicy["shippingPayerDecision"]>,
+                      }))
+                    }
+                  >
+                    <option value="hidden">{lang === "ar" ? "لا يظهر — بلا إجراء مالي" : "Hidden — no financial action"}</option>
+                    <option value="registered">{lang === "ar" ? "استخدام المسجل دون سؤال" : "Use registered payer silently"}</option>
+                    <option value="confirm">{lang === "ar" ? "عرضه للمراجعة فقط" : "Show for confirmation"}</option>
+                    <option value="allow_override">{lang === "ar" ? "السماح بالتغيير مع سبب" : "Allow override with reason"}</option>
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
               <button
                 className="policy-switch-row"
                 type="button"
@@ -6228,6 +7132,36 @@ function StatusPolicyDrawer({
               </button>
             </section>
 
+            <section className="policy-form-section status-builder-section">
+              <div className="policy-form-section__title">
+                <span><Eye size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "الظهور الخارجي" : "External visibility"}</strong>
+                  <small>{lang === "ar" ? "مستقل عن صلاحيات الموظفين الداخلية." : "Independent from internal employee permissions."}</small>
+                </div>
+              </div>
+              <div className="status-visibility-switches">
+                <button
+                  type="button"
+                  className={draft.senderVisible ? "active" : ""}
+                  onClick={() => setDraft((current) => ({ ...current, senderVisible: !current.senderVisible }))}
+                >
+                  <UsersRound size={16} />
+                  <span><strong>{lang === "ar" ? "تظهر للراسل" : "Visible to sender"}</strong><small>{lang === "ar" ? "في بوابة الراسل والتتبع" : "Sender portal and tracking"}</small></span>
+                  <i className={draft.senderVisible ? "switch switch--on" : "switch"}><b /></i>
+                </button>
+                <button
+                  type="button"
+                  className={draft.recipientVisible ? "active" : ""}
+                  onClick={() => setDraft((current) => ({ ...current, recipientVisible: !current.recipientVisible }))}
+                >
+                  <UserRound size={16} />
+                  <span><strong>{lang === "ar" ? "تظهر للمستلم" : "Visible to recipient"}</strong><small>{lang === "ar" ? "في رابط تتبع المستلم" : "Recipient tracking link"}</small></span>
+                  <i className={draft.recipientVisible ? "switch switch--on" : "switch"}><b /></i>
+                </button>
+              </div>
+            </section>
+
             <section className="policy-form-section">
               <div className="policy-form-section__title">
                 <span><ClipboardCheck size={16} /></span>
@@ -6256,6 +7190,156 @@ function StatusPolicyDrawer({
               </div>
             </section>
 
+            <section className="policy-form-section status-builder-section">
+              <div className="policy-form-section__title">
+                <span><Plus size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "حقول خاصة بهذه الحالة" : "Status-specific fields"}</strong>
+                  <small>{lang === "ar" ? "مثل باركود المرتجع، رقم قطعة الاستبدال أو أي بيان جديد." : "Such as return barcode, exchange item code, or any new input."}</small>
+                </div>
+              </div>
+              <div className="status-custom-fields">
+                {(draft.customInputFields ?? []).map((field, index) => (
+                  <article key={field.id}>
+                    <div className="status-custom-fields__row">
+                      <label className="field">
+                        <span>{lang === "ar" ? "اسم الحقل" : "Field label"}</span>
+                        <span className="field__control">
+                          <input
+                            value={field.label[lang]}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                customInputFields: (current.customInputFields ?? []).map((item) =>
+                                  item.id === field.id
+                                    ? { ...item, label: { ...item.label, [lang]: event.target.value } }
+                                    : item,
+                                ),
+                              }))
+                            }
+                          />
+                        </span>
+                      </label>
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "نوع الإدخال" : "Input type"}</span>
+                        <span className="select-wrap">
+                          <select
+                            value={field.type}
+                            onChange={(event) =>
+                              setDraft((current) => ({
+                                ...current,
+                                customInputFields: (current.customInputFields ?? []).map((item) =>
+                                  item.id === field.id
+                                    ? { ...item, type: event.target.value as typeof item.type }
+                                    : item,
+                                ),
+                              }))
+                            }
+                          >
+                            <option value="text">{lang === "ar" ? "نص" : "Text"}</option>
+                            <option value="number">{lang === "ar" ? "رقم" : "Number"}</option>
+                            <option value="date">{lang === "ar" ? "تاريخ وموعد" : "Date & time"}</option>
+                            <option value="barcode">{lang === "ar" ? "باركود" : "Barcode"}</option>
+                            <option value="select">{lang === "ar" ? "اختيار من قائمة" : "Dropdown"}</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        className={field.required ? "status-field-required active" : "status-field-required"}
+                        onClick={() =>
+                          setDraft((current) => ({
+                            ...current,
+                            customInputFields: (current.customInputFields ?? []).map((item) =>
+                              item.id === field.id ? { ...item, required: !item.required } : item,
+                            ),
+                          }))
+                        }
+                      >
+                        <Check size={14} />
+                        {field.required
+                          ? lang === "ar" ? "إلزامي" : "Required"
+                          : lang === "ar" ? "اختياري" : "Optional"}
+                      </button>
+                      <button
+                        type="button"
+                        className="status-field-delete"
+                        aria-label={lang === "ar" ? "حذف الحقل" : "Delete field"}
+                        onClick={() =>
+                          setDraft((current) => ({
+                            ...current,
+                            customInputFields: (current.customInputFields ?? []).filter((item) => item.id !== field.id),
+                          }))
+                        }
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    {field.type === "select" && (
+                      <label className="status-field-options">
+                        <span>{lang === "ar" ? "اختيارات القائمة — افصل بينها بفاصلة" : "Dropdown options — comma separated"}</span>
+                        <input
+                          value={field.options.map((option) => option[lang]).join("، ")}
+                          onChange={(event) => {
+                            const values = event.target.value
+                              .split(/[,،]/)
+                              .map((value) => value.trim())
+                              .filter(Boolean);
+                            setDraft((current) => ({
+                              ...current,
+                              customInputFields: (current.customInputFields ?? []).map((item) =>
+                                item.id === field.id
+                                  ? {
+                                      ...item,
+                                      options: values.map((value, optionIndex) => ({
+                                        ar:
+                                          lang === "ar"
+                                            ? value
+                                            : item.options[optionIndex]?.ar ?? value,
+                                        en:
+                                          lang === "en"
+                                            ? value
+                                            : item.options[optionIndex]?.en ?? value,
+                                      })),
+                                    }
+                                  : item,
+                              ),
+                            }));
+                          }}
+                        />
+                      </label>
+                    )}
+                    <small>
+                      {lang === "ar" ? `حقل رقم ${index + 1} يُحفظ داخل حدث الحالة ولا يغيّر بيانات الشحنة الأصلية.` : `Field ${index + 1} is stored in the status event without rewriting original shipment data.`}
+                    </small>
+                  </article>
+                ))}
+                <button
+                  type="button"
+                  className="status-add-custom-field"
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      customInputFields: [
+                        ...(current.customInputFields ?? []),
+                        {
+                          id: `status-input-${Date.now()}`,
+                          label: { ar: "حقل جديد", en: "New field" },
+                          type: "text",
+                          required: false,
+                          options: [],
+                        },
+                      ],
+                    }))
+                  }
+                >
+                  <Plus size={16} />
+                  {lang === "ar" ? "إضافة حقل للحالة" : "Add status field"}
+                </button>
+              </div>
+            </section>
+
             <div className="policy-demo-note">
               <CircleAlert size={15} />
               {s.demo}
@@ -6281,6 +7365,7 @@ function StatusesScreen({
   lang,
   theme,
   policies,
+  services,
   onLang,
   onTheme,
   onPoliciesChange,
@@ -6290,6 +7375,7 @@ function StatusesScreen({
   lang: Lang;
   theme: Theme;
   policies: StatusPolicy[];
+  services: ShipmentServiceType[];
   onLang: () => void;
   onTheme: () => void;
   onPoliciesChange: (
@@ -6343,18 +7429,28 @@ function StatusesScreen({
       appearsInPricing: false,
       appearsInCourierRates: false,
       requiredFields: [{ ar: "ملاحظة", en: "Note" }],
+      serviceTypeIds: [],
+      operationalCategory: "neutral",
+      shippingPayerDecision: "hidden",
+      operationalActions: ["end_assignment"],
+      requiresApproval: false,
+      senderVisible: false,
+      recipientVisible: false,
       usage: 0,
       version: 1,
     });
   }
 
   function savePolicy(policy: StatusPolicy) {
+    const normalizedPolicy = normalizeStatusPolicy(policy);
     onPoliciesChange((current) =>
-      current.some((item) => item.id === policy.id)
+      current.some((item) => item.id === normalizedPolicy.id)
         ? current.map((item) =>
-            item.id === policy.id ? { ...policy, version: item.version + 1 } : item,
+            item.id === normalizedPolicy.id
+              ? { ...normalizedPolicy, version: item.version + 1 }
+              : item,
           )
-        : [policy, ...current],
+        : [normalizedPolicy, ...current],
     );
     setEditing(null);
     setToast(isNew ? s.created : s.saved);
@@ -6547,6 +7643,19 @@ function StatusesScreen({
                       <strong>{policy.assignmentEffect[lang]}</strong>
                       <small>{policy.executors[lang]}</small>
                       <small>{policy.pieceEffect[lang]}</small>
+                      <small className="status-service-scope">
+                        <Boxes size={12} />
+                        {(policy.serviceTypeIds ?? []).length
+                          ? services
+                              .filter((service) =>
+                                (policy.serviceTypeIds ?? []).includes(service.id),
+                              )
+                              .map((service) => service.name[lang])
+                              .join("، ")
+                          : lang === "ar"
+                            ? "كل أنواع الشحنات"
+                            : "All shipment types"}
+                      </small>
                     </div>
                     <div className="status-policy-copy">
                       <strong>{policy.financialEffect[lang]}</strong>
@@ -6612,6 +7721,7 @@ function StatusesScreen({
           policy={editing}
           isNew={isNew}
           lang={lang}
+          services={services}
           onClose={() => {
             setEditing(null);
             setIsNew(false);
@@ -20654,6 +21764,7 @@ function WarehouseScreen({
 }
 
 type ShipmentEntryDraft = {
+  serviceTypeId: string;
   recipientProfileId: string;
   phone: string;
   recipientName: string;
@@ -20689,8 +21800,10 @@ type PreparedShipment = ShipmentEntryDraft & {
 
 function makeShipmentEntryDraft(
   shippingPayer: "recipient" | "sender",
+  serviceTypeId = "service-standard",
 ): ShipmentEntryDraft {
   return {
+    serviceTypeId,
     recipientProfileId: "",
     phone: "",
     recipientName: "",
@@ -20723,6 +21836,7 @@ function CourierShipmentsScreen({
   theme,
   shipmentRecords,
   statuses,
+  serviceTypes,
   couriers,
   courierPlans,
   governorates,
@@ -20736,6 +21850,7 @@ function CourierShipmentsScreen({
   theme: Theme;
   shipmentRecords: Shipment[];
   statuses: StatusPolicy[];
+  serviceTypes: ShipmentServiceType[];
   couriers: CourierRecord[];
   courierPlans: CourierRatePlan[];
   governorates: GovernorateRecord[];
@@ -20771,6 +21886,9 @@ function CourierShipmentsScreen({
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [nextDate, setNextDate] = useState("");
+  const [customStatusValues, setCustomStatusValues] = useState<
+    Record<string, string>
+  >({});
   const [finalShippingPayer, setFinalShippingPayer] = useState<
     "recipient" | "sender"
   >(firstShipment ? shipmentFinalShippingPayer(firstShipment) : "recipient");
@@ -20809,16 +21927,21 @@ function CourierShipmentsScreen({
     courierShipments.find((shipment) => shipment.id === selectedId) ??
     courierShipments[0] ??
     null;
+  const selectedShipmentService = serviceTypes.find(
+    (service) => service.id === selectedShipment?.serviceTypeId,
+  );
   const courierStatuses = statuses.filter(
     (status) =>
       status.state === "published" &&
       (status.executors.en.includes("Courier") ||
-        status.executors.ar.includes("المندوب")),
+        status.executors.ar.includes("المندوب")) &&
+      statusAllowedForService(status, selectedShipmentService),
   );
   const selectedStatus =
     courierStatuses.find((status) => status.id === selectedStatusId) ?? null;
   const payerChangedFromRegistration = Boolean(
     selectedShipment &&
+      statusUsesShippingPayer(selectedStatus) &&
       finalShippingPayer !== selectedShipment.shippingPayer,
   );
   const approvedRecipientShipping = selectedShipment
@@ -20890,6 +22013,7 @@ function CourierShipmentsScreen({
     setReason("");
     setNote("");
     setNextDate("");
+    setCustomStatusValues({});
     setError("");
   }
 
@@ -20912,6 +22036,7 @@ function CourierShipmentsScreen({
     setReason("");
     setNote("");
     setNextDate("");
+    setCustomStatusValues({});
     syncFinalPayer(selectedShipment);
     setError("");
   }
@@ -20934,7 +22059,13 @@ function CourierShipmentsScreen({
     if (statusNeeds("New date") && !nextDate) {
       missing.push(lang === "ar" ? "الموعد الجديد" : "New date");
     }
+    (selectedStatus.customInputFields ?? []).forEach((field) => {
+      if (field.required && !customStatusValues[field.id]?.trim()) {
+        missing.push(field.label[lang]);
+      }
+    });
     if (
+      statusUsesShippingPayer(selectedStatus) &&
       finalShippingPayer !== selectedShipment.shippingPayer &&
       !finalShippingPayerReason.trim()
     ) {
@@ -20998,14 +22129,31 @@ function CourierShipmentsScreen({
       governorates,
       capturedAt: timestamp,
     });
-    const isFullyDelivered =
-      selectedStatus.pieceEffect.en === "All pieces delivered";
+    const actions = normalizeStatusPolicy(selectedStatus).operationalActions ?? [];
+    const isFullyDelivered = actions.includes("deliver_to_recipient");
+    const createsReturn = actions.includes("create_return");
+    const keepsAssignment =
+      actions.includes("keep_assignment") && !actions.includes("end_assignment");
+    const entersFollowUp = actions.includes("follow_up_queue");
     const nextCustody: Localized = isFullyDelivered
       ? { ar: "تم التسليم للمستلم", en: "Delivered to recipient" }
-      : {
-          ar: "مرتجع مطلوب من المندوب",
-          en: "Return due from courier",
-        };
+      : createsReturn
+        ? {
+            ar: "مرتجع مطلوب من المندوب",
+            en: "Return due from courier",
+          }
+        : keepsAssignment
+          ? selectedShipment.custody
+          : entersFollowUp
+            ? { ar: "قائمة المتابعة", en: "Follow-up queue" }
+            : { ar: "المخزن الرئيسي", en: "Main warehouse" };
+    const nextCustodyType: Shipment["custodyType"] = isFullyDelivered
+      ? "recipient"
+      : createsReturn
+        ? "return_route"
+        : keepsAssignment
+          ? "courier"
+          : "warehouse";
     const tone: Shipment["statusTone"] =
       selectedStatus.color.toLowerCase() === "#07835a"
         ? "green"
@@ -21014,9 +22162,11 @@ function CourierShipmentsScreen({
           : selectedStatus.color.toLowerCase() === "#e95f00"
             ? "orange"
             : "blue";
-    const remaining = courierShipments.filter(
-      (shipment) => shipment.id !== selectedShipment.id,
-    );
+    const remaining = keepsAssignment
+      ? courierShipments
+      : courierShipments.filter(
+          (shipment) => shipment.id !== selectedShipment.id,
+        );
     const nextRecords: Shipment[] = shipmentRecords.map((shipment) => {
       if (shipment.id !== selectedShipment.id) return shipment;
       return {
@@ -21025,10 +22175,9 @@ function CourierShipmentsScreen({
         statusPolicyId: selectedStatus.id,
         statusTone: tone,
         custody: nextCustody,
-        custodyType: isFullyDelivered
-          ? ("recipient" as const)
-          : ("return_route" as const),
-        courier: isFullyDelivered ? null : selectedCourier.courier,
+        custodyType: nextCustodyType,
+        courier:
+          keepsAssignment || createsReturn ? selectedCourier.courier : null,
         warehouseLocation: "",
         warehouseHistory: shipment.warehouseHistory,
         deliveryDate: nextDate
@@ -21036,35 +22185,44 @@ function CourierShipmentsScreen({
           : shipment.deliveryDate,
         required: isFullyDelivered
           ? { ar: "لا يوجد", en: "None" }
-          : {
-              ar: "تسليم المرتجع للشركة",
-              en: "Hand return to company",
-            },
-        requiredType: isFullyDelivered
-          ? ("none" as const)
-          : ("attention" as const),
+          : createsReturn
+            ? {
+                ar: "تسليم المرتجع للشركة",
+                en: "Hand return to company",
+              }
+            : entersFollowUp
+              ? { ar: "متابعة الحالة", en: "Follow up status" }
+              : { ar: "لا يوجد", en: "None" },
+        requiredType:
+          createsReturn || entersFollowUp
+            ? ("attention" as const)
+            : ("none" as const),
         lastEvent: {
-          ar: isFullyDelivered
-            ? `سجّل المندوب حالة «${selectedStatus.name.ar}» الآن`
-            : `سجّل المندوب حالة «${selectedStatus.name.ar}» والمرتجع لم تستلمه الشركة بعد`,
-          en: isFullyDelivered
-            ? `Courier recorded “${selectedStatus.name.en}” just now`
-            : `Courier recorded “${selectedStatus.name.en}”; company has not received the return yet`,
+          ar: createsReturn
+            ? `سجّل المندوب حالة «${selectedStatus.name.ar}» والمرتجع لم تستلمه الشركة بعد`
+            : `سجّل المندوب حالة «${selectedStatus.name.ar}» الآن`,
+          en: createsReturn
+            ? `Courier recorded “${selectedStatus.name.en}”; company has not received the return yet`
+            : `Courier recorded “${selectedStatus.name.en}” just now`,
         },
-        finalShippingPayer,
-        finalShippingPayerSource:
-          finalShippingPayer === shipment.shippingPayer
-            ? ("registered" as const)
-            : ("accountant_correction" as const),
-        finalShippingPayerReason:
-          finalShippingPayer === shipment.shippingPayer
-            ? ""
-            : finalShippingPayerReason.trim(),
-        finalShippingPayerBy: {
-          ar: "محاسب التشغيل",
-          en: "Operations accountant",
-        },
-        finalShippingPayerAt: timestamp,
+        ...(statusUsesShippingPayer(selectedStatus)
+          ? {
+              finalShippingPayer,
+              finalShippingPayerSource:
+                finalShippingPayer === shipment.shippingPayer
+                  ? ("registered" as const)
+                  : ("accountant_correction" as const),
+              finalShippingPayerReason:
+                finalShippingPayer === shipment.shippingPayer
+                  ? ""
+                  : finalShippingPayerReason.trim(),
+              finalShippingPayerBy: {
+                ar: "محاسب التشغيل",
+                en: "Operations accountant",
+              },
+              finalShippingPayerAt: timestamp,
+            }
+          : {}),
         statusHistory: [
           {
             id: `status-event-${Date.now()}`,
@@ -21079,6 +22237,7 @@ function CourierShipmentsScreen({
             reason,
             note,
             nextDate,
+            customValues: customStatusValues,
             timestamp,
             settlementStatus: "pending" as const,
             courierCommissionSnapshot,
@@ -21093,8 +22252,12 @@ function CourierShipmentsScreen({
     syncFinalPayer(remaining[0] ?? null);
     setToast(
       lang === "ar"
-        ? "تم تسجيل الحالة وخرجت الشحنة من حيازة المندوب"
-        : "Status saved and shipment left courier custody",
+        ? keepsAssignment
+          ? "تم تسجيل الحالة وبقيت الشحنة مع المندوب حسب السياسة"
+          : "تم تسجيل الحالة ونُفذت إجراءاتها التشغيلية"
+        : keepsAssignment
+          ? "Status saved and the shipment stayed with the courier by policy"
+          : "Status saved and its operational actions were applied",
     );
     window.setTimeout(() => setToast(""), 2800);
   }
@@ -21456,6 +22619,9 @@ function CourierShipmentsScreen({
                         <strong>{selectedShipment.recipient[lang]}</strong>
                         <small>
                           {selectedShipment.id} · {selectedShipment.sender[lang]}
+                          {selectedShipmentService
+                            ? ` · ${selectedShipmentService.name[lang]}`
+                            : ""}
                         </small>
                       </span>
                     </div>
@@ -21562,6 +22728,7 @@ function CourierShipmentsScreen({
                         </span>
                       </div>
 
+                      {statusUsesShippingPayer(selectedStatus) && (
                       <section
                         className={`courier-status-payer ${
                           payerChangedFromRegistration ? "has-change" : ""
@@ -21603,6 +22770,10 @@ function CourierShipmentsScreen({
                                 ? "is-active"
                                 : ""
                             }
+                            disabled={
+                              normalizeStatusPolicy(selectedStatus)
+                                .shippingPayerDecision !== "allow_override"
+                            }
                             onClick={() => {
                               setFinalShippingPayer("recipient");
                               setError("");
@@ -21623,6 +22794,10 @@ function CourierShipmentsScreen({
                             type="button"
                             className={
                               finalShippingPayer === "sender" ? "is-active" : ""
+                            }
+                            disabled={
+                              normalizeStatusPolicy(selectedStatus)
+                                .shippingPayerDecision !== "allow_override"
                             }
                             onClick={() => {
                               setFinalShippingPayer("sender");
@@ -21692,6 +22867,7 @@ function CourierShipmentsScreen({
                           </label>
                         )}
                       </section>
+                      )}
 
                       <div className="courier-dynamic-fields">
                         {statusNeeds("Collected amount") && (
@@ -21783,6 +22959,68 @@ function CourierShipmentsScreen({
                             />
                           </label>
                         )}
+                        {(selectedStatus.customInputFields ?? []).map((field) => (
+                          <label
+                            key={field.id}
+                            className={
+                              field.type === "text" ? "courier-note-field" : ""
+                            }
+                          >
+                            <span>
+                              {field.label[lang]} {field.required && "*"}
+                            </span>
+                            {field.type === "select" && field.options.length ? (
+                              <span className="select-wrap">
+                                <select
+                                  value={customStatusValues[field.id] ?? ""}
+                                  onChange={(event) =>
+                                    setCustomStatusValues((current) => ({
+                                      ...current,
+                                      [field.id]: event.target.value,
+                                    }))
+                                  }
+                                >
+                                  <option value="">
+                                    {lang === "ar" ? "اختر..." : "Choose..."}
+                                  </option>
+                                  {field.options.map((option) => (
+                                    <option key={option.en} value={option.en}>
+                                      {option[lang]}
+                                    </option>
+                                  ))}
+                                </select>
+                                <ChevronDown size={15} />
+                              </span>
+                            ) : (
+                              <input
+                                type={
+                                  field.type === "date"
+                                    ? "datetime-local"
+                                    : field.type === "number"
+                                      ? "number"
+                                      : "text"
+                                }
+                                inputMode={
+                                  field.type === "barcode" ? "numeric" : undefined
+                                }
+                                value={customStatusValues[field.id] ?? ""}
+                                onChange={(event) =>
+                                  setCustomStatusValues((current) => ({
+                                    ...current,
+                                    [field.id]: event.target.value,
+                                  }))
+                                }
+                                placeholder={
+                                  field.type === "barcode"
+                                    ? lang === "ar"
+                                      ? "امسح أو اكتب الباركود"
+                                      : "Scan or enter barcode"
+                                    : ""
+                                }
+                              />
+                            )}
+                          </label>
+                        ))}
                       </div>
                     </div>
                   )}
@@ -32575,6 +33813,7 @@ function AddShipmentScreen({
   recipients,
   governorates,
   statuses,
+  serviceTypes,
   priceLists,
   trustConversion,
   onSaveShipments,
@@ -32593,6 +33832,7 @@ function AddShipmentScreen({
   recipients: RecipientRecord[];
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
+  serviceTypes: ShipmentServiceType[];
   priceLists: PriceListRecord[];
   trustConversion?: TrustRecord | null;
   onSaveShipments: (records: Shipment[]) => void;
@@ -32624,7 +33864,19 @@ function AddShipmentScreen({
       ?.shippingPayer ??
     "recipient";
   const makeInitialDraft = () => {
-    const initial = makeShipmentEntryDraft(initialPayer);
+    const initial = makeShipmentEntryDraft(
+      initialPayer,
+      serviceTypes.find(
+        (service) =>
+          service.state === "published" &&
+          (service.defaultForSenderIds ?? []).includes(firstSender.id),
+      )?.id ??
+        serviceTypes.find(
+          (service) => service.state === "published" && service.isCompanyDefault,
+        )?.id ??
+        serviceTypes.find((service) => service.state === "published")?.id ??
+        "service-standard",
+    );
     if (!trustConversion) return initial;
     return {
       ...initial,
@@ -32664,6 +33916,15 @@ function AddShipmentScreen({
     fields,
     senderPolicies,
   );
+  const availableServiceTypes = serviceTypes.filter(
+    (service) =>
+      service.state === "published" &&
+      (!service.senderIds.length || service.senderIds.includes(senderKey)),
+  );
+  const selectedService =
+    availableServiceTypes.find((service) => service.id === draft.serviceTypeId) ??
+    availableServiceTypes[0] ??
+    serviceTypes[0];
   const senderPriceList =
     priceLists.find(
       (priceList) =>
@@ -32774,10 +34035,22 @@ function AddShipmentScreen({
       settings,
       senderPolicies,
     );
+    const nextAvailableServices = serviceTypes.filter(
+      (service) =>
+        service.state === "published" &&
+        (!service.senderIds.length || service.senderIds.includes(nextSender.id)),
+    );
+    const nextDefaultService =
+      nextAvailableServices.find((service) =>
+        (service.defaultForSenderIds ?? []).includes(nextSender.id),
+      ) ??
+      nextAvailableServices.find((service) => service.isCompanyDefault) ??
+      nextAvailableServices[0];
     setSenderKey(nextKey);
     setDraft((current) => ({
       ...current,
       shippingPayer: nextSettings.defaultShippingPayer,
+      serviceTypeId: nextDefaultService?.id ?? "service-standard",
       recipientShippingChargeInput: "",
     }));
     setError("");
@@ -32838,11 +34111,25 @@ function AddShipmentScreen({
         : codeValues[field.code];
       return !String(value ?? "").trim();
     });
-    if (missingCreate.length) {
+    const missingServiceFields = (selectedService?.requiredFieldCodes ?? [])
+      .filter((code) => !String(codeValues[code] ?? "").trim())
+      .map(
+        (code) =>
+          activeFields.find((field) => field.code === code) ?? {
+            id: code,
+            code,
+            name: { ar: code, en: code },
+          },
+      );
+    const missingFields = [...missingCreate, ...missingServiceFields].filter(
+      (field, index, list) =>
+        list.findIndex((candidate) => candidate.code === field.code) === index,
+    );
+    if (missingFields.length) {
       setError(
         lang === "ar"
-          ? `استكمل أولًا: ${missingCreate.map((field) => field.name.ar).join("، ")}`
-          : `Complete first: ${missingCreate.map((field) => field.name.en).join(", ")}`,
+          ? `استكمل أولًا: ${missingFields.map((field) => field.name.ar).join("، ")}`
+          : `Complete first: ${missingFields.map((field) => field.name.en).join(", ")}`,
       );
       return null;
     }
@@ -32871,6 +34158,19 @@ function AddShipmentScreen({
         lang === "ar" ? "تأكيد الطلب مع المستلم" : "Recipient order confirmation",
       );
     }
+    if (
+      selectedService?.requiresConfirmation &&
+      draft.confirmation !== "confirmed" &&
+      !incompleteFields.some((field) =>
+        field.includes(lang === "ar" ? "تأكيد" : "confirmation"),
+      )
+    ) {
+      incompleteFields.push(
+        lang === "ar"
+          ? `تأكيد المستلم لخدمة ${selectedService.name.ar}`
+          : `Recipient confirmation for ${selectedService.name.en}`,
+      );
+    }
     if (trustConversion && incompleteFields.length) {
       setError(
         lang === "ar"
@@ -32895,7 +34195,10 @@ function AddShipmentScreen({
     setDraft(
       trustConversion
         ? makeInitialDraft()
-        : makeShipmentEntryDraft(policySettings.defaultShippingPayer),
+        : makeShipmentEntryDraft(
+            policySettings.defaultShippingPayer,
+            selectedService?.id ?? "service-standard",
+          ),
     );
     setError("");
   }
@@ -32963,6 +34266,7 @@ function AddShipmentScreen({
               : { ar: "لم يُسجل", en: "Not recorded" };
       return {
         id: `TS-${String(now + index).slice(-6)}`,
+        serviceTypeId: item.serviceTypeId,
         recipientProfileId: item.recipientProfileId || undefined,
         reference: item.senderReference.trim(),
         recipient: {
@@ -33252,12 +34556,66 @@ function AddShipmentScreen({
             </div>
           </section>
 
+          <section className="entry-service-selector">
+            <div className="entry-service-selector__head">
+              <span className="entry-step">2</span>
+              <span>
+                <strong>{lang === "ar" ? "نوع الشحنة" : "Shipment type"}</strong>
+                <small>
+                  {lang === "ar"
+                    ? "النوع يحدد الحقول والحالات والحركة الحقيقية للشحنة."
+                    : "The type controls fields, statuses, and the shipment’s real movement."}
+                </small>
+              </span>
+              <button type="button" onClick={() => onNavigate("services")}>
+                <SlidersHorizontal size={15} />
+                {lang === "ar" ? "إدارة الأنواع" : "Manage types"}
+              </button>
+            </div>
+            <div className="entry-service-options">
+              {availableServiceTypes.map((service) => (
+                <button
+                  type="button"
+                  key={service.id}
+                  className={draft.serviceTypeId === service.id ? "active" : ""}
+                  onClick={() => {
+                    setDraft((current) => ({
+                      ...current,
+                      serviceTypeId: service.id,
+                      pieces: String(service.defaultPieces),
+                    }));
+                    setError("");
+                  }}
+                >
+                  <span>
+                    {service.movement === "exchange"
+                      ? <ArrowLeftRight size={18} />
+                      : <PackageCheck size={18} />}
+                  </span>
+                  <span>
+                    <strong>{service.name[lang]}</strong>
+                    <small>{service.description[lang]}</small>
+                  </span>
+                  {draft.serviceTypeId === service.id && <Check size={16} />}
+                </button>
+              ))}
+            </div>
+            {selectedService && (
+              <div className="entry-service-effects">
+                <span><Boxes size={14} />{selectedService.defaultPieces} {lang === "ar" ? "قطعة افتراضيًا" : "default pieces"}</span>
+                {selectedService.hasCollection && <span><HandCoins size={14} />{lang === "ar" ? "يدعم التحصيل" : "Collection enabled"}</span>}
+                {selectedService.createsReturnParcel && <span><ArrowLeftRight size={14} />{lang === "ar" ? "ينشئ مرتجعًا" : "Creates return"}</span>}
+                {selectedService.requiresConfirmation && <span><Phone size={14} />{lang === "ar" ? "يحتاج تأكيدًا" : "Confirmation required"}</span>}
+              </div>
+            )}
+          </section>
+
           {entryMode === "manual" ? (
             <div className="shipment-entry-layout">
               <section className="entry-form-card">
                 <div className="entry-card-heading">
                   <div>
-                    <span className="entry-step">2</span>
+                    <span className="entry-step">3</span>
                     <span>
                       <strong>
                         {lang === "ar" ? "بيانات الشحنة" : "Shipment details"}
@@ -36665,6 +38023,9 @@ export default function Home() {
   const [theme, setTheme] = useState<Theme>("light");
   const [screen, setScreen] = useState<Screen>("login");
   const [sharedStatuses, setSharedStatuses] = useState(statusPolicies);
+  const [sharedServiceTypes, setSharedServiceTypes] = useState(
+    shipmentServiceTypesData,
+  );
   const [sharedSenders, setSharedSenders] = useState(senderRecordsData);
   const [sharedRecipients, setSharedRecipients] =
     useState<RecipientRecord[]>(recipientRecordsData);
@@ -36741,6 +38102,7 @@ export default function Home() {
       if (saved) {
         const parsed = JSON.parse(saved) as {
           statuses?: StatusPolicy[];
+          serviceTypes?: ShipmentServiceType[];
           senders?: SenderRecord[];
           recipients?: RecipientRecord[];
           couriers?: CourierRecord[];
@@ -36771,12 +38133,22 @@ export default function Home() {
         };
         if (Array.isArray(parsed.statuses)) {
           setSharedStatuses(
-            parsed.statuses.map((status) => ({
-              ...status,
-              appearsInAssignment: status.appearsInAssignment ?? false,
-              appearsInCourierRates:
-                status.appearsInCourierRates ?? status.appearsInPricing,
-            })),
+            parsed.statuses.map((status) =>
+              normalizeStatusPolicy({
+                ...status,
+                appearsInAssignment: status.appearsInAssignment ?? false,
+                appearsInCourierRates:
+                  status.appearsInCourierRates ?? status.appearsInPricing,
+              }),
+            ),
+          );
+        }
+        if (
+          Array.isArray(parsed.serviceTypes) &&
+          parsed.serviceTypes.length > 0
+        ) {
+          setSharedServiceTypes(
+            parsed.serviceTypes.map(normalizeShipmentServiceType),
           );
         }
         if (Array.isArray(parsed.senders) && parsed.senders.length > 0) {
@@ -36982,6 +38354,7 @@ export default function Home() {
                 !(shipment.statusHistory?.length);
               return {
                 ...shipment,
+                serviceTypeId: shipment.serviceTypeId ?? "service-standard",
                 recipientProfileId,
                 recipientShippingCharge:
                   shipment.shippingPayer === "sender" &&
@@ -37221,6 +38594,7 @@ export default function Home() {
       "tasleem-control-center-v2",
       JSON.stringify({
         statuses: sharedStatuses,
+        serviceTypes: sharedServiceTypes,
         senders: sharedSenders,
         recipients: sharedRecipients,
         couriers: sharedCouriers,
@@ -37273,6 +38647,7 @@ export default function Home() {
     sharedSenderPolicies,
     sharedShipments,
     sharedStatuses,
+    sharedServiceTypes,
     sharedSenders,
     sharedRecipients,
     sharedCouriers,
@@ -37674,6 +39049,7 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           statuses={sharedStatuses}
+          serviceTypes={sharedServiceTypes}
           couriers={sharedCouriers}
           courierPlans={sharedCourierPlans}
           governorates={sharedGovernorates}
@@ -37759,6 +39135,7 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           fields={sharedShipmentFields}
+          senders={sharedSenders}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           governorates={sharedGovernorates}
@@ -37839,6 +39216,7 @@ export default function Home() {
           recipients={sharedRecipients}
           governorates={sharedGovernorates}
           statuses={sharedStatuses}
+          serviceTypes={sharedServiceTypes}
           priceLists={sharedPriceLists}
           trustConversion={trustConversionTarget}
           onSaveShipments={saveShipmentRecords}
@@ -37863,11 +39241,27 @@ export default function Home() {
           lang={lang}
           theme={theme}
           policies={sharedStatuses}
+          services={sharedServiceTypes}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onPoliciesChange={setSharedStatuses}
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "services" ? (
+        <ShipmentServicesScreen
+          lang={lang}
+          theme={theme}
+          services={sharedServiceTypes}
+          statuses={sharedStatuses}
+          fields={sharedShipmentFields}
+          onServicesChange={setSharedServiceTypes}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() =>
+            setTheme((value) => (value === "light" ? "dark" : "light"))
+          }
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
