@@ -4379,6 +4379,9 @@ type SenderShipmentPolicy = {
   history?: SenderPolicyHistoryEntry[];
   overrideKeys?: (keyof ShipmentDataSettings)[];
   fieldOverrideCodes?: string[];
+  servicePolicyMode?: "inherit" | "custom";
+  allowedServiceTypeIds?: string[];
+  defaultServiceTypeId?: string;
 };
 
 type SenderPolicyHistoryEntry = {
@@ -4391,6 +4394,9 @@ type SenderPolicyHistoryEntry = {
   recipientAreaRates?: Record<string, RecipientAreaRate>;
   overrideKeys?: (keyof ShipmentDataSettings)[];
   fieldOverrideCodes?: string[];
+  servicePolicyMode?: "inherit" | "custom";
+  allowedServiceTypeIds?: string[];
+  defaultServiceTypeId?: string;
 };
 
 function normalizeShipmentField(field: ShipmentFieldPolicy): ShipmentFieldPolicy {
@@ -6143,6 +6149,7 @@ function ShipmentServicesScreen({
   theme,
   services,
   statuses,
+  serviceTypes,
   fields,
   senders,
   onServicesChange,
@@ -6155,6 +6162,7 @@ function ShipmentServicesScreen({
   theme: Theme;
   services: ShipmentServiceType[];
   statuses: StatusPolicy[];
+  serviceTypes: ShipmentServiceType[];
   fields: ShipmentFieldPolicy[];
   senders: SenderRecord[];
   onServicesChange: (
@@ -8555,6 +8563,7 @@ function SenderEditor({
   appliedPriceList,
   governorates,
   statuses,
+  serviceTypes,
   companyFields,
   companySettings,
   senderPolicy,
@@ -8569,6 +8578,7 @@ function SenderEditor({
   appliedPriceList: PriceListRecord | null;
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
+  serviceTypes: ShipmentServiceType[];
   companyFields: ShipmentFieldPolicy[];
   companySettings: ShipmentDataSettings;
   senderPolicy: SenderShipmentPolicy | null;
@@ -8599,6 +8609,26 @@ function SenderEditor({
   );
   const [policySettings, setPolicySettings] = useState(
     normalizeShipmentDataSettings(senderPolicy?.settings ?? companySettings),
+  );
+  const companyServiceIds = serviceTypes
+    .filter((service) => service.state === "published")
+    .map((service) => service.id);
+  const companyDefaultServiceId =
+    serviceTypes.find(
+      (service) => service.state === "published" && service.isCompanyDefault,
+    )?.id ??
+    companyServiceIds[0] ??
+    "";
+  const [servicePolicyMode, setServicePolicyMode] = useState<
+    "inherit" | "custom"
+  >(senderPolicy?.servicePolicyMode ?? "inherit");
+  const [allowedServiceTypeIds, setAllowedServiceTypeIds] = useState<string[]>(
+    senderPolicy?.allowedServiceTypeIds?.length
+      ? senderPolicy.allowedServiceTypeIds
+      : companyServiceIds,
+  );
+  const [defaultServiceTypeId, setDefaultServiceTypeId] = useState(
+    senderPolicy?.defaultServiceTypeId ?? companyDefaultServiceId,
   );
   const allSenderSettingKeys = (
     Object.keys(shipmentDataSettingsDefault) as (keyof ShipmentDataSettings)[]
@@ -8650,6 +8680,18 @@ function SenderEditor({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (
+      policyMode === "custom" &&
+      servicePolicyMode === "custom" &&
+      !allowedServiceTypeIds.length
+    ) {
+      window.alert(
+        lang === "ar"
+          ? "اختر نوع شحنة واحدًا على الأقل لهذا الراسل."
+          : "Choose at least one shipment type for this sender.",
+      );
+      return;
+    }
     onSave(
       draft,
       policyMode === "custom"
@@ -8665,6 +8707,15 @@ function SenderEditor({
             history: senderPolicy?.history ?? [],
             overrideKeys,
             fieldOverrideCodes,
+            servicePolicyMode,
+            allowedServiceTypeIds:
+              servicePolicyMode === "custom"
+                ? allowedServiceTypeIds
+                : undefined,
+            defaultServiceTypeId:
+              servicePolicyMode === "custom"
+                ? defaultServiceTypeId
+                : undefined,
           }
         : null,
     );
@@ -8695,6 +8746,9 @@ function SenderEditor({
       setPolicySettings(normalizeShipmentDataSettings(companySettings));
       setOverrideKeys([]);
       setFieldOverrideCodes([]);
+      setServicePolicyMode("inherit");
+      setAllowedServiceTypeIds(companyServiceIds);
+      setDefaultServiceTypeId(companyDefaultServiceId);
     }
     setPolicyMode(mode);
   }
@@ -8707,6 +8761,21 @@ function SenderEditor({
     setOverrideKeys((current) =>
       current.includes(key) ? current : [...current, key],
     );
+  }
+
+  function toggleAllowedSenderService(serviceId: string) {
+    setAllowedServiceTypeIds((current) => {
+      if (current.includes(serviceId)) {
+        const next = current.filter((id) => id !== serviceId);
+        if (defaultServiceTypeId === serviceId) {
+          setDefaultServiceTypeId(next[0] ?? "");
+        }
+        return next;
+      }
+      const next = [...current, serviceId];
+      if (!defaultServiceTypeId) setDefaultServiceTypeId(serviceId);
+      return next;
+    });
   }
 
   function toggleSenderSettingSource(key: keyof ShipmentDataSettings) {
@@ -8827,6 +8896,15 @@ function SenderEditor({
     setFieldOverrideCodes(
       source.fieldOverrideCodes ?? source.fields.map((field) => field.code),
     );
+    setServicePolicyMode(source.servicePolicyMode ?? "inherit");
+    setAllowedServiceTypeIds(
+      source.allowedServiceTypeIds?.length
+        ? source.allowedServiceTypeIds
+        : companyServiceIds,
+    );
+    setDefaultServiceTypeId(
+      source.defaultServiceTypeId ?? companyDefaultServiceId,
+    );
     setPolicyState("draft");
     setPolicyMode("custom");
   }
@@ -8841,6 +8919,15 @@ function SenderEditor({
       })),
     );
     setPolicySettings(normalizeShipmentDataSettings(entry.settings));
+    setServicePolicyMode(entry.servicePolicyMode ?? "inherit");
+    setAllowedServiceTypeIds(
+      entry.allowedServiceTypeIds?.length
+        ? entry.allowedServiceTypeIds
+        : companyServiceIds,
+    );
+    setDefaultServiceTypeId(
+      entry.defaultServiceTypeId ?? companyDefaultServiceId,
+    );
     setRecipientAreaRates(
       Object.fromEntries(
         governorates.flatMap((governorate) =>
@@ -9560,11 +9647,135 @@ function SenderEditor({
                                 ? "التأكيد غير مستخدم"
                                 : "Confirmation off"}
                         </span>
+                        <span>
+                          {companyServiceIds.length}{" "}
+                          {lang === "ar"
+                            ? "نوع شحنة من سياسة الشركة"
+                            : "shipment types from company policy"}
+                        </span>
                       </div>
                     </div>
                   </section>
                 ) : (
                   <>
+                    <section className="policy-form-section sender-service-policy">
+                      <div className="policy-form-section__title">
+                        <span><Boxes size={16} /></span>
+                        <div>
+                          <strong>
+                            {lang === "ar"
+                              ? "أنواع الشحنات المتاحة لهذا الراسل"
+                              : "Shipment types available to this sender"}
+                          </strong>
+                          <small>
+                            {lang === "ar"
+                              ? "وراثة خدمات الشركة أو تخصيص الأنواع والافتراضي لهذا الراسل فقط."
+                              : "Inherit company services or customize allowed and default types for this sender only."}
+                          </small>
+                        </div>
+                      </div>
+                      <div className="sender-service-source">
+                        <button
+                          type="button"
+                          className={servicePolicyMode === "inherit" ? "active" : ""}
+                          onClick={() => {
+                            setServicePolicyMode("inherit");
+                            setAllowedServiceTypeIds(companyServiceIds);
+                            setDefaultServiceTypeId(companyDefaultServiceId);
+                          }}
+                        >
+                          <ShieldCheck size={16} />
+                          <span>
+                            <strong>{lang === "ar" ? "من سياسة الشركة" : "Company policy"}</strong>
+                            <small>{lang === "ar" ? "التحديثات العامة تصل له تلقائيًا." : "Future company changes flow here automatically."}</small>
+                          </span>
+                          {servicePolicyMode === "inherit" && <Check size={15} />}
+                        </button>
+                        <button
+                          type="button"
+                          className={servicePolicyMode === "custom" ? "active" : ""}
+                          onClick={() => setServicePolicyMode("custom")}
+                        >
+                          <SlidersHorizontal size={16} />
+                          <span>
+                            <strong>{lang === "ar" ? "تخصيص لهذا الراسل" : "Customize sender"}</strong>
+                            <small>{lang === "ar" ? "لا يؤثر على أي راسل آخر." : "Does not affect any other sender."}</small>
+                          </span>
+                          {servicePolicyMode === "custom" && <Check size={15} />}
+                        </button>
+                      </div>
+
+                      {servicePolicyMode === "inherit" ? (
+                        <div className="sender-service-inherited-note">
+                          <Link2 size={16} />
+                          <span>
+                            {lang === "ar"
+                              ? `متاح له ${companyServiceIds.length} نوع، والافتراضي «${serviceTypes.find((service) => service.id === companyDefaultServiceId)?.name.ar ?? "غير محدد"}».`
+                              : `${companyServiceIds.length} types are available; default is “${serviceTypes.find((service) => service.id === companyDefaultServiceId)?.name.en ?? "Not set"}”.`}
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="sender-service-options">
+                            {serviceTypes
+                              .filter((service) => service.state === "published")
+                              .map((service) => {
+                                const checked = allowedServiceTypeIds.includes(service.id);
+                                return (
+                                  <button
+                                    type="button"
+                                    key={service.id}
+                                    className={checked ? "active" : ""}
+                                    onClick={() => toggleAllowedSenderService(service.id)}
+                                  >
+                                    <span>{checked ? <Check size={14} /> : <Plus size={14} />}</span>
+                                    <span>
+                                      <strong>{service.name[lang]}</strong>
+                                      <small>{service.description[lang]}</small>
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                          </div>
+                          <label className="select-field sender-default-service">
+                            <span>
+                              {lang === "ar"
+                                ? "النوع الافتراضي عند تسجيل شحنة"
+                                : "Default type during shipment intake"}
+                            </span>
+                            <span className="select-wrap">
+                              <select
+                                value={defaultServiceTypeId}
+                                onChange={(event) =>
+                                  setDefaultServiceTypeId(event.target.value)
+                                }
+                                disabled={!allowedServiceTypeIds.length}
+                              >
+                                {serviceTypes
+                                  .filter((service) =>
+                                    allowedServiceTypeIds.includes(service.id),
+                                  )
+                                  .map((service) => (
+                                    <option key={service.id} value={service.id}>
+                                      {service.name[lang]}
+                                    </option>
+                                  ))}
+                              </select>
+                              <ChevronDown size={15} />
+                            </span>
+                          </label>
+                          {!allowedServiceTypeIds.length && (
+                            <div className="sender-service-warning">
+                              <CircleAlert size={15} />
+                              {lang === "ar"
+                                ? "اختر نوع شحنة واحدًا على الأقل قبل الحفظ."
+                                : "Choose at least one shipment type before saving."}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </section>
+
                     <section className="policy-form-section">
                       <div className="policy-form-section__title">
                         <span><ClipboardCheck size={16} /></span>
@@ -10765,6 +10976,7 @@ function SendersScreen({
   priceLists,
   governorates,
   statuses,
+  serviceTypes,
   shipmentRecords,
   senderPolicies,
   companyFields,
@@ -10786,6 +10998,7 @@ function SendersScreen({
   priceLists: PriceListRecord[];
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
+  serviceTypes: ShipmentServiceType[];
   shipmentRecords: Shipment[];
   senderPolicies: SenderShipmentPolicy[];
   companyFields: ShipmentFieldPolicy[];
@@ -10965,6 +11178,9 @@ function SendersScreen({
             : undefined,
           overrideKeys: previousPolicy.overrideKeys,
           fieldOverrideCodes: previousPolicy.fieldOverrideCodes,
+          servicePolicyMode: previousPolicy.servicePolicyMode,
+          allowedServiceTypeIds: previousPolicy.allowedServiceTypeIds,
+          defaultServiceTypeId: previousPolicy.defaultServiceTypeId,
         });
       }
       return [
@@ -11252,6 +11468,7 @@ function SendersScreen({
           appliedPriceList={linkedPriceList(editing)}
           governorates={governorates}
           statuses={statuses}
+          serviceTypes={serviceTypes}
           companyFields={companyFields}
           companySettings={companySettings}
           senderPolicy={
@@ -16012,6 +16229,7 @@ function LegacyShipmentPoliciesScreen({
   settings,
   senderPolicies,
   senders,
+  serviceTypes,
   onLang,
   onTheme,
   onSave,
@@ -16024,6 +16242,7 @@ function LegacyShipmentPoliciesScreen({
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
   senders: SenderRecord[];
+  serviceTypes: ShipmentServiceType[];
   onLang: () => void;
   onTheme: () => void;
   onSave: (
@@ -16383,6 +16602,51 @@ function LegacyShipmentPoliciesScreen({
               </button>
             </div>
           </div>
+
+          <section className="company-service-policy-summary">
+            <div>
+              <span className="workflow-policy-icon workflow-policy-icon--orange">
+                <Boxes size={18} />
+              </span>
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? "سياسة أنواع الشحنات للشركة"
+                    : "Company shipment-type policy"}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "هذه هي الخدمات العامة التي يرثها الرسل قبل أي تخصيص داخل ملف الراسل."
+                    : "These are the company services inherited before sender-specific overrides."}
+                </small>
+              </span>
+            </div>
+            <div className="company-service-policy-summary__facts">
+              <span>
+                <strong>
+                  {serviceTypes.filter((service) => service.state === "published").length}
+                </strong>
+                <small>{lang === "ar" ? "نوع منشور" : "published types"}</small>
+              </span>
+              <span>
+                <strong>
+                  {serviceTypes.find((service) => service.isCompanyDefault)?.name[lang] ??
+                    (lang === "ar" ? "غير محدد" : "Not set")}
+                </strong>
+                <small>{lang === "ar" ? "النوع الافتراضي" : "company default"}</small>
+              </span>
+            </div>
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => onNavigate("services")}
+            >
+              <SlidersHorizontal size={16} />
+              {lang === "ar"
+                ? "إدارة أنواع الشحنات"
+                : "Manage shipment types"}
+            </button>
+          </section>
 
           <section className="shipment-policy-scope">
             <div>
@@ -17974,6 +18238,7 @@ function ShipmentPoliciesScreen({
   senderPolicies,
   senders,
   priceLists,
+  serviceTypes,
   onLang,
   onTheme,
   onNavigate,
@@ -17987,6 +18252,7 @@ function ShipmentPoliciesScreen({
   senderPolicies: SenderShipmentPolicy[];
   senders: SenderRecord[];
   priceLists: PriceListRecord[];
+  serviceTypes: ShipmentServiceType[];
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -18093,6 +18359,26 @@ function ShipmentPoliciesScreen({
         en: `${customAreaRates} area(s) with custom recipient shipping rates`,
       });
     }
+    if (policy.servicePolicyMode === "custom") {
+      const names = serviceTypes
+        .filter((service) =>
+          (policy.allowedServiceTypeIds ?? []).includes(service.id),
+        )
+        .map((service) => service.name[lang]);
+      differences.push({
+        ar: `خدمات مخصصة: ${names.length ? names.join("، ") : "لا توجد خدمات"}`,
+        en: `Custom services: ${names.length ? names.join(", ") : "No services"}`,
+      });
+      const defaultService = serviceTypes.find(
+        (service) => service.id === policy.defaultServiceTypeId,
+      );
+      if (defaultService) {
+        differences.push({
+          ar: `نوع الشحنة الافتراضي: ${defaultService.name.ar}`,
+          en: `Default shipment type: ${defaultService.name.en}`,
+        });
+      }
+    }
     const companyFieldMap = new Map(
       normalizedCompanyFields.map((field) => [field.code, field]),
     );
@@ -18179,6 +18465,27 @@ function ShipmentPoliciesScreen({
         issues.push({
           ar: "يوجد حقل مخصص غير مكتمل",
           en: "An incomplete custom field exists",
+        });
+      }
+      if (
+        policy?.servicePolicyMode === "custom" &&
+        !(policy.allowedServiceTypeIds ?? []).length
+      ) {
+        issues.push({
+          ar: "سياسة الخدمات المخصصة لا تحتوي نوع شحنة",
+          en: "Custom service policy has no shipment type",
+        });
+      }
+      if (
+        policy?.servicePolicyMode === "custom" &&
+        policy.defaultServiceTypeId &&
+        !(policy.allowedServiceTypeIds ?? []).includes(
+          policy.defaultServiceTypeId,
+        )
+      ) {
+        issues.push({
+          ar: "نوع الشحنة الافتراضي غير موجود ضمن الأنواع المسموحة",
+          en: "Default shipment type is not in the allowed types",
         });
       }
       return {
@@ -33864,9 +34171,18 @@ function AddShipmentScreen({
       ?.shippingPayer ??
     "recipient";
   const makeInitialDraft = () => {
+    const firstSenderPolicy = findEffectiveSenderShipmentPolicy(
+      firstSender.name,
+      senderPolicies,
+    );
+    const senderPolicyDefault =
+      firstSenderPolicy?.servicePolicyMode === "custom"
+        ? firstSenderPolicy.defaultServiceTypeId
+        : undefined;
     const initial = makeShipmentEntryDraft(
       initialPayer,
-      serviceTypes.find(
+      senderPolicyDefault ??
+        serviceTypes.find(
         (service) =>
           service.state === "published" &&
           (service.defaultForSenderIds ?? []).includes(firstSender.id),
@@ -33916,10 +34232,20 @@ function AddShipmentScreen({
     fields,
     senderPolicies,
   );
+  const effectiveSenderPolicy = findEffectiveSenderShipmentPolicy(
+    selectedSender,
+    senderPolicies,
+  );
+  const senderAllowedServiceIds =
+    effectiveSenderPolicy?.servicePolicyMode === "custom"
+      ? effectiveSenderPolicy.allowedServiceTypeIds ?? []
+      : null;
   const availableServiceTypes = serviceTypes.filter(
     (service) =>
       service.state === "published" &&
-      (!service.senderIds.length || service.senderIds.includes(senderKey)),
+      (!service.senderIds.length || service.senderIds.includes(senderKey)) &&
+      (senderAllowedServiceIds === null ||
+        senderAllowedServiceIds.includes(service.id)),
   );
   const selectedService =
     availableServiceTypes.find((service) => service.id === draft.serviceTypeId) ??
@@ -33943,8 +34269,7 @@ function AddShipmentScreen({
       ? senderPriceList.prices[draft.areaId]?.[pricingStatus.id] ?? 0
       : 0;
   const recipientAreaRate =
-    findEffectiveSenderShipmentPolicy(selectedSender, senderPolicies)
-      ?.recipientAreaRates?.[draft.areaId];
+    effectiveSenderPolicy?.recipientAreaRates?.[draft.areaId];
   const recipientShippingRate = recipientAreaShippingCharge(
     shippingFee,
     "recipient",
@@ -34035,15 +34360,32 @@ function AddShipmentScreen({
       settings,
       senderPolicies,
     );
+    const nextSenderPolicy = findEffectiveSenderShipmentPolicy(
+      nextSender.name,
+      senderPolicies,
+    );
+    const nextAllowedServiceIds =
+      nextSenderPolicy?.servicePolicyMode === "custom"
+        ? nextSenderPolicy.allowedServiceTypeIds ?? []
+        : null;
     const nextAvailableServices = serviceTypes.filter(
       (service) =>
         service.state === "published" &&
-        (!service.senderIds.length || service.senderIds.includes(nextSender.id)),
+        (!service.senderIds.length || service.senderIds.includes(nextSender.id)) &&
+        (nextAllowedServiceIds === null ||
+          nextAllowedServiceIds.includes(service.id)),
     );
     const nextDefaultService =
-      nextAvailableServices.find((service) =>
-        (service.defaultForSenderIds ?? []).includes(nextSender.id),
+      nextAvailableServices.find(
+        (service) =>
+          service.id ===
+          (nextSenderPolicy?.servicePolicyMode === "custom"
+            ? nextSenderPolicy.defaultServiceTypeId
+            : ""),
       ) ??
+      nextAvailableServices.find((service) =>
+          (service.defaultForSenderIds ?? []).includes(nextSender.id),
+        ) ??
       nextAvailableServices.find((service) => service.isCompanyDefault) ??
       nextAvailableServices[0];
     setSenderKey(nextKey);
@@ -38249,6 +38591,9 @@ export default function Home() {
                 ...policy,
                 state: policy.state ?? "published",
                 version: policy.version ?? 1,
+                servicePolicyMode: policy.servicePolicyMode ?? "inherit",
+                allowedServiceTypeIds: policy.allowedServiceTypeIds,
+                defaultServiceTypeId: policy.defaultServiceTypeId,
                 fields: (policy.fields ?? shipmentFieldPoliciesData).map(
                   normalizeShipmentField,
                 ),
@@ -38277,6 +38622,9 @@ export default function Home() {
                     shippingChargeValue: 0,
                   }),
                   recipientAreaRates: entry.recipientAreaRates ?? {},
+                  servicePolicyMode: entry.servicePolicyMode ?? "inherit",
+                  allowedServiceTypeIds: entry.allowedServiceTypeIds,
+                  defaultServiceTypeId: entry.defaultServiceTypeId,
                 })),
               };
             }),
@@ -38817,6 +39165,7 @@ export default function Home() {
           priceLists={sharedPriceLists}
           governorates={sharedGovernorates}
           statuses={sharedStatuses}
+          serviceTypes={sharedServiceTypes}
           shipmentRecords={sharedShipments}
           senderPolicies={sharedSenderPolicies}
           companyFields={sharedShipmentFields}
@@ -39322,6 +39671,7 @@ export default function Home() {
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           senders={sharedSenders}
+          serviceTypes={sharedServiceTypes}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -39347,6 +39697,7 @@ export default function Home() {
           senderPolicies={sharedSenderPolicies}
           senders={sharedSenders}
           priceLists={sharedPriceLists}
+          serviceTypes={sharedServiceTypes}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
