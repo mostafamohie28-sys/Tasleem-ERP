@@ -32,6 +32,7 @@ import {
   GitBranch,
   Globe2,
   HandCoins,
+  Info,
   Landmark,
   LayoutDashboard,
   Link2,
@@ -1889,6 +1890,61 @@ function statusAllowedForService(
     !service.allowedStatusIds.length ||
     service.allowedStatusIds.includes(status.id);
   return statusAllows && serviceAllows;
+}
+
+function shipmentServiceFor(
+  shipment: Shipment,
+  services: ShipmentServiceType[],
+) {
+  return (
+    services.find((service) => service.id === shipment.serviceTypeId) ??
+    services.find((service) => service.id === "service-standard")
+  );
+}
+
+function shipmentServiceMovementLabel(
+  movement: ShipmentServiceType["movement"],
+): Localized {
+  const labels: Record<ShipmentServiceType["movement"], Localized> = {
+    outbound: { ar: "تسليم للمستلم", en: "Outbound delivery" },
+    inbound: { ar: "استلام من المستلم", en: "Inbound pickup" },
+    exchange: { ar: "تسليم واستلام مرتجع", en: "Delivery and return pickup" },
+    money_only: { ar: "تحصيل مالي فقط", en: "Money collection only" },
+  };
+  return labels[movement];
+}
+
+function shipmentServiceOperationalSummary(
+  service: ShipmentServiceType,
+  lang: Lang,
+) {
+  const facts = [
+    service.hasCollection
+      ? lang === "ar"
+        ? "تحصيل مالي"
+        : "Money collection"
+      : "",
+    service.hasShippingFee
+      ? lang === "ar"
+        ? "مصاريف شحن"
+        : "Shipping fee"
+      : "",
+    service.createsReturnParcel
+      ? lang === "ar"
+        ? "مسار مرتجع"
+        : "Return route"
+      : "",
+    service.allowsPartial
+      ? lang === "ar"
+        ? "تسليم جزئي"
+        : "Partial delivery"
+      : "",
+  ].filter(Boolean);
+  return facts.length
+    ? facts.join(" · ")
+    : lang === "ar"
+      ? "لا يوجد أثر مالي أو مرتجع"
+      : "No financial or return effect";
 }
 
 const statusPolicies: StatusPolicy[] = [
@@ -5754,12 +5810,14 @@ function ScreenState({
 
 function ShipmentDrawer({
   shipment,
+  serviceTypes,
   lang,
   onClose,
   onToast,
   onOpenFull,
 }: {
   shipment: Shipment;
+  serviceTypes: ShipmentServiceType[];
   lang: Lang;
   onClose: () => void;
   onToast: (message: string) => void;
@@ -5774,6 +5832,7 @@ function ShipmentDrawer({
   const collectionEvent = [...(shipment.statusHistory ?? [])]
     .reverse()
     .find((event) => event.collectedAmount !== null);
+  const shipmentService = shipmentServiceFor(shipment, serviceTypes);
   const accountingFinal = Boolean(shipment.finalShippingPayer);
   const payerChanged =
     accountingFinal &&
@@ -5826,6 +5885,12 @@ function ShipmentDrawer({
             <span className={`status-badge status-badge--${shipment.statusTone}`}>
               {shipment.status[lang]}
             </span>
+            {shipmentService && (
+              <span className="shipment-service-chip">
+                <Boxes size={14} />
+                {shipmentService.name[lang]}
+              </span>
+            )}
             <span className="demo-chip">{t.demoData}</span>
           </div>
 
@@ -5985,6 +6050,23 @@ function ShipmentDrawer({
                 <dt>{t.sender}</dt>
                 <dd>{shipment.sender[lang]}</dd>
               </div>
+              <div>
+                <dt>{lang === "ar" ? "نوع الشحنة" : "Shipment type"}</dt>
+                <dd>
+                  {shipmentService?.name[lang] ??
+                    (lang === "ar" ? "غير معروف" : "Unknown")}
+                </dd>
+              </div>
+              {shipmentService && (
+                <div>
+                  <dt>{lang === "ar" ? "حقيقة الخدمة" : "Service behavior"}</dt>
+                  <dd>
+                    {shipmentServiceMovementLabel(shipmentService.movement)[lang]}
+                    {" · "}
+                    {shipmentServiceOperationalSummary(shipmentService, lang)}
+                  </dd>
+                </div>
+              )}
               <div>
                 <dt>{t.currentCustody}</dt>
                 <dd>{shipment.custody[lang]}</dd>
@@ -6149,9 +6231,10 @@ function ShipmentServicesScreen({
   theme,
   services,
   statuses,
-  serviceTypes,
   fields,
   senders,
+  senderPolicies,
+  shipmentRecords,
   onServicesChange,
   onLang,
   onTheme,
@@ -6162,9 +6245,10 @@ function ShipmentServicesScreen({
   theme: Theme;
   services: ShipmentServiceType[];
   statuses: StatusPolicy[];
-  serviceTypes: ShipmentServiceType[];
   fields: ShipmentFieldPolicy[];
   senders: SenderRecord[];
+  senderPolicies: SenderShipmentPolicy[];
+  shipmentRecords: Shipment[];
   onServicesChange: (
     updater: (current: ShipmentServiceType[]) => ShipmentServiceType[],
   ) => void;
@@ -6187,6 +6271,10 @@ function ShipmentServicesScreen({
     selected ? { ...selected } : null,
   );
   const [toast, setToast] = useState("");
+  const [simulationSenderId, setSimulationSenderId] = useState(
+    senders.find((sender) => sender.state === "active")?.id ?? "",
+  );
+  const [simulationStatusId, setSimulationStatusId] = useState("");
 
   useEffect(() => {
     const next = services.find((service) => service.id === selectedId);
@@ -6199,6 +6287,123 @@ function ShipmentServicesScreen({
     exchange: { ar: "تسليم + مرتجع", en: "Delivery + return" },
     money_only: { ar: "تحصيل مالي فقط", en: "Money collection only" },
   };
+
+  const publishedStatuses = statuses.filter(
+    (status) => status.state === "published",
+  );
+  const draftStatuses = draft
+    ? publishedStatuses.filter((status) => statusAllowedForService(status, draft))
+    : [];
+  const selectedSimulationStatus =
+    draftStatuses.find((status) => status.id === simulationStatusId) ??
+    draftStatuses[0];
+  const selectedSimulationSender = senders.find(
+    (sender) => sender.id === simulationSenderId,
+  );
+  const selectedSimulationPolicy = selectedSimulationSender
+    ? findEffectiveSenderShipmentPolicy(
+        selectedSimulationSender.name,
+        senderPolicies,
+      )
+    : undefined;
+  const simulationSenderAllowed = Boolean(
+    selectedSimulationSender &&
+      (!draft?.senderIds.length ||
+        draft.senderIds.includes(selectedSimulationSender.id)) &&
+      (selectedSimulationPolicy?.servicePolicyMode !== "custom" ||
+        (selectedSimulationPolicy.allowedServiceTypeIds ?? []).includes(
+          draft?.id ?? "",
+        )),
+  );
+  const serviceShipmentCount = draft
+    ? shipmentRecords.filter(
+        (shipment) => shipment.serviceTypeId === draft.id,
+      ).length
+    : 0;
+  const serviceReadiness = draft
+    ? [
+        !draft.name.ar.trim() || !draft.name.en.trim()
+          ? {
+              tone: "block" as const,
+              ar: "اسم نوع الشحنة بالعربية والإنجليزية مطلوب.",
+              en: "Arabic and English service names are required.",
+            }
+          : null,
+        !draft.code.trim()
+          ? {
+              tone: "block" as const,
+              ar: "المعرف التشغيلي للخدمة مطلوب.",
+              en: "The operational service identifier is required.",
+            }
+          : null,
+        draft.state === "published" && draftStatuses.length === 0
+          ? {
+              tone: "block" as const,
+              ar: "لا توجد حالة منشورة واحدة صالحة لهذا النوع؛ لن يستطيع الموظف إنهاء زيارته.",
+              en: "No published status is valid for this service; the visit cannot be completed.",
+            }
+          : null,
+        draft.requiredFieldCodes.some(
+          (code) =>
+            !fields.some(
+              (field) => field.code === code && field.mode !== "hidden",
+            ),
+        )
+          ? {
+              tone: "block" as const,
+              ar: "الخدمة تطلب حقلًا مخفيًا أو غير موجود في سياسة البيانات.",
+              en: "The service requires a hidden or missing shipment field.",
+            }
+          : null,
+        draft.senderIds.length > 0 &&
+        (draft.defaultForSenderIds ?? []).some(
+          (senderId) => !draft.senderIds.includes(senderId),
+        )
+          ? {
+              tone: "block" as const,
+              ar: "يوجد راسل عُيّنت له الخدمة افتراضيًا لكنه خارج نطاقها.",
+              en: "A sender uses this service as default while being outside its scope.",
+            }
+          : null,
+        draft.isCompanyDefault && draft.state !== "published"
+          ? {
+              tone: "block" as const,
+              ar: "الخدمة الافتراضية للشركة يجب أن تكون منشورة.",
+              en: "The company default service must be published.",
+            }
+          : null,
+        serviceShipmentCount > 0
+          ? {
+              tone: "info" as const,
+              ar: `يوجد ${serviceShipmentCount} شحنة مسجلة بهذا النوع؛ تعديل النسخة لا يغير سجلها السابق.`,
+              en: `${serviceShipmentCount} shipment(s) use this service; publishing a new version does not rewrite their history.`,
+            }
+          : null,
+      ].filter(
+        (
+          item,
+        ): item is {
+          tone: "block" | "info";
+          ar: string;
+          en: string;
+        } => Boolean(item),
+      )
+    : [];
+  const blockingReadiness = serviceReadiness.filter(
+    (item) => item.tone === "block",
+  );
+
+  useEffect(() => {
+    if (!draftStatuses.some((status) => status.id === simulationStatusId)) {
+      setSimulationStatusId(draftStatuses[0]?.id ?? "");
+    }
+    if (
+      draft?.senderIds.length &&
+      !draft.senderIds.includes(simulationSenderId)
+    ) {
+      setSimulationSenderId(draft.senderIds[0] ?? "");
+    }
+  }, [draft, draftStatuses, simulationSenderId, simulationStatusId]);
 
   function updateDraft<K extends keyof ShipmentServiceType>(
     key: K,
@@ -6239,6 +6444,15 @@ function ShipmentServicesScreen({
 
   function saveService() {
     if (!draft) return;
+    if (blockingReadiness.length) {
+      setToast(
+        lang === "ar"
+          ? `تعذر الحفظ: ${blockingReadiness[0].ar}`
+          : `Cannot save: ${blockingReadiness[0].en}`,
+      );
+      window.setTimeout(() => setToast(""), 3200);
+      return;
+    }
     onServicesChange((current) =>
       current.map((service) =>
         service.id === draft.id
@@ -6544,17 +6758,161 @@ function ShipmentServicesScreen({
                   </div>
                 </section>
 
-                <div className="service-impact-preview">
-                  <ShieldCheck size={18} />
-                  <span>
-                    <strong>{lang === "ar" ? "معاينة قبل النشر" : "Pre-publish preview"}</strong>
-                    <small>
-                      {lang === "ar"
-                        ? `ستظهر في التسجيل، وتسمح بـ ${draft.allowedStatusIds.length} حالة، وتطلب ${draft.requiredFieldCodes.length} حقول. الشحنات القديمة تظل على نسختها المحفوظة.`
-                        : `Appears at intake, allows ${draft.allowedStatusIds.length} statuses, and requires ${draft.requiredFieldCodes.length} fields. Existing shipments keep their saved version.`}
-                    </small>
-                  </span>
-                </div>
+                <section className="service-readiness-panel">
+                  <header>
+                    <span className={blockingReadiness.length ? "is-blocked" : "is-ready"}>
+                      {blockingReadiness.length ? (
+                        <CircleAlert size={18} />
+                      ) : (
+                        <ShieldCheck size={18} />
+                      )}
+                    </span>
+                    <div>
+                      <strong>
+                        {lang === "ar"
+                          ? "فحص الجاهزية قبل النشر"
+                          : "Pre-publish readiness check"}
+                      </strong>
+                      <small>
+                        {blockingReadiness.length
+                          ? lang === "ar"
+                            ? `${blockingReadiness.length} مشكلة تمنع نشر إعداد غير قابل للتشغيل.`
+                            : `${blockingReadiness.length} issue(s) block an unusable configuration.`
+                          : lang === "ar"
+                            ? "الخدمة قابلة للتشغيل، والشحنات القديمة تحتفظ بنسختها المحفوظة."
+                            : "The service is operationally ready; existing shipments retain their saved version."}
+                      </small>
+                    </div>
+                    <b>
+                      {blockingReadiness.length
+                        ? lang === "ar"
+                          ? "تحتاج تصحيح"
+                          : "Needs fixes"
+                        : lang === "ar"
+                          ? "جاهزة"
+                          : "Ready"}
+                    </b>
+                  </header>
+                  {serviceReadiness.length > 0 && (
+                    <div className="service-readiness-list">
+                      {serviceReadiness.map((item, index) => (
+                        <p
+                          key={`${item.tone}-${index}`}
+                          className={item.tone === "block" ? "is-blocked" : "is-info"}
+                        >
+                          {item.tone === "block" ? (
+                            <CircleAlert size={15} />
+                          ) : (
+                            <Info size={15} />
+                          )}
+                          {item[lang]}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="service-simulator">
+                  <header>
+                    <span><Calculator size={18} /></span>
+                    <div>
+                      <strong>
+                        {lang === "ar"
+                          ? "تجربة الخدمة بدون إنشاء شحنة"
+                          : "Test without creating a shipment"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "محاكاة فقط: لا تغيّر عهدة ولا حالة ولا تسجل حركة مالية."
+                          : "Simulation only: no custody, status, or financial movement is recorded."}
+                      </small>
+                    </div>
+                    <b>{lang === "ar" ? "محاكاة فقط" : "Simulation"}</b>
+                  </header>
+                  <div className="service-simulator__inputs">
+                    <label>
+                      <span>{lang === "ar" ? "الراسل" : "Sender"}</span>
+                      <select
+                        value={simulationSenderId}
+                        onChange={(event) => setSimulationSenderId(event.target.value)}
+                      >
+                        {senders
+                          .filter((sender) => sender.state === "active")
+                          .map((sender) => (
+                            <option key={sender.id} value={sender.id}>
+                              {sender.name[lang]}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{lang === "ar" ? "الحالة المختبرة" : "Test status"}</span>
+                      <select
+                        value={selectedSimulationStatus?.id ?? ""}
+                        onChange={(event) => setSimulationStatusId(event.target.value)}
+                      >
+                        {draftStatuses.map((status) => (
+                          <option key={status.id} value={status.id}>
+                            {status.name[lang]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="service-simulator__result">
+                    <article>
+                      <small>{lang === "ar" ? "إتاحة الراسل" : "Sender availability"}</small>
+                      <strong>
+                        {!selectedSimulationSender
+                          ? "—"
+                          : simulationSenderAllowed
+                            ? lang === "ar"
+                              ? "مسموح"
+                              : "Allowed"
+                            : lang === "ar"
+                              ? "غير متاح لهذا الراسل"
+                              : "Unavailable for this sender"}
+                      </strong>
+                    </article>
+                    <article>
+                      <small>{lang === "ar" ? "الحركة الفعلية" : "Physical movement"}</small>
+                      <strong>{movementLabels[draft.movement][lang]}</strong>
+                    </article>
+                    <article>
+                      <small>{lang === "ar" ? "الأثر المتوقع" : "Expected effect"}</small>
+                      <strong>{shipmentServiceOperationalSummary(draft, lang)}</strong>
+                    </article>
+                    <article>
+                      <small>{lang === "ar" ? "نتيجة الحالة" : "Status outcome"}</small>
+                      <strong>
+                        {selectedSimulationStatus
+                          ? selectedSimulationStatus.financialEffect[lang]
+                          : lang === "ar"
+                            ? "لا توجد حالة صالحة"
+                            : "No valid status"}
+                      </strong>
+                    </article>
+                  </div>
+                  {selectedSimulationStatus && (
+                    <p className="service-simulator__actions">
+                      <GitBranch size={15} />
+                      {lang === "ar" ? "الإجراءات: " : "Actions: "}
+                      {(normalizeStatusPolicy(selectedSimulationStatus).operationalActions ?? [])
+                        .map((action) => {
+                          const labels: Record<string, Localized> = {
+                            end_assignment: { ar: "إنهاء إسناد", en: "End assignment" },
+                            keep_assignment: { ar: "إبقاء الإسناد", en: "Keep assignment" },
+                            follow_up_queue: { ar: "إضافة للمتابعة", en: "Add follow-up" },
+                            create_return: { ar: "إنشاء مرتجع", en: "Create return" },
+                            deliver_to_recipient: { ar: "تسليم للمستلم", en: "Deliver to recipient" },
+                            return_to_sender: { ar: "إرجاع للراسل", en: "Return to sender" },
+                          };
+                          return labels[action]?.[lang] ?? action;
+                        })
+                        .join(" · ")}
+                    </p>
+                  )}
+                </section>
               </section>
             )}
           </div>
@@ -21178,6 +21536,7 @@ function WarehouseScreen({
   lang,
   theme,
   shipmentRecords,
+  serviceTypes,
   settings,
   senderPolicies,
   onShipmentsChange,
@@ -21189,6 +21548,7 @@ function WarehouseScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  serviceTypes: ShipmentServiceType[];
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
   onShipmentsChange: (records: Shipment[]) => void;
@@ -21712,6 +22072,12 @@ function WarehouseScreen({
                       <span className="warehouse-shipment-id">
                         <strong>{shipment.id}</strong>
                         <small>{shipment.reference}</small>
+                        {shipmentServiceFor(shipment, serviceTypes) && (
+                          <em className="shipment-service-chip">
+                            <Boxes size={12} />
+                            {shipmentServiceFor(shipment, serviceTypes)?.name[lang]}
+                          </em>
+                        )}
                       </span>
                       <span className="warehouse-party">
                         <strong>{shipment.recipient[lang]}</strong>
@@ -21834,6 +22200,16 @@ function WarehouseScreen({
                     {lang === "ar" ? "عهدة ومكان الطرد" : "Parcel custody & location"}
                   </small>
                   <h2>{selectedShipment.id}</h2>
+                  {shipmentServiceFor(selectedShipment, serviceTypes) && (
+                    <span className="shipment-service-chip">
+                      <Boxes size={12} />
+                      {
+                        shipmentServiceFor(selectedShipment, serviceTypes)?.name[
+                          lang
+                        ]
+                      }
+                    </span>
+                  )}
                 </span>
               </div>
               <button
@@ -22190,6 +22566,7 @@ function CourierShipmentsScreen({
   const [selectedStatusId, setSelectedStatusId] = useState("");
   const [collectedAmount, setCollectedAmount] = useState("");
   const [deliveredPieces, setDeliveredPieces] = useState("");
+  const [returnedPieces, setReturnedPieces] = useState("");
   const [reason, setReason] = useState("");
   const [note, setNote] = useState("");
   const [nextDate, setNextDate] = useState("");
@@ -22246,6 +22623,13 @@ function CourierShipmentsScreen({
   );
   const selectedStatus =
     courierStatuses.find((status) => status.id === selectedStatusId) ?? null;
+  const selectedStatusActions = selectedStatus
+    ? normalizeStatusPolicy(selectedStatus).operationalActions ?? []
+    : [];
+  const requiresIndependentReturnCount = Boolean(
+    selectedShipmentService?.createsReturnParcel &&
+      selectedStatusActions.includes("create_return"),
+  );
   const payerChangedFromRegistration = Boolean(
     selectedShipment &&
       statusUsesShippingPayer(selectedStatus) &&
@@ -22317,6 +22701,7 @@ function CourierShipmentsScreen({
     setSelectedStatusId("");
     setCollectedAmount("");
     setDeliveredPieces("");
+    setReturnedPieces("");
     setReason("");
     setNote("");
     setNextDate("");
@@ -22340,6 +22725,7 @@ function CourierShipmentsScreen({
           ? "0"
           : "",
     );
+    setReturnedPieces("");
     setReason("");
     setNote("");
     setNextDate("");
@@ -22356,6 +22742,13 @@ function CourierShipmentsScreen({
     }
     if (statusNeeds("Delivered pieces") && deliveredPieces === "") {
       missing.push(lang === "ar" ? "عدد القطع المسلمة" : "Delivered pieces");
+    }
+    if (requiresIndependentReturnCount && !returnedPieces.trim()) {
+      missing.push(
+        lang === "ar"
+          ? "عدد قطع الطرد المرتجع"
+          : "Returned parcel pieces",
+      );
     }
     if (statusNeeds("Reason") && !reason.trim()) {
       missing.push(lang === "ar" ? "سبب الحالة" : "Status reason");
@@ -22424,8 +22817,9 @@ function CourierShipmentsScreen({
         : selectedStatus.pieceEffect.en === "All pieces returned"
           ? 0
           : delivered;
-    const returnedSnapshot =
-      deliveredSnapshot === null
+    const returnedSnapshot = requiresIndependentReturnCount
+      ? Math.max(0, Number(returnedPieces) || 0)
+      : deliveredSnapshot === null
         ? null
         : Math.max(0, selectedShipment.pieces - deliveredSnapshot);
     const courierCommissionSnapshot = captureCourierCommissionSnapshot({
@@ -22857,6 +23251,12 @@ function CourierShipmentsScreen({
                       <span className="custody-shipment__id">
                         <strong>{shipment.id}</strong>
                         <small>{shipment.reference}</small>
+                        {shipmentServiceFor(shipment, serviceTypes) && (
+                          <em className="shipment-service-chip">
+                            <Boxes size={12} />
+                            {shipmentServiceFor(shipment, serviceTypes)?.name[lang]}
+                          </em>
+                        )}
                       </span>
                       <span className="custody-shipment__person">
                         <span className="mini-avatar">
@@ -23228,6 +23628,32 @@ function CourierShipmentsScreen({
                             )}
                           </label>
                         )}
+                        {requiresIndependentReturnCount && (
+                          <label>
+                            <span>
+                              {lang === "ar"
+                                ? "عدد قطع الطرد المرتجع"
+                                : "Returned parcel pieces"}{" "}
+                              *
+                            </span>
+                            <span className="courier-field-control">
+                              <input
+                                type="number"
+                                min="1"
+                                value={returnedPieces}
+                                onChange={(event) =>
+                                  setReturnedPieces(event.target.value)
+                                }
+                              />
+                              <b>{lang === "ar" ? "قطعة مرتجعة" : "returned pcs"}</b>
+                            </span>
+                            <small>
+                              {lang === "ar"
+                                ? "هذا مرتجع مستقل عن عدد القطع الجديدة التي تم تسليمها."
+                                : "This return is separate from the delivered replacement pieces."}
+                            </small>
+                          </label>
+                        )}
                         {statusNeeds("Reason") && (
                           <label>
                             <span>{lang === "ar" ? "سبب الحالة" : "Status reason"} *</span>
@@ -23391,6 +23817,7 @@ function CourierPrintScreen({
   lang,
   theme,
   shipmentRecords,
+  serviceTypes,
   couriers,
   debts,
   onLang,
@@ -23401,6 +23828,7 @@ function CourierPrintScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  serviceTypes: ShipmentServiceType[];
   couriers: CourierRecord[];
   debts: CourierDebt[];
   onLang: () => void;
@@ -23858,6 +24286,12 @@ function CourierPrintScreen({
                       <span className="courier-print-index">{index + 1}</span>
                       <span className="courier-print-shipment">
                         <strong>{shipment.id}</strong>
+                        {shipmentServiceFor(shipment, serviceTypes) && (
+                          <small className="shipment-service-chip">
+                            <Boxes size={11} />
+                            {shipmentServiceFor(shipment, serviceTypes)?.name[lang]}
+                          </small>
+                        )}
                         <em
                           className={`status-badge status-badge--${shipment.statusTone}`}
                         >
@@ -26560,6 +26994,7 @@ function SenderAccountPreparationScreen({
   lang,
   theme,
   shipmentRecords,
+  serviceTypes,
   statuses,
   governorates,
   priceLists,
@@ -26576,6 +27011,7 @@ function SenderAccountPreparationScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  serviceTypes: ShipmentServiceType[];
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
   priceLists: PriceListRecord[];
@@ -27090,6 +27526,15 @@ function SenderAccountPreparationScreen({
                       <span className="sender-prep-shipment">
                         <strong>{line.shipment.id}</strong>
                         <small>{line.shipment.reference}</small>
+                        {shipmentServiceFor(line.shipment, serviceTypes) && (
+                          <em className="shipment-service-chip">
+                            <Boxes size={12} />
+                            {
+                              shipmentServiceFor(line.shipment, serviceTypes)
+                                ?.name[lang]
+                            }
+                          </em>
+                        )}
                       </span>
                       <span className="sender-prep-person">
                         <strong>{line.shipment.recipient[lang]}</strong>
@@ -27254,6 +27699,7 @@ function SenderAccountScreen({
   lang,
   theme,
   shipmentRecords,
+  serviceTypes,
   statuses,
   governorates,
   priceLists,
@@ -27273,6 +27719,7 @@ function SenderAccountScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  serviceTypes: ShipmentServiceType[];
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
   priceLists: PriceListRecord[];
@@ -27969,6 +28416,16 @@ function SenderAccountScreen({
                     <span className="sender-prep-shipment">
                       <strong>{line.shipment.id}</strong>
                       <small>{line.shipment.reference}</small>
+                      {shipmentServiceFor(line.shipment, serviceTypes) && (
+                        <em className="shipment-service-chip">
+                          <Boxes size={12} />
+                          {
+                            shipmentServiceFor(line.shipment, serviceTypes)?.name[
+                              lang
+                            ]
+                          }
+                        </em>
+                      )}
                     </span>
                     <span className="sender-prep-person">
                       <strong>{line.shipment.recipient[lang]}</strong>
@@ -29303,6 +29760,7 @@ function CourierAccountScreen({
   lang,
   theme,
   shipmentRecords,
+  serviceTypes,
   couriers,
   courierPlans,
   governorates,
@@ -29320,6 +29778,7 @@ function CourierAccountScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  serviceTypes: ShipmentServiceType[];
   couriers: CourierRecord[];
   courierPlans: CourierRatePlan[];
   governorates: GovernorateRecord[];
@@ -30121,6 +30580,15 @@ function CourierAccountScreen({
                         <span className="courier-account-shipment">
                           <strong>{item.shipment.id}</strong>
                           <small>{item.shipment.reference}</small>
+                          {shipmentServiceFor(item.shipment, serviceTypes) && (
+                            <em className="shipment-service-chip">
+                              <Boxes size={12} />
+                              {
+                                shipmentServiceFor(item.shipment, serviceTypes)
+                                  ?.name[lang]
+                              }
+                            </em>
+                          )}
                         </span>
                         <span className="courier-account-person">
                           <strong>{item.shipment.recipient[lang]}</strong>
@@ -30787,6 +31255,7 @@ function AssignmentScreen({
   theme,
   shipmentRecords,
   statuses,
+  serviceTypes,
   governorates,
   couriers,
   settings,
@@ -30801,6 +31270,7 @@ function AssignmentScreen({
   theme: Theme;
   shipmentRecords: Shipment[];
   statuses: StatusPolicy[];
+  serviceTypes: ShipmentServiceType[];
   governorates: GovernorateRecord[];
   couriers: CourierRecord[];
   settings: ShipmentDataSettings;
@@ -30841,6 +31311,8 @@ function AssignmentScreen({
       shipmentRecords.filter((shipment) => {
         if (shipment.custodyType !== "warehouse") return false;
         if (shipment.requiredType === "incomplete") return false;
+        const service = shipmentServiceFor(shipment, serviceTypes);
+        if (!service) return false;
         const area = allAreas.find(
           (record) =>
             record.name.ar === shipment.area.ar ||
@@ -30856,6 +31328,9 @@ function AssignmentScreen({
               status.name.en === shipment.status.en),
         );
         if (matchingPolicy && !matchingPolicy.appearsInAssignment) return false;
+        if (matchingPolicy && !statusAllowedForService(matchingPolicy, service)) {
+          return false;
+        }
         const shipmentSettings = resolveShipmentDataSettings(
           shipment,
           settings,
@@ -30869,7 +31344,14 @@ function AssignmentScreen({
         }
         return true;
       }),
-    [allAreas, senderPolicies, settings, shipmentRecords, statuses],
+    [
+      allAreas,
+      senderPolicies,
+      serviceTypes,
+      settings,
+      shipmentRecords,
+      statuses,
+    ],
   );
   const normalized = search.trim().toLowerCase();
   const visibleShipments = eligibleShipments.filter((shipment) => {
@@ -31276,6 +31758,12 @@ function AssignmentScreen({
                   <SlidersHorizontal size={15} />
                   {lang === "ar" ? "حالة تسمح بالظهور" : "Status allows display"}
                 </span>
+                <span>
+                  <PackageCheck size={15} />
+                  {lang === "ar"
+                    ? "نوع الشحنة والحالة متوافقان"
+                    : "Service and status are compatible"}
+                </span>
               </div>
 
               <div className="assignment-shipment-list">
@@ -31302,6 +31790,12 @@ function AssignmentScreen({
                       <span className="assignment-shipment__id">
                         <strong>{shipment.id}</strong>
                         <small>{shipment.reference}</small>
+                        {shipmentServiceFor(shipment, serviceTypes) && (
+                          <em className="shipment-service-chip">
+                            <Boxes size={12} />
+                            {shipmentServiceFor(shipment, serviceTypes)?.name[lang]}
+                          </em>
+                        )}
                       </span>
                       <span className="assignment-shipment__recipient">
                         <span className="mini-avatar">
@@ -36879,6 +37373,7 @@ function Shipment360Screen({
   lang,
   theme,
   shipment,
+  serviceTypes,
   courierPlans,
   governorates,
   courierSettlements,
@@ -36894,6 +37389,7 @@ function Shipment360Screen({
   lang: Lang;
   theme: Theme;
   shipment: Shipment | null;
+  serviceTypes: ShipmentServiceType[];
   courierPlans: CourierRatePlan[];
   governorates: GovernorateRecord[];
   courierSettlements: CourierSettlement[];
@@ -36973,6 +37469,7 @@ function Shipment360Screen({
   }
 
   const shipmentId = shipment.id;
+  const shipmentService = shipmentServiceFor(shipment, serviceTypes);
   const latestStatusEvent = shipment.statusHistory?.[0];
   const collectedEvent = shipment.statusHistory?.find(
     (event) => event.collectedAmount !== null,
@@ -37337,6 +37834,15 @@ function Shipment360Screen({
                   <small>{lang === "ar" ? "رقم الشحنة" : "Shipment number"}</small>
                   <h1>{shipment.id}</h1>
                   <b>{shipment.reference}</b>
+                  {shipmentService && (
+                    <span className="shipment-service-chip shipment-service-chip--prominent">
+                      <Boxes size={14} />
+                      {shipmentService.name[lang]}
+                      <small>
+                        {shipmentServiceMovementLabel(shipmentService.movement)[lang]}
+                      </small>
+                    </span>
+                  )}
                 </div>
                 <button
                   className="square-button square-button--soft"
@@ -37540,6 +38046,21 @@ function Shipment360Screen({
                   </div>
                 </div>
                 <div className="shipment360-operation-grid">
+                  <article>
+                    <span><PackageCheck size={18} /></span>
+                    <small>{lang === "ar" ? "نوع الشحنة" : "Shipment type"}</small>
+                    <strong>
+                      {shipmentService?.name[lang] ??
+                        (lang === "ar" ? "نوع غير معروف" : "Unknown type")}
+                    </strong>
+                    <p>
+                      {shipmentService
+                        ? `${shipmentServiceMovementLabel(shipmentService.movement)[lang]} · ${shipmentServiceOperationalSummary(shipmentService, lang)}`
+                        : lang === "ar"
+                          ? "تحتاج مراجعة مرجع الخدمة"
+                          : "Service reference needs review"}
+                    </p>
+                  </article>
                   <article><span><SlidersHorizontal size={18} /></span><small>{lang === "ar" ? "الحالة" : "Status"}</small><strong>{shipment.status[lang]}</strong><p>{latestStatusEvent ? `${latestStatusEvent.recordedBy[lang]} · ${latestStatusEvent.timestamp[lang]}` : shipment.lastEvent[lang]}</p></article>
                   <article><span><Warehouse size={18} /></span><small>{lang === "ar" ? "الحيازة" : "Custody"}</small><strong>{custodyPlace}</strong><p>{shipment.custody[lang]}</p></article>
                   <article><span><Truck size={18} /></span><small>{lang === "ar" ? "الإسناد" : "Assignment"}</small><strong>{assignmentLabel}</strong><p>{shipment.assignedAt?.[lang] ?? (lang === "ar" ? "لا توجد مهمة فعالة" : "No active task")}</p></article>
@@ -37777,6 +38298,7 @@ function ShipmentsScreen({
   lang,
   theme,
   shipmentRecords,
+  serviceTypes,
   onLang,
   onTheme,
   onNavigate,
@@ -37786,6 +38308,7 @@ function ShipmentsScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  serviceTypes: ShipmentServiceType[];
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -38174,6 +38697,15 @@ function ShipmentsScreen({
                                 <span className="shipment-cell">
                                   <strong>{shipment.id}</strong>
                                   <small>{shipment.reference}</small>
+                                  {shipmentServiceFor(shipment, serviceTypes) && (
+                                    <em className="shipment-service-chip">
+                                      <Boxes size={12} />
+                                      {
+                                        shipmentServiceFor(shipment, serviceTypes)
+                                          ?.name[lang]
+                                      }
+                                    </em>
+                                  )}
                                 </span>
                               </td>
                               <td>
@@ -38274,6 +38806,12 @@ function ShipmentsScreen({
                             <span>
                               <strong>{shipment.id}</strong>
                               <small>{shipment.reference}</small>
+                              {shipmentServiceFor(shipment, serviceTypes) && (
+                                <em className="shipment-service-chip">
+                                  <Boxes size={12} />
+                                  {shipmentServiceFor(shipment, serviceTypes)?.name[lang]}
+                                </em>
+                              )}
                             </span>
                             <span
                               className={`status-badge status-badge--${shipment.statusTone}`}
@@ -38333,6 +38871,7 @@ function ShipmentsScreen({
       {selectedShipment && (
         <ShipmentDrawer
           shipment={selectedShipment}
+          serviceTypes={serviceTypes}
           lang={lang}
           onClose={() => setSelectedShipment(null)}
           onToast={showToast}
@@ -39120,6 +39659,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          serviceTypes={sharedServiceTypes}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -39140,6 +39680,7 @@ export default function Home() {
               (shipment) => shipment.id === shipmentFileTargetId,
             ) ?? null
           }
+          serviceTypes={sharedServiceTypes}
           courierPlans={sharedCourierPlans}
           governorates={sharedGovernorates}
           courierSettlements={sharedCourierSettlements}
@@ -39267,6 +39808,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          serviceTypes={sharedServiceTypes}
           couriers={sharedCouriers}
           courierPlans={sharedCourierPlans}
           governorates={sharedGovernorates}
@@ -39309,6 +39851,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          serviceTypes={sharedServiceTypes}
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
           priceLists={sharedPriceLists}
@@ -39329,6 +39872,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          serviceTypes={sharedServiceTypes}
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
           priceLists={sharedPriceLists}
@@ -39383,6 +39927,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          serviceTypes={sharedServiceTypes}
           couriers={sharedCouriers}
           debts={sharedCourierDebts}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
@@ -39416,6 +39961,7 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           statuses={sharedStatuses}
+          serviceTypes={sharedServiceTypes}
           governorates={sharedGovernorates}
           couriers={sharedCouriers}
           settings={sharedShipmentSettings}
@@ -39501,6 +40047,7 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          serviceTypes={sharedServiceTypes}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           onShipmentsChange={setSharedShipments}
@@ -39606,6 +40153,9 @@ export default function Home() {
           services={sharedServiceTypes}
           statuses={sharedStatuses}
           fields={sharedShipmentFields}
+          senders={sharedSenders}
+          senderPolicies={sharedSenderPolicies}
+          shipmentRecords={sharedShipments}
           onServicesChange={setSharedServiceTypes}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>

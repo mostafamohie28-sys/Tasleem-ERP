@@ -93,6 +93,11 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /allowedServiceTypeIds/);
   assert.match(page, /defaultServiceTypeId/);
   assert.match(page, /أنواع الشحنات المتاحة لهذا الراسل/);
+  assert.match(page, /shipmentServiceFor/);
+  assert.match(page, /فحص الجاهزية قبل النشر/);
+  assert.match(page, /تجربة الخدمة بدون إنشاء شحنة/);
+  assert.match(page, /requiresIndependentReturnCount/);
+  assert.match(page, /عدد قطع الطرد المرتجع/);
   assert.doesNotMatch(page, /className="courier-payer-review"/);
   assert.match(page, /سعر المنطقة غير مكتمل للراسل البديل/);
   assert.match(page, /tasleem-control-center-v2/);
@@ -117,6 +122,9 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /status-custom-fields/);
   assert.match(css, /sender-service-policy/);
   assert.match(css, /company-service-policy-summary/);
+  assert.match(css, /service-readiness-panel/);
+  assert.match(css, /service-simulator/);
+  assert.match(css, /shipment-service-chip/);
   assert.match(css, /courier-agreement-directory/);
   assert.match(css, /courier-private-rate-list/);
   assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.sidebar\s*\{[\s\S]*?z-index:\s*75/);
