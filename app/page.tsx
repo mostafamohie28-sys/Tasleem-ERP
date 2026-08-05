@@ -402,6 +402,17 @@ type Shipment = {
     senderOtherFees?: number;
     senderOtherFeesLabel?: Localized;
     courierCommissionSnapshot?: CourierCommissionSnapshot;
+    financialApproval?: {
+      state: "pending" | "approved" | "rejected";
+      scope: "financial_effect";
+      requestedBy: Localized;
+      requestedAt: Localized;
+      proposedShippingPayer?: "recipient" | "sender";
+      proposedShippingPayerReason?: string;
+      decidedBy?: Localized;
+      decidedAt?: Localized;
+      decisionReason?: string;
+    };
   }[];
   pieces: number;
   /** Company revenue for shipping, resolved from the sender price list. */
@@ -472,6 +483,15 @@ function shipmentAccountingRecipientShippingCharge(shipment: Shipment) {
   return shipmentFinalShippingPayer(shipment) === "recipient"
     ? shipmentRecipientShippingRate(shipment)
     : 0;
+}
+
+function statusEventFinanciallyApproved(
+  event: NonNullable<Shipment["statusHistory"]>[number],
+) {
+  return (
+    !event.financialApproval ||
+    event.financialApproval.state === "approved"
+  );
 }
 
 function shipmentTotalToCollect(shipment: Shipment) {
@@ -2985,7 +3005,7 @@ function senderSettlementLines(
       const shippingCharge =
         typeof configuredPrice === "number" ? configuredPrice : shipment.shippingFee;
       const recipientShippingCharge =
-        shipmentRecipientShippingCharge(shipment);
+        shipmentAccountingRecipientShippingCharge(shipment);
       const otherFees = statusEvent.senderOtherFees ?? 0;
       const collectedAmount = statusEvent.collectedAmount ?? 0;
       const customCompanyIncome =
@@ -7277,7 +7297,7 @@ function StatusPolicyDrawer({
               >
                 <span>
                   <strong>{lang === "ar" ? "تحتاج اعتماد مسؤول" : "Requires supervisor approval"}</strong>
-                  <small>{lang === "ar" ? "تُسجل كطلب معلق ولا تنفذ آثارها حتى الاعتماد." : "Saved as pending and actions wait for approval."}</small>
+                  <small>{lang === "ar" ? "تُسجل الحالة والحيازة الفعلية فورًا، ويُعلّق أثرها المالي فقط حتى قرار المسؤول." : "The real status and custody are saved immediately; only the financial effect waits for approval."}</small>
                 </span>
                 <i className={draft.requiresApproval ? "switch switch--on" : "switch"}><b /></i>
               </button>
@@ -22868,6 +22888,8 @@ function CourierShipmentsScreen({
       : courierShipments.filter(
           (shipment) => shipment.id !== selectedShipment.id,
         );
+    const needsFinancialApproval =
+      normalizeStatusPolicy(selectedStatus).requiresApproval ?? false;
     const nextRecords: Shipment[] = shipmentRecords.map((shipment) => {
       if (shipment.id !== selectedShipment.id) return shipment;
       return {
@@ -22899,14 +22921,22 @@ function CourierShipmentsScreen({
             ? ("attention" as const)
             : ("none" as const),
         lastEvent: {
-          ar: createsReturn
+          ar: createsReturn && needsFinancialApproval
+            ? `سُجلت حالة «${selectedStatus.name.ar}» والمرتجع مطلوب فعليًا، وأثرها المالي ينتظر الاعتماد`
+            : createsReturn
             ? `سجّل المندوب حالة «${selectedStatus.name.ar}» والمرتجع لم تستلمه الشركة بعد`
+            : needsFinancialApproval
+              ? `سُجلت حالة «${selectedStatus.name.ar}» فعليًا وأثرها المالي ينتظر الاعتماد`
             : `سجّل المندوب حالة «${selectedStatus.name.ar}» الآن`,
-          en: createsReturn
+          en: createsReturn && needsFinancialApproval
+            ? `“${selectedStatus.name.en}” and its required return were recorded; the financial effect awaits approval`
+            : createsReturn
             ? `Courier recorded “${selectedStatus.name.en}”; company has not received the return yet`
+            : needsFinancialApproval
+              ? `“${selectedStatus.name.en}” was recorded; its financial effect awaits approval`
             : `Courier recorded “${selectedStatus.name.en}” just now`,
         },
-        ...(statusUsesShippingPayer(selectedStatus)
+        ...(statusUsesShippingPayer(selectedStatus) && !needsFinancialApproval
           ? {
               finalShippingPayer,
               finalShippingPayerSource:
@@ -22942,6 +22972,28 @@ function CourierShipmentsScreen({
             timestamp,
             settlementStatus: "pending" as const,
             courierCommissionSnapshot,
+            ...(needsFinancialApproval
+              ? {
+                  financialApproval: {
+                    state: "pending" as const,
+                    scope: "financial_effect" as const,
+                    requestedBy: {
+                      ar: "محاسب التشغيل",
+                      en: "Operations accountant",
+                    },
+                    requestedAt: timestamp,
+                    ...(statusUsesShippingPayer(selectedStatus)
+                      ? {
+                          proposedShippingPayer: finalShippingPayer,
+                          proposedShippingPayerReason:
+                            finalShippingPayer === shipment.shippingPayer
+                              ? ""
+                              : finalShippingPayerReason.trim(),
+                        }
+                      : {}),
+                  },
+                }
+              : {}),
           },
           ...(shipment.statusHistory ?? []),
         ],
@@ -22953,10 +23005,14 @@ function CourierShipmentsScreen({
     syncFinalPayer(remaining[0] ?? null);
     setToast(
       lang === "ar"
-        ? keepsAssignment
+        ? needsFinancialApproval
+          ? "تم تسجيل الحالة والحيازة فعليًا، وأُرسل أثرها المالي للاعتماد"
+          : keepsAssignment
           ? "تم تسجيل الحالة وبقيت الشحنة مع المندوب حسب السياسة"
           : "تم تسجيل الحالة ونُفذت إجراءاتها التشغيلية"
-        : keepsAssignment
+        : needsFinancialApproval
+          ? "Status and custody saved; the financial effect was sent for approval"
+          : keepsAssignment
           ? "Status saved and the shipment stayed with the courier by policy"
           : "Status saved and its operational actions were applied",
     );
@@ -27057,6 +27113,7 @@ function SenderAccountPreparationScreen({
     () =>
       allLines.filter(
         (line) =>
+          statusEventFinanciallyApproved(line.statusEvent) &&
           line.statusEvent.senderSettlementStatus !== "settled" &&
           line.statusEvent.senderSettlementStatus !== "reserved" &&
           (!line.moneySettled || !line.returnSettled),
@@ -27087,6 +27144,16 @@ function SenderAccountPreparationScreen({
   );
   const senderLines = eligibleLines.filter(
     (line) => line.shipment.sender.en === selectedSender.en,
+  );
+  const senderApprovalCount = shipmentRecords.reduce(
+    (count, shipment) =>
+      shipment.sender.en === selectedSender.en
+        ? count +
+          (shipment.statusHistory ?? []).filter(
+            (event) => event.financialApproval?.state === "pending",
+          ).length
+        : count,
+    0,
   );
   const filteredLines = senderLines.filter((line) => {
     const normalized = search.trim().toLowerCase();
@@ -27327,6 +27394,26 @@ function SenderAccountPreparationScreen({
               </small>
             </span>
           </section>
+          {senderApprovalCount > 0 && (
+            <section className="sender-prep-truth sender-prep-truth--approval">
+              <CircleAlert size={18} />
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? `${senderApprovalCount} واقعة لهذا الراسل تنتظر اعتماد أثرها المالي`
+                    : `${senderApprovalCount} event(s) for this sender await financial approval`}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "ليست مفقودة؛ ستظهر هنا تلقائيًا بعد اعتمادها من مركز التنبيهات."
+                    : "They are not missing; they will appear here automatically after approval in Alerts."}
+                </small>
+              </span>
+              <button className="secondary-button" type="button" onClick={() => onNavigate("alerts")}>
+                {lang === "ar" ? "فتح الاعتمادات" : "Open approvals"}
+              </button>
+            </section>
+          )}
 
           <section className="sender-prep-selector">
             <label>
@@ -28843,6 +28930,7 @@ function AlertsScreen({
   theme,
   shipmentRecords,
   settlements,
+  onShipmentsChange,
   onLang,
   onTheme,
   onNavigate,
@@ -28853,6 +28941,7 @@ function AlertsScreen({
   theme: Theme;
   shipmentRecords: Shipment[];
   settlements: CourierSettlement[];
+  onShipmentsChange: (records: Shipment[]) => void;
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -28861,7 +28950,15 @@ function AlertsScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [filter, setFilter] = useState<"all" | "payer" | "cash">("all");
+  const [filter, setFilter] = useState<"all" | "approval" | "payer" | "cash">("all");
+  const [approvalDecision, setApprovalDecision] = useState<{
+    shipmentId: string;
+    eventId: string;
+    decision: "approved" | "rejected";
+  } | null>(null);
+  const [decisionReason, setDecisionReason] = useState("");
+  const [decisionError, setDecisionError] = useState("");
+  const [toast, setToast] = useState("");
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
     style: "currency",
     currency: "EGP",
@@ -28875,9 +28972,127 @@ function AlertsScreen({
   const cashAlerts = settlements.filter(
     (settlement) => settlement.difference !== 0,
   );
-  const visiblePayerAlerts = filter === "cash" ? [] : payerAlerts;
-  const visibleCashAlerts = filter === "payer" ? [] : cashAlerts;
-  const totalAlerts = payerAlerts.length + cashAlerts.length;
+  const approvalRequests = shipmentRecords.flatMap((shipment) =>
+    (shipment.statusHistory ?? [])
+      .filter((event) => event.financialApproval?.state === "pending")
+      .map((event) => ({ shipment, event })),
+  );
+  const visibleApprovals =
+    filter === "all" || filter === "approval" ? approvalRequests : [];
+  const visiblePayerAlerts =
+    filter === "all" || filter === "payer" ? payerAlerts : [];
+  const visibleCashAlerts =
+    filter === "all" || filter === "cash" ? cashAlerts : [];
+  const totalAlerts =
+    approvalRequests.length + payerAlerts.length + cashAlerts.length;
+
+  function openApprovalDecision(
+    shipmentId: string,
+    eventId: string,
+    decision: "approved" | "rejected",
+  ) {
+    setApprovalDecision({ shipmentId, eventId, decision });
+    setDecisionReason("");
+    setDecisionError("");
+  }
+
+  function saveApprovalDecision() {
+    if (!approvalDecision) return;
+    if (!decisionReason.trim()) {
+      setDecisionError(
+        lang === "ar"
+          ? "اكتب سبب القرار لحماية سجل المراجعة."
+          : "Enter a decision reason to protect the audit trail.",
+      );
+      return;
+    }
+    const now = new Date();
+    const decidedAt: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      en: now.toLocaleString("en-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    };
+    const approved = approvalDecision.decision === "approved";
+    onShipmentsChange(
+      shipmentRecords.map((shipment) => {
+        if (shipment.id !== approvalDecision.shipmentId) return shipment;
+        const targetEvent = (shipment.statusHistory ?? []).find(
+          (event) => event.id === approvalDecision.eventId,
+        );
+        if (!targetEvent?.financialApproval) return shipment;
+        const proposedPayer =
+          targetEvent.financialApproval.proposedShippingPayer;
+        return {
+          ...shipment,
+          ...(approved && proposedPayer
+            ? {
+                finalShippingPayer: proposedPayer,
+                finalShippingPayerSource:
+                  proposedPayer === shipment.shippingPayer
+                    ? ("registered" as const)
+                    : ("accountant_correction" as const),
+                finalShippingPayerReason:
+                  targetEvent.financialApproval
+                    .proposedShippingPayerReason ?? "",
+                finalShippingPayerBy: {
+                  ar: "مسؤول الاعتماد",
+                  en: "Approval supervisor",
+                },
+                finalShippingPayerAt: decidedAt,
+              }
+            : {}),
+          lastEvent: {
+            ar: approved
+              ? `اعتمد المسؤول الأثر المالي لحالة «${targetEvent.status.ar}»`
+              : `رفض المسؤول الأثر المالي لحالة «${targetEvent.status.ar}» مع بقاء الحالة التشغيلية كما سُجلت`,
+            en: approved
+              ? `Supervisor approved the financial effect of “${targetEvent.status.en}”`
+              : `Supervisor rejected the financial effect of “${targetEvent.status.en}”; the recorded operational status remains unchanged`,
+          },
+          statusHistory: (shipment.statusHistory ?? []).map((event) =>
+            event.id === approvalDecision.eventId &&
+            event.financialApproval
+              ? {
+                  ...event,
+                  financialApproval: {
+                    ...event.financialApproval,
+                    state: approvalDecision.decision,
+                    decidedBy: {
+                      ar: "مسؤول الاعتماد",
+                      en: "Approval supervisor",
+                    },
+                    decidedAt,
+                    decisionReason: decisionReason.trim(),
+                  },
+                }
+              : event,
+          ),
+        };
+      }),
+    );
+    setApprovalDecision(null);
+    setDecisionReason("");
+    setDecisionError("");
+    setToast(
+      approved
+        ? lang === "ar"
+          ? "تم اعتماد الأثر المالي وأصبح مؤهلًا للتسوية"
+          : "Financial effect approved and is now settlement-eligible"
+        : lang === "ar"
+          ? "تم رفض الأثر المالي مع الحفاظ على الحالة والحيازة المسجلتين"
+          : "Financial effect rejected; recorded status and custody were preserved",
+    );
+    window.setTimeout(() => setToast(""), 2800);
+  }
 
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
@@ -28960,6 +29175,15 @@ function AlertsScreen({
             </button>
             <button
               type="button"
+              className={filter === "approval" ? "is-active" : ""}
+              onClick={() => setFilter("approval")}
+            >
+              <span><ShieldCheck size={18} /></span>
+              <small>{lang === "ar" ? "اعتمادات مالية" : "Financial approvals"}</small>
+              <strong>{approvalRequests.length}</strong>
+            </button>
+            <button
+              type="button"
               className={filter === "payer" ? "is-active" : ""}
               onClick={() => setFilter("payer")}
             >
@@ -28979,6 +29203,110 @@ function AlertsScreen({
           </section>
 
           <section className="alerts-list">
+            {visibleApprovals.map(({ shipment, event }) => {
+              const request = event.financialApproval!;
+              const isOpen =
+                approvalDecision?.shipmentId === shipment.id &&
+                approvalDecision.eventId === event.id;
+              return (
+                <article
+                  className="alert-record alert-record--approval"
+                  key={`approval-${shipment.id}-${event.id}`}
+                >
+                  <span className="alert-record__icon"><ShieldCheck size={20} /></span>
+                  <div className="alert-record__content">
+                    <span className="alert-record__title">
+                      <strong>
+                        {lang === "ar"
+                          ? "طلب اعتماد الأثر المالي"
+                          : "Financial-effect approval request"}
+                      </strong>
+                      <em>{request.requestedAt[lang]}</em>
+                    </span>
+                    <p>
+                      <b>{shipment.id}</b> · {shipment.recipient[lang]} · {shipment.sender[lang]}
+                    </p>
+                    <div className="alert-record__facts">
+                      <span>
+                        <small>{lang === "ar" ? "الحالة المسجلة" : "Recorded status"}</small>
+                        <strong>{event.status[lang]}</strong>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "المبلغ المحصل" : "Collected amount"}</small>
+                        <strong>{money.format(event.collectedAmount ?? 0)}</strong>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "الحيازة الحالية" : "Current custody"}</small>
+                        <strong>{shipment.custody[lang]}</strong>
+                      </span>
+                      {request.proposedShippingPayer && (
+                        <span>
+                          <small>{lang === "ar" ? "متحمل الشحن المقترح" : "Proposed shipping payer"}</small>
+                          <strong>
+                            {request.proposedShippingPayer === "recipient"
+                              ? lang === "ar" ? "المستلم" : "Recipient"
+                              : lang === "ar" ? "الراسل" : "Sender"}
+                          </strong>
+                        </span>
+                      )}
+                    </div>
+                    <p className="alert-record__reason">
+                      {lang === "ar"
+                        ? "الحالة والحيازة الفعلية مسجلتان؛ المبلغ والعمولة وحساب الراسل خارج التسويات حتى القرار."
+                        : "Status and custody are recorded; cash, commission, and sender accounting stay outside settlements until a decision."}
+                    </p>
+                    {isOpen && (
+                      <div className="approval-decision-box">
+                        <label>
+                          <span>
+                            {approvalDecision.decision === "approved"
+                              ? lang === "ar" ? "سبب الاعتماد" : "Approval reason"
+                              : lang === "ar" ? "سبب الرفض" : "Rejection reason"}
+                          </span>
+                          <textarea
+                            value={decisionReason}
+                            onChange={(changeEvent) => {
+                              setDecisionReason(changeEvent.target.value);
+                              setDecisionError("");
+                            }}
+                            placeholder={
+                              lang === "ar"
+                                ? "اكتب سببًا واضحًا يُحفظ في سجل المراجعة..."
+                                : "Enter a clear reason for the audit trail..."
+                            }
+                          />
+                        </label>
+                        {decisionError && <p className="field-error">{decisionError}</p>}
+                        <div>
+                          <button type="button" className="secondary-button" onClick={() => setApprovalDecision(null)}>
+                            {lang === "ar" ? "إلغاء" : "Cancel"}
+                          </button>
+                          <button type="button" className={approvalDecision.decision === "approved" ? "primary-button" : "danger-button"} onClick={saveApprovalDecision}>
+                            {approvalDecision.decision === "approved"
+                              ? lang === "ar" ? "تأكيد الاعتماد" : "Confirm approval"
+                              : lang === "ar" ? "تأكيد الرفض" : "Confirm rejection"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="alert-record__actions">
+                    <button type="button" className="secondary-button" onClick={() => onOpenShipment(shipment.id)}>
+                      <Eye size={16} />
+                      {lang === "ar" ? "فتح الشحنة" : "Open shipment"}
+                    </button>
+                    <button type="button" className="primary-button" onClick={() => openApprovalDecision(shipment.id, event.id, "approved")}>
+                      <Check size={16} />
+                      {lang === "ar" ? "اعتماد الأثر" : "Approve effect"}
+                    </button>
+                    <button type="button" className="danger-button" onClick={() => openApprovalDecision(shipment.id, event.id, "rejected")}>
+                      <X size={16} />
+                      {lang === "ar" ? "رفض الأثر" : "Reject effect"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
             {visiblePayerAlerts.map((shipment) => (
               <article className="alert-record alert-record--warning" key={`payer-${shipment.id}`}>
                 <span className="alert-record__icon"><CircleAlert size={20} /></span>
@@ -29050,7 +29378,7 @@ function AlertsScreen({
                 </button>
               </article>
             ))}
-            {visiblePayerAlerts.length === 0 && visibleCashAlerts.length === 0 && (
+            {visibleApprovals.length === 0 && visiblePayerAlerts.length === 0 && visibleCashAlerts.length === 0 && (
               <div className="alerts-empty">
                 <ShieldCheck size={32} />
                 <strong>{lang === "ar" ? "لا توجد اختلافات في العرض الحالي" : "No discrepancies in this view"}</strong>
@@ -29064,6 +29392,7 @@ function AlertsScreen({
           </section>
         </main>
       </div>
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
     </div>
   );
 }
@@ -29802,6 +30131,7 @@ function CourierAccountScreen({
         (shipment.statusHistory ?? []).some(
           (event) =>
             event.recordedBy.en === profile.courier.en &&
+            statusEventFinanciallyApproved(event) &&
             event.settlementStatus !== "settled",
         ),
       ),
@@ -29842,7 +30172,17 @@ function CourierAccountScreen({
       .filter(
         (event) =>
           event.recordedBy.en === selectedCourier.courier.en &&
+          statusEventFinanciallyApproved(event) &&
           event.settlementStatus !== "settled",
+      )
+      .map((event) => ({ shipment, event })),
+  );
+  const awaitingApprovalItems = shipmentRecords.flatMap((shipment) =>
+    (shipment.statusHistory ?? [])
+      .filter(
+        (event) =>
+          event.recordedBy.en === selectedCourier.courier.en &&
+          event.financialApproval?.state === "pending",
       )
       .map((event) => ({ shipment, event })),
   );
@@ -30400,6 +30740,26 @@ function CourierAccountScreen({
               </small>
             </span>
           </section>
+          {awaitingApprovalItems.length > 0 && (
+            <section className="courier-account-truth courier-account-truth--approval">
+              <CircleAlert size={18} />
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? `${awaitingApprovalItems.length} واقعة مسجلة فعليًا لكنها تنتظر اعتماد أثرها المالي`
+                    : `${awaitingApprovalItems.length} recorded event(s) await financial approval`}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? "لن تدخل التسوية الحالية قبل قرار المسؤول، ويمكن مراجعتها من مركز التنبيهات."
+                    : "They stay outside this settlement until the supervisor decides them."}
+                </small>
+              </span>
+              <button className="secondary-button" type="button" onClick={() => onNavigate("alerts")}>
+                {lang === "ar" ? "فتح الاعتمادات" : "Open approvals"}
+              </button>
+            </section>
+          )}
 
           <section className="courier-account-selector">
             <label>
@@ -30416,6 +30776,7 @@ function CourierAccountScreen({
                         (shipment.statusHistory ?? []).filter(
                           (event) =>
                             event.recordedBy.en === profile.courier.en &&
+                            statusEventFinanciallyApproved(event) &&
                             event.settlementStatus !== "settled",
                         ).length,
                       0,
@@ -37553,10 +37914,18 @@ function Shipment360Screen({
       : lang === "ar"
         ? "تسوية جزئية للراسل"
         : "Partial sender settlement"
-    : senderDraft
-      ? lang === "ar"
-        ? "محجوزة في مسودة حساب"
-        : "Reserved in account draft"
+      : senderDraft
+        ? lang === "ar"
+          ? "محجوزة في مسودة حساب"
+          : "Reserved in account draft"
+        : collectedEvent?.financialApproval?.state === "pending"
+          ? lang === "ar"
+            ? "الأثر المالي ينتظر الاعتماد"
+            : "Financial effect awaiting approval"
+          : collectedEvent?.financialApproval?.state === "rejected"
+            ? lang === "ar"
+              ? "الأثر المالي مرفوض وغير قابل للتسوية"
+              : "Financial effect rejected and not settlement-eligible"
       : collectedEvent?.senderSettlementStatus === "eligible"
         ? lang === "ar"
           ? "جاهزة لحساب الراسل"
@@ -37649,6 +38018,15 @@ function Shipment360Screen({
             : "",
           event.returnedPieces !== null
             ? `${lang === "ar" ? "مرتجع" : "Returned"}: ${event.returnedPieces}`
+            : "",
+          event.financialApproval
+            ? event.financialApproval.state === "pending"
+              ? lang === "ar"
+                ? "الأثر المالي: ينتظر الاعتماد"
+                : "Financial effect: awaiting approval"
+              : event.financialApproval.state === "approved"
+                ? `${lang === "ar" ? "الأثر المالي: معتمد" : "Financial effect: approved"}${event.financialApproval.decisionReason ? ` — ${event.financialApproval.decisionReason}` : ""}`
+                : `${lang === "ar" ? "الأثر المالي: مرفوض" : "Financial effect: rejected"}${event.financialApproval.decisionReason ? ` — ${event.financialApproval.decisionReason}` : ""}`
             : "",
         ]
           .filter(Boolean)
@@ -38118,8 +38496,8 @@ function Shipment360Screen({
                     </h2>
                     <p>
                       {lang === "ar"
-                        ? "التعليمات المسجلة تظل محفوظة، والاعتماد النهائي لا يظهر إلا بعد تسوية المندوب."
-                        : "Registered instructions remain preserved; final approval appears only after courier settlement."}
+                        ? "تعليمات التسجيل محفوظة، والقرار النهائي يُثبت مباشرة أو بعد اعتماد المسؤول إذا كانت الحالة حساسة."
+                        : "Registration instructions stay preserved; the final decision is recorded directly or after supervisor approval for sensitive statuses."}
                     </p>
                   </div>
                 </div>
@@ -39792,6 +40170,7 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           settlements={sharedCourierSettlements}
+          onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
