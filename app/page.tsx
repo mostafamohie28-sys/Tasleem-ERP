@@ -709,6 +709,7 @@ type TreasuryMovement = {
     | "operating_expense"
     | "cash_shortage"
     | "cash_surplus"
+    | "employee_debt_payment"
     | "other_income"
     | "other_expense"
     | "transfer";
@@ -733,6 +734,7 @@ type TreasuryMovement = {
       | "manual_voucher"
       | "treasury_transfer"
       | "cash_variance_review"
+      | "employee_debt_payment"
       | "reversal";
     id: string;
   };
@@ -829,6 +831,22 @@ type EmployeeTreasuryDebt = {
   state: "open" | "settled";
   reason: string;
   createdAt: Localized;
+};
+
+type EmployeeTreasuryDebtPayment = {
+  id: string;
+  debtId: string;
+  employeeId: string;
+  employee: Localized;
+  accountId: TreasuryAccount["id"];
+  mode: "full" | "partial";
+  amount: number;
+  debtBefore: number;
+  debtAfter: number;
+  note: string;
+  receivedBy: Localized;
+  receivedAt: Localized;
+  treasuryMovementId: string;
 };
 
 type TreasuryVarianceIssue = {
@@ -4343,6 +4361,8 @@ const treasuryCashSessionHistoryData: TreasuryCashSession[] = [];
 const treasuryVarianceReviewsData: TreasuryVarianceReview[] = [];
 
 const employeeTreasuryDebtsData: EmployeeTreasuryDebt[] = [];
+
+const employeeTreasuryDebtPaymentsData: EmployeeTreasuryDebtPayment[] = [];
 
 const financialDayCloseSnapshotsData: FinancialDayCloseSnapshot[] = [];
 
@@ -24607,12 +24627,14 @@ function TreasuryScreen({
   cashSessionHistory,
   varianceReviews,
   employeeTreasuryDebts,
+  employeeTreasuryDebtPayments,
   dayCloseSnapshots,
   onMovementsChange,
   onCashSessionChange,
   onCashSessionHistoryChange,
   onVarianceReviewsChange,
   onEmployeeTreasuryDebtsChange,
+  onEmployeeTreasuryDebtPaymentsChange,
   onDayCloseSnapshotsChange,
   onLang,
   onTheme,
@@ -24630,12 +24652,16 @@ function TreasuryScreen({
   cashSessionHistory: TreasuryCashSession[];
   varianceReviews: TreasuryVarianceReview[];
   employeeTreasuryDebts: EmployeeTreasuryDebt[];
+  employeeTreasuryDebtPayments: EmployeeTreasuryDebtPayment[];
   dayCloseSnapshots: FinancialDayCloseSnapshot[];
   onMovementsChange: (movements: TreasuryMovement[]) => void;
   onCashSessionChange: (session: TreasuryCashSession) => void;
   onCashSessionHistoryChange: (sessions: TreasuryCashSession[]) => void;
   onVarianceReviewsChange: (reviews: TreasuryVarianceReview[]) => void;
   onEmployeeTreasuryDebtsChange: (debts: EmployeeTreasuryDebt[]) => void;
+  onEmployeeTreasuryDebtPaymentsChange: (
+    payments: EmployeeTreasuryDebtPayment[],
+  ) => void;
   onDayCloseSnapshotsChange: (snapshots: FinancialDayCloseSnapshot[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -24660,6 +24686,7 @@ function TreasuryScreen({
     | "open-session"
     | "handover"
     | "variance-review"
+    | "employee-debt-payment"
     | "close-session"
     | "close-day"
     | null
@@ -24683,6 +24710,13 @@ function TreasuryScreen({
   const [varianceDecision, setVarianceDecision] =
     useState<TreasuryVarianceReview["resolution"]>("company_expense");
   const [verifiedCount, setVerifiedCount] = useState("");
+  const [selectedEmployeeDebt, setSelectedEmployeeDebt] =
+    useState<EmployeeTreasuryDebt | null>(null);
+  const [debtPaymentMode, setDebtPaymentMode] =
+    useState<"full" | "partial">("full");
+  const [debtPaymentAmount, setDebtPaymentAmount] = useState("");
+  const [debtPaymentAccountId, setDebtPaymentAccountId] =
+    useState<TreasuryAccount["id"]>("main-cash");
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -24702,6 +24736,10 @@ function TreasuryScreen({
     operating_expense: { ar: "مصروف تشغيلي", en: "Operating expense" },
     cash_shortage: { ar: "تسوية عجز عهدة", en: "Cash shortage adjustment" },
     cash_surplus: { ar: "تسوية زيادة عهدة", en: "Cash surplus adjustment" },
+    employee_debt_payment: {
+      ar: "سداد مديونية موظف",
+      en: "Employee debt payment",
+    },
     other_income: { ar: "إيراد آخر", en: "Other income" },
     other_expense: { ar: "مصروف آخر", en: "Other expense" },
     transfer: { ar: "تحويل بين الخزن", en: "Treasury transfer" },
@@ -24936,6 +24974,10 @@ function TreasuryScreen({
     setSelectedVarianceIssue(null);
     setVarianceDecision("company_expense");
     setVerifiedCount("");
+    setSelectedEmployeeDebt(null);
+    setDebtPaymentMode("full");
+    setDebtPaymentAmount("");
+    setDebtPaymentAccountId("main-cash");
   }
 
   function openMovementDialog() {
@@ -25013,6 +25055,17 @@ function TreasuryScreen({
     setClosingNote("");
     setFormError("");
     setDialog("variance-review");
+  }
+
+  function openEmployeeDebtPaymentDialog(debt: EmployeeTreasuryDebt) {
+    if (debt.state !== "open" || debt.remainingAmount <= 0) return;
+    setSelectedEmployeeDebt(debt);
+    setDebtPaymentMode("full");
+    setDebtPaymentAmount(String(debt.remainingAmount));
+    setDebtPaymentAccountId("main-cash");
+    setClosingNote("");
+    setFormError("");
+    setDialog("employee-debt-payment");
   }
 
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
@@ -25920,6 +25973,170 @@ function TreasuryScreen({
     );
   }
 
+  function submitEmployeeDebtPayment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selectedDebt = selectedEmployeeDebt;
+    const currentDebt = employeeTreasuryDebts.find(
+      (debt) => debt.id === selectedDebt?.id,
+    );
+    if (
+      !currentDebt ||
+      currentDebt.state !== "open" ||
+      currentDebt.remainingAmount <= 0
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "هذه المديونية مسددة أو لم تعد متاحة."
+          : "This receivable is settled or no longer available.",
+      );
+      return;
+    }
+    const amount =
+      debtPaymentMode === "full"
+        ? currentDebt.remainingAmount
+        : Number(debtPaymentAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب مبلغ سداد صحيحًا أكبر من صفر."
+          : "Enter a valid payment amount above zero.",
+      );
+      return;
+    }
+    if (amount > currentDebt.remainingAmount) {
+      setFormError(
+        lang === "ar"
+          ? "مبلغ السداد أكبر من المتبقي على الموظف."
+          : "The payment exceeds the remaining receivable.",
+      );
+      return;
+    }
+    if (
+      debtPaymentMode === "partial" &&
+      amount >= currentDebt.remainingAmount
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "إذا كان المبلغ يساوي المتبقي اختر «سداد كامل»."
+          : "Choose full payment when paying the entire remaining amount.",
+      );
+      return;
+    }
+    if (debtPaymentMode === "partial" && !closingNote.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب ملاحظة توضح السداد الجزئي."
+          : "Add a note explaining the partial payment.",
+      );
+      return;
+    }
+    const receivingAccount = accounts.find(
+      (account) => account.id === debtPaymentAccountId,
+    );
+    if (!receivingAccount || receivingAccount.state !== "active") {
+      setFormError(
+        lang === "ar"
+          ? "اختر خزنة أو حسابًا ماليًا نشطًا لاستلام المبلغ."
+          : "Choose an active treasury account to receive the payment.",
+      );
+      return;
+    }
+    if (
+      receivingAccount.kind === "cash" &&
+      cashSession.state !== "open"
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "افتح جلسة النقد قبل استلام السداد نقدًا."
+          : "Open the cash session before receiving a cash payment.",
+      );
+      return;
+    }
+    const now = new Date();
+    const nowNumber = now.getTime();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const receiptId = `EDP-${nowNumber.toString().slice(-9)}`;
+    const movementId = `TM-EDP-${nowNumber.toString().slice(-9)}`;
+    const debtAfter = currentDebt.remainingAmount - amount;
+    const payment: EmployeeTreasuryDebtPayment = {
+      id: receiptId,
+      debtId: currentDebt.id,
+      employeeId: currentDebt.employeeId,
+      employee: currentDebt.employee,
+      accountId: receivingAccount.id,
+      mode: debtPaymentMode,
+      amount,
+      debtBefore: currentDebt.remainingAmount,
+      debtAfter,
+      note: closingNote.trim(),
+      receivedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      receivedAt: timestamp,
+      treasuryMovementId: movementId,
+    };
+    const nextSequence =
+      movements.reduce(
+        (largest, movement) => Math.max(largest, movement.sequence),
+        0,
+      ) + 1;
+    const movement: TreasuryMovement = {
+      id: movementId,
+      accountId: receivingAccount.id,
+      direction: "in",
+      category: "employee_debt_payment",
+      amount,
+      party: currentDebt.employee,
+      description: {
+        ar: `استلام سداد مديونية عهدة ${currentDebt.id} من ${currentDebt.employee.ar}`,
+        en: `Custody receivable payment for ${currentDebt.id} from ${currentDebt.employee.en}`,
+      },
+      reference: receiptId,
+      source: "system",
+      createdBy: payment.receivedBy,
+      timestamp,
+      sequence: nextSequence,
+      sourceDocument: {
+        type: "employee_debt_payment",
+        id: receiptId,
+      },
+    };
+    onEmployeeTreasuryDebtsChange(
+      employeeTreasuryDebts.map((debt) =>
+        debt.id === currentDebt.id
+          ? {
+              ...debt,
+              paidAmount: debt.paidAmount + amount,
+              remainingAmount: debtAfter,
+              state: debtAfter === 0 ? "settled" : "open",
+            }
+          : debt,
+      ),
+    );
+    onEmployeeTreasuryDebtPaymentsChange([
+      payment,
+      ...employeeTreasuryDebtPayments,
+    ]);
+    onMovementsChange([movement, ...movements]);
+    resetDialog();
+    showToast(
+      debtAfter === 0
+        ? lang === "ar"
+          ? `تم استلام السداد وإغلاق المديونية بالإيصال ${receiptId}`
+          : `Payment received and receivable closed under ${receiptId}`
+        : lang === "ar"
+          ? `تم استلام سداد جزئي والمتبقي ${money.format(debtAfter)}`
+          : `Partial payment received; ${money.format(debtAfter)} remains`,
+    );
+  }
+
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
       <Sidebar
@@ -26776,6 +26993,18 @@ function TreasuryScreen({
                           </span>
                           <b>{money.format(debt.remainingAmount)}</b>
                           <small>{debt.reason}</small>
+                          <button
+                            className="secondary-button"
+                            type="button"
+                            onClick={() =>
+                              openEmployeeDebtPaymentDialog(debt)
+                            }
+                          >
+                            <HandCoins size={15} />
+                            {lang === "ar"
+                              ? "استلام سداد"
+                              : "Receive payment"}
+                          </button>
                         </article>
                       ))
                   ) : (
@@ -26793,6 +27022,35 @@ function TreasuryScreen({
                             : "Created only by an explicit authorized review."}
                         </small>
                       </span>
+                    </div>
+                  )}
+                  {employeeTreasuryDebtPayments.length > 0 && (
+                    <div className="employee-debt-payments">
+                      <div>
+                        <ReceiptText size={16} />
+                        <strong>
+                          {lang === "ar"
+                            ? "آخر إيصالات السداد"
+                            : "Latest payment receipts"}
+                        </strong>
+                      </div>
+                      {employeeTreasuryDebtPayments
+                        .slice(0, 5)
+                        .map((payment) => (
+                          <article key={payment.id}>
+                            <span>
+                              <strong>{payment.employee[lang]}</strong>
+                              <small>
+                                {payment.id} · {payment.receivedAt[lang]}
+                              </small>
+                            </span>
+                            <b>{money.format(payment.amount)}</b>
+                            <small>
+                              {lang === "ar" ? "المتبقي" : "Remaining"}{" "}
+                              {money.format(payment.debtAfter)}
+                            </small>
+                          </article>
+                        ))}
                     </div>
                   )}
                 </div>
@@ -27129,6 +27387,10 @@ function TreasuryScreen({
                               ? lang === "ar"
                                 ? "قرار مراجعة فرق عهدة"
                                 : "Custody variance review"
+                            : selectedMovement.sourceDocument.type === "employee_debt_payment"
+                              ? lang === "ar"
+                                ? "إيصال سداد مديونية موظف"
+                                : "Employee debt payment receipt"
                             : selectedMovement.sourceDocument.type === "reversal"
                               ? lang === "ar"
                                 ? "تصحيح حركة"
@@ -27254,6 +27516,8 @@ function TreasuryScreen({
                   ? submitHandover
                 : dialog === "variance-review"
                   ? submitVarianceReview
+                : dialog === "employee-debt-payment"
+                  ? submitEmployeeDebtPayment
                 : dialog === "movement"
                   ? submitManualMovement
                   : dialog === "close-session"
@@ -27285,6 +27549,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "قرار مالي موثق"
                         : "Documented financial decision"
+                    : dialog === "employee-debt-payment"
+                      ? lang === "ar"
+                        ? "إيصال تحصيل مستقل"
+                        : "Independent collection receipt"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "مطابقة النقد الفعلي"
@@ -27318,6 +27586,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "مراجعة فرق العهدة"
                         : "Review custody variance"
+                    : dialog === "employee-debt-payment"
+                      ? lang === "ar"
+                        ? "استلام سداد مديونية موظف"
+                        : "Receive employee debt payment"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "عد وإغلاق جلسة الخزنة"
@@ -27341,7 +27613,173 @@ function TreasuryScreen({
               </button>
             </div>
 
-            {dialog === "variance-review" && selectedVarianceIssue ? (
+            {dialog === "employee-debt-payment" && selectedEmployeeDebt ? (
+              <div className="employee-debt-payment-dialog">
+                <div className="employee-debt-payment-summary">
+                  <span>
+                    <UserRound size={19} />
+                  </span>
+                  <span>
+                    <small>{lang === "ar" ? "الموظف" : "Employee"}</small>
+                    <strong>{selectedEmployeeDebt.employee[lang]}</strong>
+                    <b>{selectedEmployeeDebt.id}</b>
+                  </span>
+                  <article>
+                    <small>
+                      {lang === "ar"
+                        ? "أصل المديونية"
+                        : "Original receivable"}
+                    </small>
+                    <strong>
+                      {money.format(selectedEmployeeDebt.originalAmount)}
+                    </strong>
+                  </article>
+                  <article>
+                    <small>
+                      {lang === "ar"
+                        ? "المتبقي قبل السداد"
+                        : "Remaining before payment"}
+                    </small>
+                    <strong>
+                      {money.format(selectedEmployeeDebt.remainingAmount)}
+                    </strong>
+                  </article>
+                </div>
+
+                <div className="employee-debt-payment-mode">
+                  <button
+                    type="button"
+                    className={
+                      debtPaymentMode === "full" ? "active" : ""
+                    }
+                    onClick={() => {
+                      setDebtPaymentMode("full");
+                      setDebtPaymentAmount(
+                        String(selectedEmployeeDebt.remainingAmount),
+                      );
+                    }}
+                  >
+                    <Check size={17} />
+                    <span>
+                      <strong>
+                        {lang === "ar" ? "سداد كامل" : "Full payment"}
+                      </strong>
+                      <small>
+                        {money.format(selectedEmployeeDebt.remainingAmount)}
+                      </small>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={
+                      debtPaymentMode === "partial" ? "active" : ""
+                    }
+                    onClick={() => {
+                      setDebtPaymentMode("partial");
+                      setDebtPaymentAmount("");
+                    }}
+                  >
+                    <HandCoins size={17} />
+                    <span>
+                      <strong>
+                        {lang === "ar" ? "سداد جزئي" : "Partial payment"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "ويبقى الباقي مفتوحًا"
+                          : "Keeps the remainder open"}
+                      </small>
+                    </span>
+                  </button>
+                </div>
+
+                <div className="treasury-form-grid">
+                  <label className="treasury-form-field cash-actual-field">
+                    <span>{lang === "ar" ? "المبلغ المستلم" : "Received amount"}</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={
+                        debtPaymentMode === "full"
+                          ? selectedEmployeeDebt.remainingAmount
+                          : debtPaymentAmount
+                      }
+                      onChange={(event) =>
+                        setDebtPaymentAmount(event.target.value)
+                      }
+                      disabled={debtPaymentMode === "full"}
+                      placeholder="0"
+                    />
+                  </label>
+                  <label className="treasury-form-field">
+                    <span>{lang === "ar" ? "دخل إلى" : "Received into"}</span>
+                    <select
+                      value={debtPaymentAccountId}
+                      onChange={(event) =>
+                        setDebtPaymentAccountId(
+                          event.target.value as TreasuryAccount["id"],
+                        )
+                      }
+                    >
+                      {accounts
+                        .filter((account) => account.state === "active")
+                        .map((account) => (
+                          <option value={account.id} key={account.id}>
+                            {account.name[lang]} ·{" "}
+                            {money.format(accountBalance(account))}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                </div>
+
+                <div className="employee-debt-payment-preview">
+                  <span>
+                    <small>{lang === "ar" ? "قبل السداد" : "Before"}</small>
+                    <strong>
+                      {money.format(selectedEmployeeDebt.remainingAmount)}
+                    </strong>
+                  </span>
+                  <ChevronLeft size={18} />
+                  <span>
+                    <small>{lang === "ar" ? "بعد السداد" : "After"}</small>
+                    <strong>
+                      {money.format(
+                        Math.max(
+                          0,
+                          selectedEmployeeDebt.remainingAmount -
+                            (debtPaymentMode === "full"
+                              ? selectedEmployeeDebt.remainingAmount
+                              : Number(debtPaymentAmount) || 0),
+                        ),
+                      )}
+                    </strong>
+                  </span>
+                </div>
+
+                <label className="treasury-form-field">
+                  <span>
+                    {lang === "ar"
+                      ? debtPaymentMode === "partial"
+                        ? "ملاحظة السداد الجزئي — إلزامية"
+                        : "ملاحظة الإيصال — اختيارية"
+                      : debtPaymentMode === "partial"
+                        ? "Partial payment note — required"
+                        : "Receipt note — optional"}
+                  </span>
+                  <textarea
+                    value={closingNote}
+                    onChange={(event) => setClosingNote(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "اكتب وسيلة أو تفاصيل الاستلام عند الحاجة..."
+                        : "Add payment method or receipt details when needed..."
+                    }
+                  />
+                </label>
+              </div>
+            ) : dialog === "variance-review" && selectedVarianceIssue ? (
               <div className="variance-review-dialog">
                 <div className="variance-review-summary">
                   <span
@@ -28032,6 +28470,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "القرار يُغلق فرقًا واحدًا فقط. التسوية المالية تُنشئ حركة مرتبطة، ومديونية الموظف تُنشأ فقط عند اختيارها صراحة."
                       : "The decision closes one variance only. Financial settlement creates a linked movement, and employee debt is created only when explicitly selected."
+                  : dialog === "employee-debt-payment"
+                    ? lang === "ar"
+                      ? "التأكيد ينشئ إيصالًا وحركة داخل الخزنة ويخفض المديونية بنفس المبلغ في عملية واحدة."
+                      : "Confirmation creates a receipt and treasury inflow and reduces the receivable by the same amount in one operation."
                   : dialog === "close-session"
                     ? lang === "ar"
                       ? "الإغلاق يثبت العد والفرق فقط؛ لا يغيّر حركة قديمة ولا يصنع مصروفًا أو دينًا."
@@ -28077,6 +28519,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "اعتماد قرار المراجعة"
                       : "Approve review decision"
+                  : dialog === "employee-debt-payment"
+                    ? lang === "ar"
+                      ? "تأكيد الاستلام وإصدار الإيصال"
+                      : "Confirm receipt & issue voucher"
                   : dialog === "close-session"
                     ? lang === "ar"
                       ? "تأكيد العد وإغلاق الجلسة"
@@ -41776,6 +42222,12 @@ export default function Home() {
     useState<TreasuryVarianceReview[]>(treasuryVarianceReviewsData);
   const [sharedEmployeeTreasuryDebts, setSharedEmployeeTreasuryDebts] =
     useState<EmployeeTreasuryDebt[]>(employeeTreasuryDebtsData);
+  const [
+    sharedEmployeeTreasuryDebtPayments,
+    setSharedEmployeeTreasuryDebtPayments,
+  ] = useState<EmployeeTreasuryDebtPayment[]>(
+    employeeTreasuryDebtPaymentsData,
+  );
   const [sharedFinancialDayCloses, setSharedFinancialDayCloses] = useState<
     FinancialDayCloseSnapshot[]
   >(financialDayCloseSnapshotsData);
@@ -41832,6 +42284,7 @@ export default function Home() {
           treasuryCashSessionHistory?: TreasuryCashSession[];
           treasuryVarianceReviews?: TreasuryVarianceReview[];
           employeeTreasuryDebts?: EmployeeTreasuryDebt[];
+          employeeTreasuryDebtPayments?: EmployeeTreasuryDebtPayment[];
           financialDayCloses?: FinancialDayCloseSnapshot[];
           trusts?: TrustRecord[];
           trustPolicy?: TrustPolicy;
@@ -42074,6 +42527,11 @@ export default function Home() {
         }
         if (Array.isArray(parsed.employeeTreasuryDebts)) {
           setSharedEmployeeTreasuryDebts(parsed.employeeTreasuryDebts);
+        }
+        if (Array.isArray(parsed.employeeTreasuryDebtPayments)) {
+          setSharedEmployeeTreasuryDebtPayments(
+            parsed.employeeTreasuryDebtPayments,
+          );
         }
         if (Array.isArray(parsed.financialDayCloses)) {
           setSharedFinancialDayCloses(parsed.financialDayCloses);
@@ -42417,6 +42875,8 @@ export default function Home() {
         treasuryCashSessionHistory: sharedTreasuryCashSessionHistory,
         treasuryVarianceReviews: sharedTreasuryVarianceReviews,
         employeeTreasuryDebts: sharedEmployeeTreasuryDebts,
+        employeeTreasuryDebtPayments:
+          sharedEmployeeTreasuryDebtPayments,
         financialDayCloses: sharedFinancialDayCloses,
         trusts: sharedTrusts,
         trustPolicy: sharedTrustPolicy,
@@ -42440,6 +42900,7 @@ export default function Home() {
     sharedTreasuryCashSessionHistory,
     sharedTreasuryVarianceReviews,
     sharedEmployeeTreasuryDebts,
+    sharedEmployeeTreasuryDebtPayments,
     sharedFinancialDayCloses,
     sharedTrustPolicy,
     sharedTrusts,
@@ -42835,12 +43296,18 @@ export default function Home() {
           cashSessionHistory={sharedTreasuryCashSessionHistory}
           varianceReviews={sharedTreasuryVarianceReviews}
           employeeTreasuryDebts={sharedEmployeeTreasuryDebts}
+          employeeTreasuryDebtPayments={
+            sharedEmployeeTreasuryDebtPayments
+          }
           dayCloseSnapshots={sharedFinancialDayCloses}
           onMovementsChange={setSharedTreasuryMovements}
           onCashSessionChange={setSharedTreasuryCashSession}
           onCashSessionHistoryChange={setSharedTreasuryCashSessionHistory}
           onVarianceReviewsChange={setSharedTreasuryVarianceReviews}
           onEmployeeTreasuryDebtsChange={setSharedEmployeeTreasuryDebts}
+          onEmployeeTreasuryDebtPaymentsChange={
+            setSharedEmployeeTreasuryDebtPayments
+          }
           onDayCloseSnapshotsChange={setSharedFinancialDayCloses}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>

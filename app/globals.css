@@ -19754,6 +19754,14 @@ tbody tr:hover {
   line-height: 1.5;
 }
 
+.employee-treasury-debts > article > button {
+  grid-column: 1 / -1;
+  min-height: 34px;
+  justify-content: center;
+  margin-top: 3px;
+  font-size: 9px;
+}
+
 .employee-treasury-debts__empty {
   min-height: 130px;
   display: flex;
@@ -19766,6 +19774,50 @@ tbody tr:hover {
 .employee-treasury-debts__empty span {
   display: grid;
   gap: 3px;
+}
+
+.employee-debt-payments {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.employee-debt-payments > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--blue-600);
+}
+
+.employee-debt-payments > div strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.employee-debt-payments > article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.employee-debt-payments > article > span {
+  display: grid;
+  gap: 2px;
+}
+
+.employee-debt-payments > article > b {
+  color: var(--green-600);
+  font-size: 10px;
+}
+
+.employee-debt-payments > article > small {
+  grid-column: 1 / -1;
 }
 
 .treasury-variance-history {
@@ -19802,6 +19854,121 @@ tbody tr:hover {
 .variance-review-dialog {
   display: grid;
   gap: 12px;
+}
+
+.employee-debt-payment-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.employee-debt-payment-summary {
+  display: grid;
+  grid-template-columns: 38px minmax(135px, 1fr) minmax(100px, 0.8fr) minmax(110px, 0.8fr);
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.employee-debt-payment-summary > span:first-child {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--orange-500) 12%, var(--surface-raised));
+  color: var(--orange-600);
+}
+
+.employee-debt-payment-summary > span:nth-child(2),
+.employee-debt-payment-summary article {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.employee-debt-payment-summary small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.employee-debt-payment-summary strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.employee-debt-payment-summary span > b {
+  color: var(--text-soft);
+  font-size: 8px;
+}
+
+.employee-debt-payment-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.employee-debt-payment-mode > button {
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+  color: var(--text-soft);
+  text-align: start;
+}
+
+.employee-debt-payment-mode > button.active {
+  border-color: color-mix(in srgb, var(--blue-600) 42%, var(--border));
+  background: color-mix(in srgb, var(--blue-600) 8%, var(--surface-raised));
+  color: var(--blue-600);
+}
+
+.employee-debt-payment-mode span {
+  display: grid;
+  gap: 3px;
+}
+
+.employee-debt-payment-mode strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.employee-debt-payment-mode small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.employee-debt-payment-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--green-600) 25%, var(--border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--green-600) 6%, var(--surface-soft));
+  color: var(--green-600);
+}
+
+.employee-debt-payment-preview > span {
+  display: grid;
+  gap: 3px;
+}
+
+.employee-debt-payment-preview small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.employee-debt-payment-preview strong {
+  color: var(--text);
+  font-size: 12px;
 }
 
 .variance-review-summary {
@@ -20682,6 +20849,7 @@ tbody tr:hover {
 
   .treasury-variance-list article,
   .variance-review-summary,
+  .employee-debt-payment-summary,
   .treasury-variance-history > article {
     grid-template-columns: 34px minmax(0, 1fr);
   }
@@ -20691,6 +20859,7 @@ tbody tr:hover {
   .treasury-variance-list article > button,
   .variance-review-summary > article,
   .variance-review-summary > b,
+  .employee-debt-payment-summary > article,
   .treasury-variance-history > article > span,
   .treasury-variance-history > article > b {
     grid-column: 2 / -1;
@@ -20698,6 +20867,16 @@ tbody tr:hover {
 
   .variance-decision-grid {
     grid-template-columns: 1fr;
+  }
+
+  .employee-debt-payment-mode,
+  .employee-debt-payment-preview {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-debt-payment-preview > svg {
+    margin: -2px auto;
+    transform: rotate(90deg);
   }
 
   .cash-session-history__list article {
