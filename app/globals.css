@@ -19442,7 +19442,7 @@ tbody tr:hover {
 
 .treasury-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 12px;
   padding: 6px;
@@ -19504,9 +19504,319 @@ tbody tr:hover {
 
 .cash-session-space,
 .treasury-variance-space,
+.treasury-reconciliation-space,
 .financial-day-space {
   display: grid;
   gap: 12px;
+}
+
+.treasury-reconciliation-truth {
+  min-height: 68px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in srgb, var(--blue-600) 28%, var(--border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--blue-600) 6%, var(--surface-raised));
+  color: var(--blue-600);
+}
+
+.treasury-reconciliation-truth > span {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.treasury-reconciliation-truth strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.treasury-reconciliation-truth small {
+  color: var(--text-soft);
+  font-size: 9.5px;
+  line-height: 1.65;
+}
+
+.treasury-reconciliation-truth > b {
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: var(--surface-raised);
+  color: var(--orange-600);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.treasury-reconciliation-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.treasury-reconciliation-metrics article {
+  min-width: 0;
+  min-height: 84px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.treasury-reconciliation-metrics small,
+.treasury-reconciliation-metrics span {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.treasury-reconciliation-metrics strong {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.treasury-reconciliation-metrics .matched strong {
+  color: var(--green-600);
+}
+
+.treasury-reconciliation-metrics .difference strong {
+  color: var(--orange-600);
+}
+
+.treasury-reconciliation-accounts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.treasury-reconciliation-accounts > article {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 38px minmax(140px, 1fr) minmax(120px, 0.7fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.treasury-reconciliation-accounts .source-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--blue-600) 10%, var(--surface-soft));
+  color: var(--blue-600);
+}
+
+.treasury-reconciliation-accounts > article > span:nth-child(2),
+.treasury-reconciliation-account__balance {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.treasury-reconciliation-accounts small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.treasury-reconciliation-accounts strong {
+  color: var(--text);
+  font-size: 10.5px;
+}
+
+.treasury-reconciliation-accounts span > b {
+  color: var(--text-soft);
+  font-size: 8px;
+}
+
+.treasury-reconciliation-accounts .secondary-button {
+  min-height: 36px;
+  padding: 7px 10px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.treasury-reconciliation-history {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.treasury-reconciliation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.treasury-reconciliation-list > article {
+  display: grid;
+  grid-template-columns: 34px minmax(145px, 1.1fr) repeat(3, minmax(105px, 0.7fr)) minmax(120px, 0.8fr);
+  align-items: center;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.treasury-reconciliation-list > article > span:not(.treasury-reconciliation-status) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.treasury-reconciliation-list small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.treasury-reconciliation-list strong {
+  color: var(--text);
+  font-size: 9.5px;
+}
+
+.treasury-reconciliation-list span > b {
+  color: var(--text-soft);
+  font-size: 8px;
+}
+
+.treasury-reconciliation-list strong.matched {
+  color: var(--green-600);
+}
+
+.treasury-reconciliation-list strong.surplus {
+  color: var(--blue-600);
+}
+
+.treasury-reconciliation-list strong.shortage {
+  color: var(--red-600);
+}
+
+.treasury-reconciliation-list > article > p {
+  grid-column: 2 / -1;
+  margin: 0;
+  padding-top: 7px;
+  border-top: 1px dashed var(--border);
+  color: var(--text-soft);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.treasury-reconciliation-status {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.treasury-reconciliation-status.matched {
+  background: color-mix(in srgb, var(--green-600) 11%, var(--surface-raised));
+  color: var(--green-600);
+}
+
+.treasury-reconciliation-status.under_review {
+  background: color-mix(in srgb, var(--orange-500) 12%, var(--surface-raised));
+  color: var(--orange-600);
+}
+
+.statement-reconciliation-dialog {
+  display: grid;
+  gap: 12px;
+}
+
+.statement-reconciliation-account {
+  display: grid;
+  grid-template-columns: 38px minmax(150px, 1fr) minmax(120px, 0.7fr);
+  align-items: center;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.statement-reconciliation-account > span:first-child {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--blue-600) 10%, var(--surface-raised));
+  color: var(--blue-600);
+}
+
+.statement-reconciliation-account > span:nth-child(2),
+.statement-reconciliation-account article {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.statement-reconciliation-account small,
+.statement-reconciliation-preview small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.statement-reconciliation-account strong,
+.statement-reconciliation-preview strong {
+  color: var(--text);
+  font-size: 10px;
+}
+
+.statement-reconciliation-preview {
+  display: grid;
+  grid-template-columns: minmax(100px, 1fr) 34px minmax(100px, 1fr) minmax(100px, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.statement-reconciliation-preview article {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px;
+  border-radius: 9px;
+  background: var(--surface-raised);
+}
+
+.statement-reconciliation-preview > span {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+}
+
+.statement-reconciliation-preview.matched > span {
+  background: color-mix(in srgb, var(--green-600) 11%, var(--surface-raised));
+  color: var(--green-600);
+}
+
+.statement-reconciliation-preview.different > span {
+  background: color-mix(in srgb, var(--orange-500) 12%, var(--surface-raised));
+  color: var(--orange-600);
+}
+
+.statement-reconciliation-preview.different article:last-child strong {
+  color: var(--orange-600);
 }
 
 .treasury-variance-truth {
@@ -20804,6 +21114,7 @@ tbody tr:hover {
 @media (max-width: 980px) {
   .cash-session-metrics,
   .treasury-variance-metrics,
+  .treasury-reconciliation-metrics,
   .financial-day-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -20812,6 +21123,19 @@ tbody tr:hover {
   .treasury-variance-grid,
   .financial-day-grid {
     grid-template-columns: 1fr;
+  }
+
+  .treasury-reconciliation-accounts {
+    grid-template-columns: 1fr;
+  }
+
+  .treasury-reconciliation-list > article {
+    grid-template-columns: 34px minmax(145px, 1fr) repeat(2, minmax(100px, 0.7fr));
+  }
+
+  .treasury-reconciliation-list > article > span:nth-child(5),
+  .treasury-reconciliation-list > article > span:nth-child(6) {
+    grid-column: span 2;
   }
 
   .treasury-variance-list article {
@@ -20916,9 +21240,51 @@ tbody tr:hover {
 @media (max-width: 520px) {
   .cash-session-metrics,
   .treasury-variance-metrics,
+  .treasury-reconciliation-metrics,
   .financial-day-metrics,
   .cash-close-summary {
     grid-template-columns: 1fr;
+  }
+
+  .treasury-reconciliation-truth {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .treasury-reconciliation-truth > b {
+    grid-column: 1 / -1;
+    text-align: center;
+  }
+
+  .treasury-reconciliation-accounts > article {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .treasury-reconciliation-account__balance,
+  .treasury-reconciliation-accounts .secondary-button {
+    grid-column: 1 / -1;
+  }
+
+  .treasury-reconciliation-list > article {
+    grid-template-columns: 30px minmax(0, 1fr);
+  }
+
+  .treasury-reconciliation-list > article > span:nth-child(n + 3) {
+    grid-column: 2;
+  }
+
+  .statement-reconciliation-account,
+  .statement-reconciliation-preview {
+    grid-template-columns: 36px minmax(0, 1fr);
+  }
+
+  .statement-reconciliation-account article,
+  .statement-reconciliation-preview article {
+    grid-column: 1 / -1;
+  }
+
+  .statement-reconciliation-preview > span {
+    grid-column: 1 / -1;
+    justify-self: center;
   }
 }
 

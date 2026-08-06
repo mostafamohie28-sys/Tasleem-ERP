@@ -77,6 +77,13 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /EmployeeTreasuryDebtPayment/);
   assert.match(page, /submitEmployeeDebtPayment/);
   assert.match(page, /employee_debt_payment/);
+  assert.match(page, /TreasuryStatementReconciliation/);
+  assert.match(page, /submitStatementReconciliation/);
+  assert.match(page, /treasuryStatementReconciliations/);
+  assert.match(page, /مطابقة البنك والمحفظة/);
+  assert.match(page, /كشف الحساب يراجع الرصيد ولا يغيّره/);
+  assert.match(page, /أي فرق يظل واقعة مفتوحة للمراجعة/);
+  assert.match(page, /unresolvedStatementCount/);
   assert.match(page, /التأكيد ينشئ إيصالًا وحركة داخل الخزنة/);
   assert.match(page, /إذا كان المبلغ يساوي المتبقي اختر/);
   assert.match(page, /submitVarianceReview/);
@@ -152,6 +159,9 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /variance-decision-grid/);
   assert.match(css, /employee-debt-payment-dialog/);
   assert.match(css, /employee-debt-payments/);
+  assert.match(css, /treasury-reconciliation-space/);
+  assert.match(css, /statement-reconciliation-dialog/);
+  assert.match(css, /treasury-reconciliation-list/);
   assert.match(css, /financial-day-space/);
   assert.match(css, /treasury-breakdown/);
   assert.match(css, /treasury-reversal-badge/);

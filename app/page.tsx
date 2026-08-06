@@ -790,6 +790,7 @@ type FinancialDayCloseSnapshot = {
   cashVariance: number;
   sessionIds?: string[];
   varianceSessionCount?: number;
+  unresolvedStatementCount?: number;
   closedAt: Localized;
   closedBy: Localized;
   note: string;
@@ -847,6 +848,21 @@ type EmployeeTreasuryDebtPayment = {
   receivedBy: Localized;
   receivedAt: Localized;
   treasuryMovementId: string;
+};
+
+type TreasuryStatementReconciliation = {
+  id: string;
+  accountId: TreasuryAccount["id"];
+  accountName: Localized;
+  statementReference: string;
+  statementDate: string;
+  ledgerBalance: number;
+  statementBalance: number;
+  difference: number;
+  state: "matched" | "under_review" | "resolved";
+  note: string;
+  reconciledBy: Localized;
+  reconciledAt: Localized;
 };
 
 type TreasuryVarianceIssue = {
@@ -4363,6 +4379,9 @@ const treasuryVarianceReviewsData: TreasuryVarianceReview[] = [];
 const employeeTreasuryDebtsData: EmployeeTreasuryDebt[] = [];
 
 const employeeTreasuryDebtPaymentsData: EmployeeTreasuryDebtPayment[] = [];
+
+const treasuryStatementReconciliationsData: TreasuryStatementReconciliation[] =
+  [];
 
 const financialDayCloseSnapshotsData: FinancialDayCloseSnapshot[] = [];
 
@@ -24628,6 +24647,7 @@ function TreasuryScreen({
   varianceReviews,
   employeeTreasuryDebts,
   employeeTreasuryDebtPayments,
+  statementReconciliations,
   dayCloseSnapshots,
   onMovementsChange,
   onCashSessionChange,
@@ -24635,6 +24655,7 @@ function TreasuryScreen({
   onVarianceReviewsChange,
   onEmployeeTreasuryDebtsChange,
   onEmployeeTreasuryDebtPaymentsChange,
+  onStatementReconciliationsChange,
   onDayCloseSnapshotsChange,
   onLang,
   onTheme,
@@ -24653,6 +24674,7 @@ function TreasuryScreen({
   varianceReviews: TreasuryVarianceReview[];
   employeeTreasuryDebts: EmployeeTreasuryDebt[];
   employeeTreasuryDebtPayments: EmployeeTreasuryDebtPayment[];
+  statementReconciliations: TreasuryStatementReconciliation[];
   dayCloseSnapshots: FinancialDayCloseSnapshot[];
   onMovementsChange: (movements: TreasuryMovement[]) => void;
   onCashSessionChange: (session: TreasuryCashSession) => void;
@@ -24661,6 +24683,9 @@ function TreasuryScreen({
   onEmployeeTreasuryDebtsChange: (debts: EmployeeTreasuryDebt[]) => void;
   onEmployeeTreasuryDebtPaymentsChange: (
     payments: EmployeeTreasuryDebtPayment[],
+  ) => void;
+  onStatementReconciliationsChange: (
+    reconciliations: TreasuryStatementReconciliation[],
   ) => void;
   onDayCloseSnapshotsChange: (snapshots: FinancialDayCloseSnapshot[]) => void;
   onLang: () => void;
@@ -24671,7 +24696,9 @@ function TreasuryScreen({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeTab, setActiveTab] =
-    useState<"ledger" | "session" | "variance" | "day">("ledger");
+    useState<
+      "ledger" | "session" | "variance" | "reconciliation" | "day"
+    >("ledger");
   const [accountId, setAccountId] =
     useState<TreasuryAccount["id"]>("main-cash");
   const [search, setSearch] = useState("");
@@ -24687,6 +24714,7 @@ function TreasuryScreen({
     | "handover"
     | "variance-review"
     | "employee-debt-payment"
+    | "statement-reconciliation"
     | "close-session"
     | "close-day"
     | null
@@ -24717,6 +24745,13 @@ function TreasuryScreen({
   const [debtPaymentAmount, setDebtPaymentAmount] = useState("");
   const [debtPaymentAccountId, setDebtPaymentAccountId] =
     useState<TreasuryAccount["id"]>("main-cash");
+  const [reconciliationAccountId, setReconciliationAccountId] =
+    useState<TreasuryAccount["id"]>("bank");
+  const [statementBalance, setStatementBalance] = useState("");
+  const [statementReference, setStatementReference] = useState("");
+  const [statementDate, setStatementDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -24914,6 +24949,27 @@ function TreasuryScreen({
   const openEmployeeDebtTotal = employeeTreasuryDebts
     .filter((debt) => debt.state === "open")
     .reduce((sum, debt) => sum + debt.remainingAmount, 0);
+  const nonCashAccounts = accounts.filter(
+    (account) => account.kind !== "cash",
+  );
+  const openStatementDifferences = statementReconciliations.filter(
+    (reconciliation) => reconciliation.state === "under_review",
+  );
+  const openStatementDifferenceTotal = openStatementDifferences.reduce(
+    (sum, reconciliation) =>
+      sum + Math.abs(reconciliation.difference),
+    0,
+  );
+  const reconciliationAccount =
+    accounts.find(
+      (account) => account.id === reconciliationAccountId,
+    ) ?? nonCashAccounts[0];
+  const reconciliationLedgerBalance = reconciliationAccount
+    ? accountBalance(reconciliationAccount)
+    : 0;
+  const reconciliationDifference = statementBalance
+    ? Number(statementBalance) - reconciliationLedgerBalance
+    : 0;
   const normalizedSearch = search.trim().toLowerCase();
   const filteredMovements = [...accountMovements]
     .sort((a, b) => b.sequence - a.sequence)
@@ -24978,6 +25034,10 @@ function TreasuryScreen({
     setDebtPaymentMode("full");
     setDebtPaymentAmount("");
     setDebtPaymentAccountId("main-cash");
+    setReconciliationAccountId("bank");
+    setStatementBalance("");
+    setStatementReference("");
+    setStatementDate(new Date().toISOString().slice(0, 10));
   }
 
   function openMovementDialog() {
@@ -25066,6 +25126,33 @@ function TreasuryScreen({
     setClosingNote("");
     setFormError("");
     setDialog("employee-debt-payment");
+  }
+
+  function openStatementReconciliationDialog(
+    requestedAccountId?: TreasuryAccount["id"],
+  ) {
+    const account =
+      nonCashAccounts.find(
+        (candidate) =>
+          candidate.id === requestedAccountId &&
+          candidate.state === "active",
+      ) ??
+      nonCashAccounts.find((candidate) => candidate.state === "active");
+    if (!account) {
+      showToast(
+        lang === "ar"
+          ? "لا يوجد حساب بنك أو محفظة نشط للمطابقة"
+          : "No active bank or wallet account is available",
+      );
+      return;
+    }
+    setReconciliationAccountId(account.id);
+    setStatementBalance(String(accountBalance(account)));
+    setStatementReference("");
+    setStatementDate(new Date().toISOString().slice(0, 10));
+    setClosingNote("");
+    setFormError("");
+    setDialog("statement-reconciliation");
   }
 
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
@@ -25722,11 +25809,15 @@ function TreasuryScreen({
     }
     const varianceSessionCount =
       openVarianceIssuesForBusinessDate.length;
-    if (varianceSessionCount > 0 && !closingNote.trim()) {
+    if (
+      (varianceSessionCount > 0 ||
+        openStatementDifferences.length > 0) &&
+      !closingNote.trim()
+    ) {
       setFormError(
         lang === "ar"
-          ? "يوجد فرق عد مفتوح؛ اكتب ملاحظة الإغلاق التي توضح أنه انتقل للمراجعة."
-          : "There is an open cash variance; add a close note confirming review.",
+          ? "توجد فروق مالية مفتوحة؛ اكتب ملاحظة الإغلاق التي توضح انتقالها للمراجعة."
+          : "There are open financial differences; add a close note confirming review.",
       );
       return;
     }
@@ -25747,6 +25838,7 @@ function TreasuryScreen({
       cashVariance: cashSession.variance ?? 0,
       sessionIds: sessionsForBusinessDate.map((session) => session.id),
       varianceSessionCount,
+      unresolvedStatementCount: openStatementDifferences.length,
       closedAt: {
         ar: now.toLocaleString("ar-EG", {
           dateStyle: "medium",
@@ -26137,6 +26229,123 @@ function TreasuryScreen({
     );
   }
 
+  function submitStatementReconciliation(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    const account = accounts.find(
+      (candidate) => candidate.id === reconciliationAccountId,
+    );
+    if (
+      !account ||
+      account.kind === "cash" ||
+      account.state !== "active"
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "اختر حساب بنك أو محفظة نشطًا."
+          : "Choose an active bank or wallet account.",
+      );
+      return;
+    }
+    const balance = Number(statementBalance);
+    if (!Number.isFinite(balance)) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب رصيدًا صحيحًا كما يظهر في كشف الحساب."
+          : "Enter a valid balance exactly as shown on the statement.",
+      );
+      return;
+    }
+    if (!statementReference.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "مرجع كشف الحساب إلزامي."
+          : "The statement reference is required.",
+      );
+      return;
+    }
+    if (
+      statementReconciliations.some(
+        (reconciliation) =>
+          reconciliation.accountId === account.id &&
+          reconciliation.statementReference.toLowerCase() ===
+          statementReference.trim().toLowerCase(),
+      )
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "تم استخدام مرجع كشف الحساب من قبل."
+          : "This statement reference has already been used.",
+      );
+      return;
+    }
+    if (!statementDate) {
+      setFormError(
+        lang === "ar"
+          ? "حدد تاريخ نهاية كشف الحساب."
+          : "Choose the statement ending date.",
+      );
+      return;
+    }
+    if (statementDate > new Date().toISOString().slice(0, 10)) {
+      setFormError(
+        lang === "ar"
+          ? "تاريخ نهاية الكشف لا يمكن أن يكون في المستقبل."
+          : "The statement ending date cannot be in the future.",
+      );
+      return;
+    }
+    const ledgerBalance = accountBalance(account);
+    const difference = balance - ledgerBalance;
+    if (difference !== 0 && !closingNote.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب ملاحظة أولية عن فرق الكشف؛ لن يتغير الرصيد تلقائيًا."
+          : "Add an initial note for the statement difference; no balance will change automatically.",
+      );
+      return;
+    }
+    const now = new Date();
+    const reconciliation: TreasuryStatementReconciliation = {
+      id: `TSR-${now.getTime().toString().slice(-9)}`,
+      accountId: account.id,
+      accountName: account.name,
+      statementReference: statementReference.trim(),
+      statementDate,
+      ledgerBalance,
+      statementBalance: balance,
+      difference,
+      state: difference === 0 ? "matched" : "under_review",
+      note: closingNote.trim(),
+      reconciledBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      reconciledAt: {
+        ar: now.toLocaleString("ar-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        en: now.toLocaleString("en-EG", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+      },
+    };
+    onStatementReconciliationsChange([
+      reconciliation,
+      ...statementReconciliations,
+    ]);
+    resetDialog();
+    showToast(
+      difference === 0
+        ? lang === "ar"
+          ? `تمت مطابقة ${account.name.ar} دون فروق`
+          : `${account.name.en} matched without differences`
+        : lang === "ar"
+          ? "حُفظ فرق الكشف للمراجعة دون تغيير الرصيد"
+          : "Statement difference saved for review without changing balance",
+    );
+  }
+
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
       <Sidebar
@@ -26283,6 +26492,17 @@ function TreasuryScreen({
                   {openVarianceIssues.length}{" "}
                   {lang === "ar" ? "فرق مفتوح" : "open variance(s)"}
                 </span>
+              ) : activeTab === "reconciliation" ? (
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={() => openStatementReconciliationDialog()}
+                >
+                  <ClipboardCheck size={17} />
+                  {lang === "ar"
+                    ? "مطابقة كشف جديد"
+                    : "New statement reconciliation"}
+                </button>
               ) : latestDayClose ? (
                 <span className="treasury-complete-badge">
                   <LockKeyhole size={16} />
@@ -26354,6 +26574,29 @@ function TreasuryScreen({
                     : lang === "ar"
                       ? "لا فروق مفتوحة"
                       : "No open variances"}
+                </small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "reconciliation" ? "active" : ""}
+              onClick={() => setActiveTab("reconciliation")}
+            >
+              <Landmark size={18} />
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? "مطابقة البنك والمحفظة"
+                    : "Bank & wallet reconciliation"}
+                </strong>
+                <small>
+                  {openStatementDifferences.length
+                    ? lang === "ar"
+                      ? `${openStatementDifferences.length} فرق مفتوح`
+                      : `${openStatementDifferences.length} open difference(s)`
+                    : lang === "ar"
+                      ? "مقارنة كشوف الحساب"
+                      : "Compare statements"}
                 </small>
               </span>
             </button>
@@ -27107,6 +27350,243 @@ function TreasuryScreen({
             </section>
           )}
 
+          {activeTab === "reconciliation" && (
+            <section className="treasury-reconciliation-space">
+              <div className="treasury-reconciliation-truth">
+                <Landmark size={20} />
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "كشف الحساب يراجع الرصيد ولا يغيّره"
+                      : "A statement reviews the balance; it does not change it"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "نسجل رصيد البنك أو المحفظة كما ورد في الكشف ونقارنه بالدفتر. أي فرق يظل واقعة مفتوحة للمراجعة ولا يتحول تلقائيًا إلى مصروف أو إيراد."
+                      : "Record the bank or wallet balance exactly as stated and compare it with the ledger. Any difference stays open for review and never becomes an expense or income automatically."}
+                  </small>
+                </span>
+                <b>
+                  {openStatementDifferences.length}{" "}
+                  {lang === "ar" ? "فرق مفتوح" : "open difference(s)"}
+                </b>
+              </div>
+
+              <div className="treasury-reconciliation-metrics">
+                <article>
+                  <small>
+                    {lang === "ar" ? "كشوف مسجلة" : "Recorded statements"}
+                  </small>
+                  <strong>{statementReconciliations.length}</strong>
+                  <span>
+                    {lang === "ar"
+                      ? "لكل كشف مرجع مستقل"
+                      : "Each statement has its own reference"}
+                  </span>
+                </article>
+                <article className="matched">
+                  <small>
+                    {lang === "ar" ? "مطابق دون فروق" : "Matched statements"}
+                  </small>
+                  <strong>
+                    {
+                      statementReconciliations.filter(
+                        (reconciliation) =>
+                          reconciliation.state === "matched",
+                      ).length
+                    }
+                  </strong>
+                  <span>
+                    {lang === "ar"
+                      ? "الرصيد الدفتري يساوي الكشف"
+                      : "Ledger equals the statement"}
+                  </span>
+                </article>
+                <article className="difference">
+                  <small>
+                    {lang === "ar" ? "فروق تحت المراجعة" : "Open differences"}
+                  </small>
+                  <strong>{openStatementDifferences.length}</strong>
+                  <span>
+                    {lang === "ar"
+                      ? "لا حركة مالية تلقائية"
+                      : "No automatic financial movement"}
+                  </span>
+                </article>
+                <article>
+                  <small>
+                    {lang === "ar"
+                      ? "إجمالي قيمة الفروق"
+                      : "Absolute open differences"}
+                  </small>
+                  <strong>{money.format(openStatementDifferenceTotal)}</strong>
+                  <span>
+                    {lang === "ar"
+                      ? "مؤشر مراجعة وليس رصيدًا"
+                      : "A review metric, not a balance"}
+                  </span>
+                </article>
+              </div>
+
+              <div className="treasury-reconciliation-accounts">
+                {nonCashAccounts.map((account) => {
+                  const latest = statementReconciliations.find(
+                    (reconciliation) =>
+                      reconciliation.accountId === account.id,
+                  );
+                  return (
+                    <article key={account.id}>
+                      <span className="source-icon">{accountIcon(account)}</span>
+                      <span>
+                        <small>
+                          {account.kind === "bank"
+                            ? lang === "ar"
+                              ? "حساب بنكي"
+                              : "Bank account"
+                            : lang === "ar"
+                              ? "محفظة إلكترونية"
+                              : "E-wallet"}
+                        </small>
+                        <strong>{account.name[lang]}</strong>
+                        <b>
+                          {latest
+                            ? lang === "ar"
+                              ? `آخر كشف ${latest.statementDate}`
+                              : `Latest statement ${latest.statementDate}`
+                            : lang === "ar"
+                              ? "لم تُسجل مطابقة بعد"
+                              : "No reconciliation recorded"}
+                        </b>
+                      </span>
+                      <span className="treasury-reconciliation-account__balance">
+                        <small>
+                          {lang === "ar"
+                            ? "الرصيد الدفتري الحالي"
+                            : "Current ledger balance"}
+                        </small>
+                        <strong>{money.format(accountBalance(account))}</strong>
+                      </span>
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={account.state !== "active"}
+                        onClick={() =>
+                          openStatementReconciliationDialog(account.id)
+                        }
+                      >
+                        <ClipboardCheck size={16} />
+                        {lang === "ar" ? "مطابقة كشف" : "Reconcile statement"}
+                      </button>
+                    </article>
+                  );
+                })}
+              </div>
+
+              <div className="treasury-reconciliation-history">
+                <div className="treasury-variance-head">
+                  <span>
+                    <ReceiptText size={19} />
+                    <strong>
+                      {lang === "ar"
+                        ? "سجل مطابقات كشوف الحساب"
+                        : "Statement reconciliation history"}
+                    </strong>
+                  </span>
+                  <b>{statementReconciliations.length}</b>
+                </div>
+                {statementReconciliations.length ? (
+                  <div className="treasury-reconciliation-list">
+                    {statementReconciliations.map((reconciliation) => (
+                      <article key={reconciliation.id}>
+                        <span
+                          className={`treasury-reconciliation-status ${reconciliation.state}`}
+                        >
+                          {reconciliation.state === "matched" ? (
+                            <Check size={17} />
+                          ) : (
+                            <CircleAlert size={17} />
+                          )}
+                        </span>
+                        <span>
+                          <small>{reconciliation.accountName[lang]}</small>
+                          <strong>{reconciliation.statementReference}</strong>
+                          <b>
+                            {reconciliation.statementDate} ·{" "}
+                            {reconciliation.id}
+                          </b>
+                        </span>
+                        <span>
+                          <small>
+                            {lang === "ar"
+                              ? "الرصيد الدفتري وقت المطابقة"
+                              : "Ledger snapshot"}
+                          </small>
+                          <strong>
+                            {money.format(reconciliation.ledgerBalance)}
+                          </strong>
+                        </span>
+                        <span>
+                          <small>
+                            {lang === "ar"
+                              ? "رصيد كشف الحساب"
+                              : "Statement balance"}
+                          </small>
+                          <strong>
+                            {money.format(reconciliation.statementBalance)}
+                          </strong>
+                        </span>
+                        <span>
+                          <small>{lang === "ar" ? "الفرق" : "Difference"}</small>
+                          <strong
+                            className={
+                              reconciliation.difference === 0
+                                ? "matched"
+                                : reconciliation.difference > 0
+                                  ? "surplus"
+                                  : "shortage"
+                            }
+                          >
+                            {reconciliation.difference > 0 ? "+" : ""}
+                            {money.format(reconciliation.difference)}
+                          </strong>
+                        </span>
+                        <span>
+                          <small>{reconciliation.reconciledAt[lang]}</small>
+                          <strong>
+                            {reconciliation.state === "matched"
+                              ? lang === "ar"
+                                ? "مطابق"
+                                : "Matched"
+                              : lang === "ar"
+                                ? "تحت المراجعة"
+                                : "Under review"}
+                          </strong>
+                        </span>
+                        {reconciliation.note && (
+                          <p>{reconciliation.note}</p>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="treasury-variance-empty">
+                    <Landmark size={24} />
+                    <strong>
+                      {lang === "ar"
+                        ? "لا توجد كشوف حساب مسجلة"
+                        : "No statements have been reconciled"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "ابدأ من حساب البنك أو المحفظة، ثم اكتب مرجع الكشف وتاريخه ورصيده الفعلي."
+                        : "Start from a bank or wallet account, then enter the statement reference, date, and actual balance."}
+                    </small>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
           {activeTab === "day" && (
             <section className="financial-day-space">
               <div className="financial-day-status">
@@ -27222,6 +27702,35 @@ function TreasuryScreen({
                             : lang === "ar"
                               ? `${openVarianceIssuesForBusinessDate.length} فرق لم يُحسم بعد`
                               : `${openVarianceIssuesForBusinessDate.length} variance issue(s) remain unresolved`}
+                        </small>
+                      </span>
+                    </li>
+                    <li
+                      className={
+                        openStatementDifferences.length === 0
+                          ? "done"
+                          : "review"
+                      }
+                    >
+                      {openStatementDifferences.length === 0 ? (
+                        <Check size={17} />
+                      ) : (
+                        <CircleAlert size={17} />
+                      )}
+                      <span>
+                        <strong>
+                          {lang === "ar"
+                            ? "مطابقة البنك والمحفظة"
+                            : "Bank and wallet reconciliation"}
+                        </strong>
+                        <small>
+                          {openStatementDifferences.length === 0
+                            ? lang === "ar"
+                              ? "لا توجد فروق كشوف مفتوحة"
+                              : "No open statement differences"
+                            : lang === "ar"
+                              ? `${openStatementDifferences.length} فرق مفتوح؛ لا يمنع الإغلاق لكن يجب توضيحه في الملاحظة`
+                              : `${openStatementDifferences.length} open difference(s); close is allowed with an explanatory note`}
                         </small>
                       </span>
                     </li>
@@ -27518,6 +28027,8 @@ function TreasuryScreen({
                   ? submitVarianceReview
                 : dialog === "employee-debt-payment"
                   ? submitEmployeeDebtPayment
+                : dialog === "statement-reconciliation"
+                  ? submitStatementReconciliation
                 : dialog === "movement"
                   ? submitManualMovement
                   : dialog === "close-session"
@@ -27553,6 +28064,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "إيصال تحصيل مستقل"
                         : "Independent collection receipt"
+                    : dialog === "statement-reconciliation"
+                      ? lang === "ar"
+                        ? "مقارنة دون تعديل الرصيد"
+                        : "Comparison without changing balance"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "مطابقة النقد الفعلي"
@@ -27590,6 +28105,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "استلام سداد مديونية موظف"
                         : "Receive employee debt payment"
+                    : dialog === "statement-reconciliation"
+                      ? lang === "ar"
+                        ? "مطابقة كشف بنك أو محفظة"
+                        : "Reconcile a bank or wallet statement"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "عد وإغلاق جلسة الخزنة"
@@ -27613,7 +28132,196 @@ function TreasuryScreen({
               </button>
             </div>
 
-            {dialog === "employee-debt-payment" && selectedEmployeeDebt ? (
+            {dialog === "statement-reconciliation" &&
+            reconciliationAccount ? (
+              <div className="statement-reconciliation-dialog">
+                <div className="statement-reconciliation-account">
+                  <span>{accountIcon(reconciliationAccount)}</span>
+                  <span>
+                    <small>
+                      {reconciliationAccount.kind === "bank"
+                        ? lang === "ar"
+                          ? "الحساب البنكي المختار"
+                          : "Selected bank account"
+                        : lang === "ar"
+                          ? "المحفظة المختارة"
+                          : "Selected wallet"}
+                    </small>
+                    <strong>{reconciliationAccount.name[lang]}</strong>
+                  </span>
+                  <article>
+                    <small>
+                      {lang === "ar"
+                        ? "الرصيد الدفتري الآن"
+                        : "Current ledger balance"}
+                    </small>
+                    <strong>
+                      {money.format(reconciliationLedgerBalance)}
+                    </strong>
+                  </article>
+                </div>
+
+                <div className="treasury-form-grid">
+                  <label className="treasury-form-field">
+                    <span>{lang === "ar" ? "الحساب" : "Account"}</span>
+                    <select
+                      value={reconciliationAccountId}
+                      onChange={(event) => {
+                        const nextId = event.target
+                          .value as TreasuryAccount["id"];
+                        const nextAccount = nonCashAccounts.find(
+                          (account) => account.id === nextId,
+                        );
+                        setReconciliationAccountId(nextId);
+                        if (nextAccount) {
+                          setStatementBalance(
+                            String(accountBalance(nextAccount)),
+                          );
+                        }
+                        setFormError("");
+                      }}
+                    >
+                      {nonCashAccounts
+                        .filter((account) => account.state === "active")
+                        .map((account) => (
+                          <option value={account.id} key={account.id}>
+                            {account.name[lang]}
+                          </option>
+                        ))}
+                    </select>
+                  </label>
+                  <label className="treasury-form-field">
+                    <span>
+                      {lang === "ar"
+                        ? "تاريخ نهاية الكشف"
+                        : "Statement ending date"}
+                    </span>
+                    <input
+                      type="date"
+                      value={statementDate}
+                      max={new Date().toISOString().slice(0, 10)}
+                      onChange={(event) =>
+                        setStatementDate(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="treasury-form-field">
+                    <span>
+                      {lang === "ar"
+                        ? "مرجع كشف الحساب"
+                        : "Statement reference"}
+                    </span>
+                    <input
+                      value={statementReference}
+                      onChange={(event) =>
+                        setStatementReference(event.target.value)
+                      }
+                      placeholder={
+                        lang === "ar"
+                          ? "مثال: BANK-2026-08-001"
+                          : "e.g. BANK-2026-08-001"
+                      }
+                    />
+                  </label>
+                  <label className="treasury-form-field cash-actual-field">
+                    <span>
+                      {lang === "ar"
+                        ? "الرصيد في كشف الحساب"
+                        : "Balance on statement"}
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={statementBalance}
+                      onChange={(event) =>
+                        setStatementBalance(event.target.value)
+                      }
+                      placeholder="0"
+                    />
+                  </label>
+                </div>
+
+                <div
+                  className={`statement-reconciliation-preview ${
+                    reconciliationDifference === 0
+                      ? "matched"
+                      : "different"
+                  }`}
+                >
+                  <article>
+                    <small>
+                      {lang === "ar" ? "الرصيد الدفتري" : "Ledger balance"}
+                    </small>
+                    <strong>
+                      {money.format(reconciliationLedgerBalance)}
+                    </strong>
+                  </article>
+                  <span>
+                    {reconciliationDifference === 0 ? (
+                      <Check size={19} />
+                    ) : (
+                      <CircleAlert size={19} />
+                    )}
+                  </span>
+                  <article>
+                    <small>
+                      {lang === "ar" ? "رصيد الكشف" : "Statement balance"}
+                    </small>
+                    <strong>
+                      {money.format(Number(statementBalance) || 0)}
+                    </strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "الفرق" : "Difference"}</small>
+                    <strong>
+                      {reconciliationDifference > 0 ? "+" : ""}
+                      {money.format(reconciliationDifference)}
+                    </strong>
+                  </article>
+                </div>
+
+                <div className="treasury-dialog__notice">
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>
+                      {reconciliationDifference === 0
+                        ? lang === "ar"
+                          ? "الكشف مطابق للدفتر"
+                          : "Statement matches the ledger"
+                        : lang === "ar"
+                          ? "الفرق سيظل مفتوحًا للمراجعة"
+                          : "The difference will remain open for review"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "الحفظ لا ينشئ حركة مالية ولا يغيّر الرصيد. أي مصروف بنكي أو تحويل ناقص يُثبت لاحقًا بمستند مستقل."
+                        : "Saving creates no movement and changes no balance. Any bank fee or missing transfer must be posted later with its own source document."}
+                    </small>
+                  </span>
+                </div>
+
+                <label className="treasury-form-field">
+                  <span>
+                    {lang === "ar"
+                      ? reconciliationDifference === 0
+                        ? "ملاحظة المطابقة — اختيارية"
+                        : "وصف أولي للفرق — إلزامي"
+                      : reconciliationDifference === 0
+                        ? "Reconciliation note — optional"
+                        : "Initial difference note — required"}
+                  </span>
+                  <textarea
+                    value={closingNote}
+                    onChange={(event) => setClosingNote(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "مثال: رسوم بنكية محتملة أو تحويل لم يظهر في الدفتر..."
+                        : "e.g. possible bank fees or a transfer missing from the ledger..."
+                    }
+                  />
+                </label>
+              </div>
+            ) : dialog === "employee-debt-payment" && selectedEmployeeDebt ? (
               <div className="employee-debt-payment-dialog">
                 <div className="employee-debt-payment-summary">
                   <span>
@@ -28523,6 +29231,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "تأكيد الاستلام وإصدار الإيصال"
                       : "Confirm receipt & issue voucher"
+                  : dialog === "statement-reconciliation"
+                    ? lang === "ar"
+                      ? "حفظ المطابقة"
+                      : "Save reconciliation"
                   : dialog === "close-session"
                     ? lang === "ar"
                       ? "تأكيد العد وإغلاق الجلسة"
@@ -42228,6 +42940,12 @@ export default function Home() {
   ] = useState<EmployeeTreasuryDebtPayment[]>(
     employeeTreasuryDebtPaymentsData,
   );
+  const [
+    sharedTreasuryStatementReconciliations,
+    setSharedTreasuryStatementReconciliations,
+  ] = useState<TreasuryStatementReconciliation[]>(
+    treasuryStatementReconciliationsData,
+  );
   const [sharedFinancialDayCloses, setSharedFinancialDayCloses] = useState<
     FinancialDayCloseSnapshot[]
   >(financialDayCloseSnapshotsData);
@@ -42285,6 +43003,7 @@ export default function Home() {
           treasuryVarianceReviews?: TreasuryVarianceReview[];
           employeeTreasuryDebts?: EmployeeTreasuryDebt[];
           employeeTreasuryDebtPayments?: EmployeeTreasuryDebtPayment[];
+          treasuryStatementReconciliations?: TreasuryStatementReconciliation[];
           financialDayCloses?: FinancialDayCloseSnapshot[];
           trusts?: TrustRecord[];
           trustPolicy?: TrustPolicy;
@@ -42531,6 +43250,11 @@ export default function Home() {
         if (Array.isArray(parsed.employeeTreasuryDebtPayments)) {
           setSharedEmployeeTreasuryDebtPayments(
             parsed.employeeTreasuryDebtPayments,
+          );
+        }
+        if (Array.isArray(parsed.treasuryStatementReconciliations)) {
+          setSharedTreasuryStatementReconciliations(
+            parsed.treasuryStatementReconciliations,
           );
         }
         if (Array.isArray(parsed.financialDayCloses)) {
@@ -42877,6 +43601,8 @@ export default function Home() {
         employeeTreasuryDebts: sharedEmployeeTreasuryDebts,
         employeeTreasuryDebtPayments:
           sharedEmployeeTreasuryDebtPayments,
+        treasuryStatementReconciliations:
+          sharedTreasuryStatementReconciliations,
         financialDayCloses: sharedFinancialDayCloses,
         trusts: sharedTrusts,
         trustPolicy: sharedTrustPolicy,
@@ -42901,6 +43627,7 @@ export default function Home() {
     sharedTreasuryVarianceReviews,
     sharedEmployeeTreasuryDebts,
     sharedEmployeeTreasuryDebtPayments,
+    sharedTreasuryStatementReconciliations,
     sharedFinancialDayCloses,
     sharedTrustPolicy,
     sharedTrusts,
@@ -43299,6 +44026,9 @@ export default function Home() {
           employeeTreasuryDebtPayments={
             sharedEmployeeTreasuryDebtPayments
           }
+          statementReconciliations={
+            sharedTreasuryStatementReconciliations
+          }
           dayCloseSnapshots={sharedFinancialDayCloses}
           onMovementsChange={setSharedTreasuryMovements}
           onCashSessionChange={setSharedTreasuryCashSession}
@@ -43307,6 +44037,9 @@ export default function Home() {
           onEmployeeTreasuryDebtsChange={setSharedEmployeeTreasuryDebts}
           onEmployeeTreasuryDebtPaymentsChange={
             setSharedEmployeeTreasuryDebtPayments
+          }
+          onStatementReconciliationsChange={
+            setSharedTreasuryStatementReconciliations
           }
           onDayCloseSnapshotsChange={setSharedFinancialDayCloses}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
