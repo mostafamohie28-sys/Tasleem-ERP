@@ -707,6 +707,8 @@ type TreasuryMovement = {
     | "sender_payment"
     | "company_deposit"
     | "operating_expense"
+    | "cash_shortage"
+    | "cash_surplus"
     | "other_income"
     | "other_expense"
     | "transfer";
@@ -730,6 +732,7 @@ type TreasuryMovement = {
       | "sender_receipt"
       | "manual_voucher"
       | "treasury_transfer"
+      | "cash_variance_review"
       | "reversal";
     id: string;
   };
@@ -787,6 +790,57 @@ type FinancialDayCloseSnapshot = {
   varianceSessionCount?: number;
   closedAt: Localized;
   closedBy: Localized;
+  note: string;
+};
+
+type TreasuryVarianceReview = {
+  id: string;
+  issueId: string;
+  sessionId: string;
+  varianceKind: "opening" | "closing";
+  expectedAmount: number;
+  originalActualAmount: number;
+  originalVariance: number;
+  resolution:
+    | "recount_matched"
+    | "company_expense"
+    | "employee_receivable"
+    | "surplus_income";
+  verifiedActualAmount?: number;
+  resolutionAmount: number;
+  responsibleEmployeeId?: string;
+  responsible: Localized;
+  note: string;
+  reviewedBy: Localized;
+  reviewedAt: Localized;
+  treasuryMovementId?: string;
+  employeeDebtId?: string;
+};
+
+type EmployeeTreasuryDebt = {
+  id: string;
+  employeeId: string;
+  employee: Localized;
+  sourceReviewId: string;
+  sourceSessionId: string;
+  originalAmount: number;
+  paidAmount: number;
+  remainingAmount: number;
+  state: "open" | "settled";
+  reason: string;
+  createdAt: Localized;
+};
+
+type TreasuryVarianceIssue = {
+  id: string;
+  sessionId: string;
+  kind: "opening" | "closing";
+  expectedAmount: number;
+  actualAmount: number;
+  variance: number;
+  responsibleEmployeeId?: string;
+  responsible: Localized;
+  occurredAt: Localized;
   note: string;
 };
 
@@ -4285,6 +4339,10 @@ const treasuryCashSessionDefault: TreasuryCashSession = {
 };
 
 const treasuryCashSessionHistoryData: TreasuryCashSession[] = [];
+
+const treasuryVarianceReviewsData: TreasuryVarianceReview[] = [];
+
+const employeeTreasuryDebtsData: EmployeeTreasuryDebt[] = [];
 
 const financialDayCloseSnapshotsData: FinancialDayCloseSnapshot[] = [];
 
@@ -24547,10 +24605,14 @@ function TreasuryScreen({
   roles,
   cashSession,
   cashSessionHistory,
+  varianceReviews,
+  employeeTreasuryDebts,
   dayCloseSnapshots,
   onMovementsChange,
   onCashSessionChange,
   onCashSessionHistoryChange,
+  onVarianceReviewsChange,
+  onEmployeeTreasuryDebtsChange,
   onDayCloseSnapshotsChange,
   onLang,
   onTheme,
@@ -24566,10 +24628,14 @@ function TreasuryScreen({
   roles: AccessRole[];
   cashSession: TreasuryCashSession;
   cashSessionHistory: TreasuryCashSession[];
+  varianceReviews: TreasuryVarianceReview[];
+  employeeTreasuryDebts: EmployeeTreasuryDebt[];
   dayCloseSnapshots: FinancialDayCloseSnapshot[];
   onMovementsChange: (movements: TreasuryMovement[]) => void;
   onCashSessionChange: (session: TreasuryCashSession) => void;
   onCashSessionHistoryChange: (sessions: TreasuryCashSession[]) => void;
+  onVarianceReviewsChange: (reviews: TreasuryVarianceReview[]) => void;
+  onEmployeeTreasuryDebtsChange: (debts: EmployeeTreasuryDebt[]) => void;
   onDayCloseSnapshotsChange: (snapshots: FinancialDayCloseSnapshot[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -24579,7 +24645,7 @@ function TreasuryScreen({
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeTab, setActiveTab] =
-    useState<"ledger" | "session" | "day">("ledger");
+    useState<"ledger" | "session" | "variance" | "day">("ledger");
   const [accountId, setAccountId] =
     useState<TreasuryAccount["id"]>("main-cash");
   const [search, setSearch] = useState("");
@@ -24593,6 +24659,7 @@ function TreasuryScreen({
     | "reverse"
     | "open-session"
     | "handover"
+    | "variance-review"
     | "close-session"
     | "close-day"
     | null
@@ -24611,6 +24678,11 @@ function TreasuryScreen({
   const [closingNote, setClosingNote] = useState("");
   const [reverseReason, setReverseReason] = useState("");
   const [sessionEmployeeId, setSessionEmployeeId] = useState("");
+  const [selectedVarianceIssue, setSelectedVarianceIssue] =
+    useState<TreasuryVarianceIssue | null>(null);
+  const [varianceDecision, setVarianceDecision] =
+    useState<TreasuryVarianceReview["resolution"]>("company_expense");
+  const [verifiedCount, setVerifiedCount] = useState("");
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -24628,6 +24700,8 @@ function TreasuryScreen({
     sender_payment: { ar: "دفع للراسل", en: "Sender payment" },
     company_deposit: { ar: "تغذية خزنة", en: "Treasury funding" },
     operating_expense: { ar: "مصروف تشغيلي", en: "Operating expense" },
+    cash_shortage: { ar: "تسوية عجز عهدة", en: "Cash shortage adjustment" },
+    cash_surplus: { ar: "تسوية زيادة عهدة", en: "Cash surplus adjustment" },
     other_income: { ar: "إيراد آخر", en: "Other income" },
     other_expense: { ar: "مصروف آخر", en: "Other expense" },
     transfer: { ar: "تحويل بين الخزن", en: "Treasury transfer" },
@@ -24727,6 +24801,9 @@ function TreasuryScreen({
   const custodyVariance = actualCash
     ? Number(actualCash) - custodyExpected
     : 0;
+  const recountVariance = selectedVarianceIssue && verifiedCount
+    ? Number(verifiedCount) - selectedVarianceIssue.expectedAmount
+    : selectedVarianceIssue?.variance ?? 0;
   const dayCloseBlocked = cashSession.state === "open";
   const sessionsForBusinessDate = [
     ...cashSessionHistory,
@@ -24736,11 +24813,69 @@ function TreasuryScreen({
       (session.businessDate ?? businessDate) === businessDate &&
       sessions.findIndex((candidate) => candidate.id === session.id) === index,
   );
-  const varianceSessionsForBusinessDate = sessionsForBusinessDate.filter(
-    (session) =>
-      (session.variance ?? 0) !== 0 ||
-      (session.openingVariance ?? 0) !== 0,
+  const allCashSessions = [...cashSessionHistory, cashSession].filter(
+    (session, index, sessions) =>
+      sessions.findIndex((candidate) => candidate.id === session.id) === index,
   );
+  const varianceIssues = allCashSessions.flatMap<TreasuryVarianceIssue>(
+    (session) => {
+      const issues: TreasuryVarianceIssue[] = [];
+      if ((session.openingVariance ?? 0) !== 0) {
+        issues.push({
+          id: `${session.id}-opening`,
+          sessionId: session.id,
+          kind: "opening",
+          expectedAmount:
+            session.openingExpected ?? session.openingBalance,
+          actualAmount: session.openingBalance,
+          variance: session.openingVariance ?? 0,
+          responsibleEmployeeId: session.responsibleEmployeeId,
+          responsible: session.responsible,
+          occurredAt: session.openedAt,
+          note: session.openingNote ?? "",
+        });
+      }
+      if (
+        session.state === "closed" &&
+        (session.variance ?? 0) !== 0
+      ) {
+        issues.push({
+          id: `${session.id}-closing`,
+          sessionId: session.id,
+          kind: "closing",
+          expectedAmount: session.expectedBalance ?? 0,
+          actualAmount: session.actualBalance ?? 0,
+          variance: session.variance ?? 0,
+          responsibleEmployeeId: session.responsibleEmployeeId,
+          responsible: session.responsible,
+          occurredAt: session.closedAt ?? session.openedAt,
+          note: session.closingNote ?? "",
+        });
+      }
+      return issues;
+    },
+  );
+  const resolvedVarianceIssueIds = new Set(
+    varianceReviews.map((review) => review.issueId),
+  );
+  const openVarianceIssues = varianceIssues.filter(
+    (issue) => !resolvedVarianceIssueIds.has(issue.id),
+  );
+  const businessDateSessionIds = new Set(
+    sessionsForBusinessDate.map((session) => session.id),
+  );
+  const openVarianceIssuesForBusinessDate = openVarianceIssues.filter(
+    (issue) => businessDateSessionIds.has(issue.sessionId),
+  );
+  const openShortageTotal = openVarianceIssues
+    .filter((issue) => issue.variance < 0)
+    .reduce((sum, issue) => sum + Math.abs(issue.variance), 0);
+  const openSurplusTotal = openVarianceIssues
+    .filter((issue) => issue.variance > 0)
+    .reduce((sum, issue) => sum + issue.variance, 0);
+  const openEmployeeDebtTotal = employeeTreasuryDebts
+    .filter((debt) => debt.state === "open")
+    .reduce((sum, debt) => sum + debt.remainingAmount, 0);
   const normalizedSearch = search.trim().toLowerCase();
   const filteredMovements = [...accountMovements]
     .sort((a, b) => b.sequence - a.sequence)
@@ -24798,6 +24933,9 @@ function TreasuryScreen({
     setClosingNote("");
     setReverseReason("");
     setSessionEmployeeId("");
+    setSelectedVarianceIssue(null);
+    setVarianceDecision("company_expense");
+    setVerifiedCount("");
   }
 
   function openMovementDialog() {
@@ -24864,6 +25002,17 @@ function TreasuryScreen({
     setClosingNote("");
     setFormError("");
     setDialog("close-day");
+  }
+
+  function openVarianceReviewDialog(issue: TreasuryVarianceIssue) {
+    setSelectedVarianceIssue(issue);
+    setVarianceDecision(
+      issue.variance > 0 ? "surplus_income" : "company_expense",
+    );
+    setVerifiedCount(String(issue.actualAmount));
+    setClosingNote("");
+    setFormError("");
+    setDialog("variance-review");
   }
 
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
@@ -25518,7 +25667,8 @@ function TreasuryScreen({
       );
       return;
     }
-    const varianceSessionCount = varianceSessionsForBusinessDate.length;
+    const varianceSessionCount =
+      openVarianceIssuesForBusinessDate.length;
     if (varianceSessionCount > 0 && !closingNote.trim()) {
       setFormError(
         lang === "ar"
@@ -25563,6 +25713,210 @@ function TreasuryScreen({
       lang === "ar"
         ? "تم حفظ Snapshot إغلاق اليوم دون تغيير أي حساب أو دين"
         : "Day-close snapshot saved without changing any account or debt",
+    );
+  }
+
+  function submitVarianceReview(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const issue = selectedVarianceIssue;
+    if (!issue || resolvedVarianceIssueIds.has(issue.id)) {
+      setFormError(
+        lang === "ar"
+          ? "هذا الفرق لم يعد متاحًا للمراجعة."
+          : "This variance is no longer available for review.",
+      );
+      return;
+    }
+    if (!closingNote.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "سبب قرار المراجعة إلزامي."
+          : "A review decision reason is required.",
+      );
+      return;
+    }
+    if (
+      issue.variance > 0 &&
+      varianceDecision !== "surplus_income" &&
+      varianceDecision !== "recount_matched"
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "الزيادة يمكن تأكيدها بعد إعادة العد أو اعتمادها كإيراد فقط."
+          : "A surplus can only be recounted or recognized as income.",
+      );
+      return;
+    }
+    if (
+      issue.variance < 0 &&
+      varianceDecision === "surplus_income"
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "لا يمكن اعتماد العجز كإيراد."
+          : "A shortage cannot be recognized as income.",
+      );
+      return;
+    }
+    const verifiedActualAmount = Number(verifiedCount);
+    if (
+      varianceDecision === "recount_matched" &&
+      (!Number.isFinite(verifiedActualAmount) ||
+        verifiedActualAmount !== issue.expectedAmount)
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "إغلاق الفرق بإعادة العد يتطلب أن يساوي المعدود الجديد المبلغ المتوقع."
+          : "A recount can close the issue only when the verified count matches expected cash.",
+      );
+      return;
+    }
+    const createsFinancialAdjustment =
+      varianceDecision !== "recount_matched";
+    if (
+      createsFinancialAdjustment &&
+      (cashSession.state !== "open" || cashAccount.state !== "active")
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "افتح جلسة خزنة نشطة قبل تثبيت التسوية المالية للفرق."
+          : "Open an active cash session before posting the financial adjustment.",
+      );
+      return;
+    }
+    if (
+      varianceDecision === "employee_receivable" &&
+      !issue.responsibleEmployeeId
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "لا يوجد موظف مسؤول مرتبط بالجلسة لإنشاء المديونية."
+          : "The session has no responsible employee for the receivable.",
+      );
+      return;
+    }
+    const now = new Date();
+    const nowNumber = now.getTime();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const reviewId = `TVR-${nowNumber.toString().slice(-9)}`;
+    const resolutionAmount =
+      varianceDecision === "recount_matched"
+        ? 0
+        : Math.abs(issue.variance);
+    const movementId = createsFinancialAdjustment
+      ? `TM-VAR-${nowNumber.toString().slice(-9)}`
+      : undefined;
+    const debtId =
+      varianceDecision === "employee_receivable"
+        ? `ETD-${nowNumber.toString().slice(-8)}`
+        : undefined;
+    const review: TreasuryVarianceReview = {
+      id: reviewId,
+      issueId: issue.id,
+      sessionId: issue.sessionId,
+      varianceKind: issue.kind,
+      expectedAmount: issue.expectedAmount,
+      originalActualAmount: issue.actualAmount,
+      originalVariance: issue.variance,
+      resolution: varianceDecision,
+      verifiedActualAmount:
+        varianceDecision === "recount_matched"
+          ? verifiedActualAmount
+          : undefined,
+      resolutionAmount,
+      responsibleEmployeeId: issue.responsibleEmployeeId,
+      responsible: issue.responsible,
+      note: closingNote.trim(),
+      reviewedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      reviewedAt: timestamp,
+      treasuryMovementId: movementId,
+      employeeDebtId: debtId,
+    };
+    if (createsFinancialAdjustment && movementId) {
+      const isSurplus = issue.variance > 0;
+      const nextSequence =
+        movements.reduce(
+          (largest, movement) => Math.max(largest, movement.sequence),
+          0,
+        ) + 1;
+      const movement: TreasuryMovement = {
+        id: movementId,
+        accountId: cashAccount.id,
+        direction: isSurplus ? "in" : "out",
+        category: isSurplus ? "cash_surplus" : "cash_shortage",
+        amount: resolutionAmount,
+        party:
+          varianceDecision === "employee_receivable"
+            ? issue.responsible
+            : { ar: "إدارة الشركة", en: "Company management" },
+        description: {
+          ar:
+            varianceDecision === "employee_receivable"
+              ? `إثبات عجز عهدة كمديونية على ${issue.responsible.ar}`
+              : isSurplus
+                ? `اعتماد زيادة عهدة من الجلسة ${issue.sessionId}`
+                : `اعتماد عجز عهدة كمصروف شركة من الجلسة ${issue.sessionId}`,
+          en:
+            varianceDecision === "employee_receivable"
+              ? `Cash shortage recognized as receivable from ${issue.responsible.en}`
+              : isSurplus
+                ? `Cash surplus recognized from session ${issue.sessionId}`
+                : `Cash shortage recognized as company expense from session ${issue.sessionId}`,
+        },
+        reference: reviewId,
+        source: "system",
+        createdBy: review.reviewedBy,
+        timestamp,
+        sequence: nextSequence,
+        sourceDocument: {
+          type: "cash_variance_review",
+          id: reviewId,
+        },
+      };
+      onMovementsChange([movement, ...movements]);
+    }
+    if (
+      varianceDecision === "employee_receivable" &&
+      debtId &&
+      issue.responsibleEmployeeId
+    ) {
+      const debt: EmployeeTreasuryDebt = {
+        id: debtId,
+        employeeId: issue.responsibleEmployeeId,
+        employee: issue.responsible,
+        sourceReviewId: reviewId,
+        sourceSessionId: issue.sessionId,
+        originalAmount: resolutionAmount,
+        paidAmount: 0,
+        remainingAmount: resolutionAmount,
+        state: "open",
+        reason: closingNote.trim(),
+        createdAt: timestamp,
+      };
+      onEmployeeTreasuryDebtsChange([
+        debt,
+        ...employeeTreasuryDebts,
+      ]);
+    }
+    onVarianceReviewsChange([review, ...varianceReviews]);
+    resetDialog();
+    showToast(
+      varianceDecision === "recount_matched"
+        ? lang === "ar"
+          ? "تم توثيق إعادة العد وإغلاق الفرق دون حركة مالية"
+          : "Recount documented and variance closed without a financial movement"
+        : lang === "ar"
+          ? `تم اعتماد تسوية الفرق بالمرجع ${reviewId}`
+          : `Variance adjustment ${reviewId} was approved`,
     );
   }
 
@@ -25704,8 +26058,14 @@ function TreasuryScreen({
                       : lang === "ar"
                         ? "فتح جلسة جديدة"
                         : "Open new session"}
-                  </button>
-                )
+                    </button>
+                  )
+              ) : activeTab === "variance" ? (
+                <span className="treasury-complete-badge">
+                  <CircleAlert size={16} />
+                  {openVarianceIssues.length}{" "}
+                  {lang === "ar" ? "فرق مفتوح" : "open variance(s)"}
+                </span>
               ) : latestDayClose ? (
                 <span className="treasury-complete-badge">
                   <LockKeyhole size={16} />
@@ -25756,6 +26116,27 @@ function TreasuryScreen({
                     : lang === "ar"
                       ? "مغلقة"
                       : "Closed"}
+                </small>
+              </span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "variance" ? "active" : ""}
+              onClick={() => setActiveTab("variance")}
+            >
+              <CircleAlert size={18} />
+              <span>
+                <strong>
+                  {lang === "ar" ? "فروق العهدة" : "Custody variances"}
+                </strong>
+                <small>
+                  {openVarianceIssues.length
+                    ? lang === "ar"
+                      ? `${openVarianceIssues.length} تحتاج مراجعة`
+                      : `${openVarianceIssues.length} need review`
+                    : lang === "ar"
+                      ? "لا فروق مفتوحة"
+                      : "No open variances"}
                 </small>
               </span>
             </button>
@@ -26240,6 +26621,234 @@ function TreasuryScreen({
             </section>
           )}
 
+          {activeTab === "variance" && (
+            <section className="treasury-variance-space">
+              <div className="treasury-variance-truth">
+                <ShieldCheck size={20} />
+                <span>
+                  <strong>
+                    {lang === "ar"
+                      ? "فرق العد واقعة تحتاج قرارًا، وليس مديونية تلقائية"
+                      : "A count variance is a fact requiring a decision, not an automatic debt"}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "إعادة العد، مصروف الشركة، مديونية الموظف أو إيراد الزيادة قرارات مستقلة بسبب ومراجع؛ ولا يُعدّل أصل الجلسة."
+                      : "Recount, company expense, employee receivable, or surplus income are separate reasoned decisions; the original session remains unchanged."}
+                  </small>
+                </span>
+              </div>
+
+              <div className="treasury-variance-metrics">
+                <article>
+                  <small>{lang === "ar" ? "فروق مفتوحة" : "Open variances"}</small>
+                  <strong>{openVarianceIssues.length}</strong>
+                  <span>{lang === "ar" ? "تحتاج قرار مراجعة" : "Need a review decision"}</span>
+                </article>
+                <article className="shortage">
+                  <small>{lang === "ar" ? "إجمالي العجز المفتوح" : "Open shortages"}</small>
+                  <strong>{money.format(openShortageTotal)}</strong>
+                  <span>{lang === "ar" ? "غير محمّل تلقائيًا" : "Not charged automatically"}</span>
+                </article>
+                <article className="surplus">
+                  <small>{lang === "ar" ? "إجمالي الزيادة المفتوحة" : "Open surpluses"}</small>
+                  <strong>{money.format(openSurplusTotal)}</strong>
+                  <span>{lang === "ar" ? "ليست إيرادًا قبل الاعتماد" : "Not income before approval"}</span>
+                </article>
+                <article>
+                  <small>{lang === "ar" ? "مديونيات موظفين مفتوحة" : "Open employee receivables"}</small>
+                  <strong>{money.format(openEmployeeDebtTotal)}</strong>
+                  <span>{lang === "ar" ? "نتيجة قرارات معتمدة فقط" : "From approved decisions only"}</span>
+                </article>
+              </div>
+
+              <div className="treasury-variance-grid">
+                <div className="treasury-variance-queue">
+                  <div className="treasury-variance-head">
+                    <span>
+                      <CircleAlert size={19} />
+                      <strong>
+                        {lang === "ar"
+                          ? "الفروق التي تنتظر قرارًا"
+                          : "Variances awaiting a decision"}
+                      </strong>
+                    </span>
+                    <b>{openVarianceIssues.length}</b>
+                  </div>
+                  {openVarianceIssues.length ? (
+                    <div className="treasury-variance-list">
+                      {openVarianceIssues.map((issue) => (
+                        <article key={issue.id}>
+                          <span
+                            className={`treasury-variance-sign ${
+                              issue.variance < 0 ? "shortage" : "surplus"
+                            }`}
+                          >
+                            {issue.variance < 0 ? "−" : "+"}
+                          </span>
+                          <span>
+                            <small>
+                              {issue.kind === "opening"
+                                ? lang === "ar"
+                                  ? "فرق استلام عهدة"
+                                  : "Custody receipt variance"
+                                : lang === "ar"
+                                  ? "فرق إغلاق جلسة"
+                                  : "Session close variance"}
+                            </small>
+                            <strong>{issue.responsible[lang]}</strong>
+                            <b>{issue.sessionId}</b>
+                          </span>
+                          <span>
+                            <small>{lang === "ar" ? "المتوقع" : "Expected"}</small>
+                            <strong>{money.format(issue.expectedAmount)}</strong>
+                          </span>
+                          <span>
+                            <small>{lang === "ar" ? "المعدود" : "Counted"}</small>
+                            <strong>{money.format(issue.actualAmount)}</strong>
+                          </span>
+                          <strong
+                            className={
+                              issue.variance < 0 ? "shortage" : "surplus"
+                            }
+                          >
+                            {issue.variance > 0 ? "+" : "−"}{" "}
+                            {money.format(Math.abs(issue.variance))}
+                          </strong>
+                          <button
+                            className="primary-button"
+                            type="button"
+                            onClick={() => openVarianceReviewDialog(issue)}
+                          >
+                            <ClipboardCheck size={16} />
+                            {lang === "ar" ? "مراجعة واتخاذ قرار" : "Review & decide"}
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="treasury-variance-empty">
+                      <Check size={24} />
+                      <strong>
+                        {lang === "ar"
+                          ? "لا توجد فروق عهدة مفتوحة"
+                          : "No open custody variances"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "أي فرق ينتج عن عد فتح أو إغلاق جلسة سيظهر هنا تلقائيًا."
+                          : "Any opening or closing count variance will appear here automatically."}
+                      </small>
+                    </div>
+                  )}
+                </div>
+
+                <div className="employee-treasury-debts">
+                  <div className="treasury-variance-head">
+                    <span>
+                      <HandCoins size={19} />
+                      <strong>
+                        {lang === "ar"
+                          ? "مديونيات العهدة على الموظفين"
+                          : "Employee cash receivables"}
+                      </strong>
+                    </span>
+                    <b>
+                      {
+                        employeeTreasuryDebts.filter(
+                          (debt) => debt.state === "open",
+                        ).length
+                      }
+                    </b>
+                  </div>
+                  {employeeTreasuryDebts.filter(
+                    (debt) => debt.state === "open",
+                  ).length ? (
+                    employeeTreasuryDebts
+                      .filter((debt) => debt.state === "open")
+                      .map((debt) => (
+                        <article key={debt.id}>
+                          <span>
+                            <strong>{debt.employee[lang]}</strong>
+                            <small>
+                              {debt.id} · {debt.sourceSessionId}
+                            </small>
+                          </span>
+                          <b>{money.format(debt.remainingAmount)}</b>
+                          <small>{debt.reason}</small>
+                        </article>
+                      ))
+                  ) : (
+                    <div className="employee-treasury-debts__empty">
+                      <ShieldCheck size={21} />
+                      <span>
+                        <strong>
+                          {lang === "ar"
+                            ? "لا توجد مديونية عهدة"
+                            : "No custody receivables"}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "لا تنشأ إلا بقرار صريح من مراجع مخوّل."
+                            : "Created only by an explicit authorized review."}
+                        </small>
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {varianceReviews.length > 0 && (
+                <div className="treasury-variance-history">
+                  <div className="treasury-variance-head">
+                    <span>
+                      <ReceiptText size={19} />
+                      <strong>
+                        {lang === "ar"
+                          ? "قرارات المراجعة السابقة"
+                          : "Previous review decisions"}
+                      </strong>
+                    </span>
+                    <b>{varianceReviews.length}</b>
+                  </div>
+                  {varianceReviews.slice(0, 8).map((review) => (
+                    <article key={review.id}>
+                      <span>
+                        <strong>{review.responsible[lang]}</strong>
+                        <small>{review.id} · {review.sessionId}</small>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "القرار" : "Decision"}</small>
+                        <strong>
+                          {review.resolution === "recount_matched"
+                            ? lang === "ar"
+                              ? "تطابق بعد إعادة العد"
+                              : "Matched after recount"
+                            : review.resolution === "company_expense"
+                              ? lang === "ar"
+                                ? "عجز كمصروف شركة"
+                                : "Shortage as company expense"
+                              : review.resolution === "employee_receivable"
+                                ? lang === "ar"
+                                  ? "مديونية على الموظف"
+                                  : "Employee receivable"
+                                : lang === "ar"
+                                  ? "زيادة كإيراد"
+                                  : "Surplus as income"}
+                        </strong>
+                      </span>
+                      <b>{money.format(review.resolutionAmount)}</b>
+                      <span>
+                        <small>{review.reviewedAt[lang]}</small>
+                        <strong>{review.reviewedBy[lang]}</strong>
+                      </span>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
           {activeTab === "day" && (
             <section className="financial-day-space">
               <div className="financial-day-status">
@@ -26343,18 +26952,18 @@ function TreasuryScreen({
                         <small>{lang === "ar" ? "كل الظاهر حركات مثبتة وليست طلبات" : "All visible rows are posted movements"}</small>
                       </span>
                     </li>
-                    <li className={varianceSessionsForBusinessDate.length === 0 ? "done" : "review"}>
-                      {varianceSessionsForBusinessDate.length === 0 ? <Check size={17} /> : <CircleAlert size={17} />}
+                    <li className={openVarianceIssuesForBusinessDate.length === 0 ? "done" : "review"}>
+                      {openVarianceIssuesForBusinessDate.length === 0 ? <Check size={17} /> : <CircleAlert size={17} />}
                       <span>
                         <strong>{lang === "ar" ? "فرق عد الخزنة" : "Cash count variance"}</strong>
                         <small>
-                          {varianceSessionsForBusinessDate.length === 0
+                          {openVarianceIssuesForBusinessDate.length === 0
                             ? lang === "ar"
                               ? "لا يوجد فرق مفتوح"
                               : "No open variance"
                             : lang === "ar"
-                              ? `${varianceSessionsForBusinessDate.length} جلسة بها فرق للمراجعة`
-                              : `${varianceSessionsForBusinessDate.length} session(s) have variance under review`}
+                              ? `${openVarianceIssuesForBusinessDate.length} فرق لم يُحسم بعد`
+                              : `${openVarianceIssuesForBusinessDate.length} variance issue(s) remain unresolved`}
                         </small>
                       </span>
                     </li>
@@ -26516,6 +27125,10 @@ function TreasuryScreen({
                             ? lang === "ar"
                               ? "تحويل خزنة"
                               : "Treasury transfer"
+                            : selectedMovement.sourceDocument.type === "cash_variance_review"
+                              ? lang === "ar"
+                                ? "قرار مراجعة فرق عهدة"
+                                : "Custody variance review"
                             : selectedMovement.sourceDocument.type === "reversal"
                               ? lang === "ar"
                                 ? "تصحيح حركة"
@@ -26639,6 +27252,8 @@ function TreasuryScreen({
                   ? submitOpenSession
                 : dialog === "handover"
                   ? submitHandover
+                : dialog === "variance-review"
+                  ? submitVarianceReview
                 : dialog === "movement"
                   ? submitManualMovement
                   : dialog === "close-session"
@@ -26666,6 +27281,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "تسليم واستلام في خطوة واحدة"
                         : "One-step custody handover"
+                    : dialog === "variance-review"
+                      ? lang === "ar"
+                        ? "قرار مالي موثق"
+                        : "Documented financial decision"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "مطابقة النقد الفعلي"
@@ -26695,6 +27314,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "تسليم العهدة لموظف آخر"
                         : "Hand cash custody to another employee"
+                    : dialog === "variance-review"
+                      ? lang === "ar"
+                        ? "مراجعة فرق العهدة"
+                        : "Review custody variance"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "عد وإغلاق جلسة الخزنة"
@@ -26718,7 +27341,225 @@ function TreasuryScreen({
               </button>
             </div>
 
-            {dialog === "reverse" ? (
+            {dialog === "variance-review" && selectedVarianceIssue ? (
+              <div className="variance-review-dialog">
+                <div className="variance-review-summary">
+                  <span
+                    className={
+                      selectedVarianceIssue.variance < 0
+                        ? "shortage"
+                        : "surplus"
+                    }
+                  >
+                    {selectedVarianceIssue.variance < 0 ? "−" : "+"}
+                  </span>
+                  <span>
+                    <small>
+                      {selectedVarianceIssue.kind === "opening"
+                        ? lang === "ar"
+                          ? "فرق استلام عهدة"
+                          : "Custody receipt variance"
+                        : lang === "ar"
+                          ? "فرق إغلاق جلسة"
+                          : "Session close variance"}
+                    </small>
+                    <strong>{selectedVarianceIssue.responsible[lang]}</strong>
+                    <b>{selectedVarianceIssue.sessionId}</b>
+                  </span>
+                  <article>
+                    <small>{lang === "ar" ? "المتوقع" : "Expected"}</small>
+                    <strong>
+                      {money.format(selectedVarianceIssue.expectedAmount)}
+                    </strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "المعدود" : "Counted"}</small>
+                    <strong>
+                      {money.format(selectedVarianceIssue.actualAmount)}
+                    </strong>
+                  </article>
+                  <b
+                    className={
+                      selectedVarianceIssue.variance < 0
+                        ? "shortage"
+                        : "surplus"
+                    }
+                  >
+                    {selectedVarianceIssue.variance > 0 ? "+" : "−"}{" "}
+                    {money.format(
+                      Math.abs(selectedVarianceIssue.variance),
+                    )}
+                  </b>
+                </div>
+
+                <div className="variance-decision-grid">
+                  <button
+                    type="button"
+                    className={
+                      varianceDecision === "recount_matched" ? "active" : ""
+                    }
+                    onClick={() =>
+                      setVarianceDecision("recount_matched")
+                    }
+                  >
+                    <Calculator size={18} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? "إعادة العد والتطابق"
+                          : "Recount and match"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "لا حركة مالية ولا مديونية"
+                          : "No movement or receivable"}
+                      </small>
+                    </span>
+                  </button>
+                  {selectedVarianceIssue.variance < 0 ? (
+                    <>
+                      <button
+                        type="button"
+                        className={
+                          varianceDecision === "company_expense"
+                            ? "active"
+                            : ""
+                        }
+                        onClick={() =>
+                          setVarianceDecision("company_expense")
+                        }
+                      >
+                        <Banknote size={18} />
+                        <span>
+                          <strong>
+                            {lang === "ar"
+                              ? "مصروف على الشركة"
+                              : "Company expense"}
+                          </strong>
+                          <small>
+                            {lang === "ar"
+                              ? "يثبت حركة عجز معتمدة"
+                              : "Posts an approved shortage"}
+                          </small>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          varianceDecision === "employee_receivable"
+                            ? "active"
+                            : ""
+                        }
+                        onClick={() =>
+                          setVarianceDecision("employee_receivable")
+                        }
+                      >
+                        <UserRound size={18} />
+                        <span>
+                          <strong>
+                            {lang === "ar"
+                              ? "مديونية على الموظف"
+                              : "Employee receivable"}
+                          </strong>
+                          <small>
+                            {lang === "ar"
+                              ? "قرار صريح وليس تلقائيًا"
+                              : "Explicit, never automatic"}
+                          </small>
+                        </span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      className={
+                        varianceDecision === "surplus_income"
+                          ? "active"
+                          : ""
+                      }
+                      onClick={() =>
+                        setVarianceDecision("surplus_income")
+                      }
+                    >
+                      <Plus size={18} />
+                      <span>
+                        <strong>
+                          {lang === "ar"
+                            ? "اعتماد الزيادة كإيراد"
+                            : "Recognize surplus as income"}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "يثبت حركة زيادة معتمدة"
+                            : "Posts an approved surplus"}
+                        </small>
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {varianceDecision === "recount_matched" && (
+                  <>
+                    <label className="treasury-form-field cash-actual-field">
+                      <span>
+                        {lang === "ar"
+                          ? "النقد المعدود في المراجعة"
+                          : "Verified recount amount"}
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        value={verifiedCount}
+                        onChange={(event) =>
+                          setVerifiedCount(event.target.value)
+                        }
+                      />
+                    </label>
+                    <div
+                      className={`cash-variance-preview ${
+                        recountVariance === 0 ? "matched" : "different"
+                      }`}
+                    >
+                      <span>
+                        {recountVariance === 0 ? (
+                          <Check size={18} />
+                        ) : (
+                          <CircleAlert size={18} />
+                        )}
+                        <strong>
+                          {recountVariance === 0
+                            ? lang === "ar"
+                              ? "أصبح العد متطابقًا"
+                              : "Recount is matched"
+                            : lang === "ar"
+                              ? "ما زال هناك فرق"
+                              : "Variance still exists"}
+                        </strong>
+                      </span>
+                      <b>{money.format(recountVariance)}</b>
+                    </div>
+                  </>
+                )}
+
+                <label className="treasury-form-field">
+                  <span>
+                    {lang === "ar"
+                      ? "سبب قرار المراجعة — إلزامي"
+                      : "Review decision reason — required"}
+                  </span>
+                  <textarea
+                    value={closingNote}
+                    onChange={(event) => setClosingNote(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "اكتب نتيجة التحقيق أو إعادة العد ومستند القرار..."
+                        : "Document the investigation, recount, and decision basis..."
+                    }
+                  />
+                </label>
+              </div>
+            ) : dialog === "reverse" ? (
               <div className="treasury-reversal-dialog">
                 <div className="treasury-reversal-box">
                   <RotateCcw size={19} />
@@ -27006,7 +27847,7 @@ function TreasuryScreen({
                   </article>
                   <article>
                     <small>{lang === "ar" ? "جلسات بها فرق عد" : "Sessions with variance"}</small>
-                    <strong>{varianceSessionsForBusinessDate.length}</strong>
+                    <strong>{openVarianceIssuesForBusinessDate.length}</strong>
                   </article>
                 </div>
                 <div className="day-close-ready">
@@ -27187,6 +28028,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "التأكيد يغلق عهدة الموظف السابق ويفتح عهدة المستلم بنفس النقد المعدود، مع إبقاء أي فرق على الجلسة السابقة للمراجعة."
                       : "Confirmation closes the previous custody and opens the receiver's session with the same counted cash, keeping any variance on the previous session for review."
+                  : dialog === "variance-review"
+                    ? lang === "ar"
+                      ? "القرار يُغلق فرقًا واحدًا فقط. التسوية المالية تُنشئ حركة مرتبطة، ومديونية الموظف تُنشأ فقط عند اختيارها صراحة."
+                      : "The decision closes one variance only. Financial settlement creates a linked movement, and employee debt is created only when explicitly selected."
                   : dialog === "close-session"
                     ? lang === "ar"
                       ? "الإغلاق يثبت العد والفرق فقط؛ لا يغيّر حركة قديمة ولا يصنع مصروفًا أو دينًا."
@@ -27228,6 +28073,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "تأكيد التسليم وفتح الجلسة"
                       : "Confirm handover & open"
+                  : dialog === "variance-review"
+                    ? lang === "ar"
+                      ? "اعتماد قرار المراجعة"
+                      : "Approve review decision"
                   : dialog === "close-session"
                     ? lang === "ar"
                       ? "تأكيد العد وإغلاق الجلسة"
@@ -40923,6 +41772,10 @@ export default function Home() {
     sharedTreasuryCashSessionHistory,
     setSharedTreasuryCashSessionHistory,
   ] = useState<TreasuryCashSession[]>(treasuryCashSessionHistoryData);
+  const [sharedTreasuryVarianceReviews, setSharedTreasuryVarianceReviews] =
+    useState<TreasuryVarianceReview[]>(treasuryVarianceReviewsData);
+  const [sharedEmployeeTreasuryDebts, setSharedEmployeeTreasuryDebts] =
+    useState<EmployeeTreasuryDebt[]>(employeeTreasuryDebtsData);
   const [sharedFinancialDayCloses, setSharedFinancialDayCloses] = useState<
     FinancialDayCloseSnapshot[]
   >(financialDayCloseSnapshotsData);
@@ -40977,6 +41830,8 @@ export default function Home() {
           treasuryMovements?: TreasuryMovement[];
           treasuryCashSession?: TreasuryCashSession;
           treasuryCashSessionHistory?: TreasuryCashSession[];
+          treasuryVarianceReviews?: TreasuryVarianceReview[];
+          employeeTreasuryDebts?: EmployeeTreasuryDebt[];
           financialDayCloses?: FinancialDayCloseSnapshot[];
           trusts?: TrustRecord[];
           trustPolicy?: TrustPolicy;
@@ -41213,6 +42068,12 @@ export default function Home() {
           setSharedTreasuryCashSessionHistory(
             parsed.treasuryCashSessionHistory,
           );
+        }
+        if (Array.isArray(parsed.treasuryVarianceReviews)) {
+          setSharedTreasuryVarianceReviews(parsed.treasuryVarianceReviews);
+        }
+        if (Array.isArray(parsed.employeeTreasuryDebts)) {
+          setSharedEmployeeTreasuryDebts(parsed.employeeTreasuryDebts);
         }
         if (Array.isArray(parsed.financialDayCloses)) {
           setSharedFinancialDayCloses(parsed.financialDayCloses);
@@ -41554,6 +42415,8 @@ export default function Home() {
         treasuryMovements: sharedTreasuryMovements,
         treasuryCashSession: sharedTreasuryCashSession,
         treasuryCashSessionHistory: sharedTreasuryCashSessionHistory,
+        treasuryVarianceReviews: sharedTreasuryVarianceReviews,
+        employeeTreasuryDebts: sharedEmployeeTreasuryDebts,
         financialDayCloses: sharedFinancialDayCloses,
         trusts: sharedTrusts,
         trustPolicy: sharedTrustPolicy,
@@ -41575,6 +42438,8 @@ export default function Home() {
     sharedTreasuryMovements,
     sharedTreasuryCashSession,
     sharedTreasuryCashSessionHistory,
+    sharedTreasuryVarianceReviews,
+    sharedEmployeeTreasuryDebts,
     sharedFinancialDayCloses,
     sharedTrustPolicy,
     sharedTrusts,
@@ -41968,10 +42833,14 @@ export default function Home() {
           roles={sharedAccessRoles}
           cashSession={sharedTreasuryCashSession}
           cashSessionHistory={sharedTreasuryCashSessionHistory}
+          varianceReviews={sharedTreasuryVarianceReviews}
+          employeeTreasuryDebts={sharedEmployeeTreasuryDebts}
           dayCloseSnapshots={sharedFinancialDayCloses}
           onMovementsChange={setSharedTreasuryMovements}
           onCashSessionChange={setSharedTreasuryCashSession}
           onCashSessionHistoryChange={setSharedTreasuryCashSessionHistory}
+          onVarianceReviewsChange={setSharedTreasuryVarianceReviews}
+          onEmployeeTreasuryDebtsChange={setSharedEmployeeTreasuryDebts}
           onDayCloseSnapshotsChange={setSharedFinancialDayCloses}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>

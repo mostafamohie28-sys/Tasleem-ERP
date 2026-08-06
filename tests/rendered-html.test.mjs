@@ -72,6 +72,12 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /submitOpenSession/);
   assert.match(page, /submitHandover/);
   assert.match(page, /treasuryCashSessionHistory/);
+  assert.match(page, /TreasuryVarianceReview/);
+  assert.match(page, /EmployeeTreasuryDebt/);
+  assert.match(page, /submitVarianceReview/);
+  assert.match(page, /cash_variance_review/);
+  assert.match(page, /فرق العد واقعة تحتاج قرارًا، وليس مديونية تلقائية/);
+  assert.match(page, /إغلاق الفرق بإعادة العد يتطلب/);
   assert.match(page, /openedSequence/);
   assert.match(page, /تسليم واستلام في خطوة واحدة/);
   assert.match(page, /هذا الرقم يصبح رصيد بداية عهدة الموظف الجديد/);
@@ -136,6 +142,9 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /cash-session-space/);
   assert.match(css, /cash-session-history/);
   assert.match(css, /cash-handover-route/);
+  assert.match(css, /treasury-variance-space/);
+  assert.match(css, /treasury-variance-list/);
+  assert.match(css, /variance-decision-grid/);
   assert.match(css, /financial-day-space/);
   assert.match(css, /treasury-breakdown/);
   assert.match(css, /treasury-reversal-badge/);
