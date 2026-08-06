@@ -69,6 +69,12 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /type FinancialDayCloseSnapshot/);
   assert.match(page, /submitSessionClose/);
   assert.match(page, /submitDayClose/);
+  assert.match(page, /submitOpenSession/);
+  assert.match(page, /submitHandover/);
+  assert.match(page, /treasuryCashSessionHistory/);
+  assert.match(page, /openedSequence/);
+  assert.match(page, /تسليم واستلام في خطوة واحدة/);
+  assert.match(page, /هذا الرقم يصبح رصيد بداية عهدة الموظف الجديد/);
   assert.match(page, /requestedDebtPayment/);
   assert.match(page, /currentSettlementCash/);
   assert.match(page, /sourceDocument/);
@@ -128,6 +134,8 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /access-dialog-layer/);
   assert.match(css, /treasury-tabs/);
   assert.match(css, /cash-session-space/);
+  assert.match(css, /cash-session-history/);
+  assert.match(css, /cash-handover-route/);
   assert.match(css, /financial-day-space/);
   assert.match(css, /treasury-breakdown/);
   assert.match(css, /treasury-reversal-badge/);

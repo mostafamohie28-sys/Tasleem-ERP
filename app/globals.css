@@ -19820,6 +19820,112 @@ tbody tr:hover {
   font-size: 9.5px;
 }
 
+.cash-session-process > button + button {
+  margin-inline-start: 8px;
+}
+
+.cash-session-history {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+}
+
+.cash-session-history__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cash-session-history__head > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--blue-600);
+}
+
+.cash-session-history__head strong {
+  color: var(--text);
+  font-size: 11.5px;
+}
+
+.cash-session-history__head small {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.cash-session-history__list {
+  display: grid;
+  gap: 7px;
+}
+
+.cash-session-history__list article {
+  display: grid;
+  grid-template-columns: 32px minmax(150px, 1.15fr) minmax(125px, 1fr) minmax(160px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.cash-session-history__list article > span:not(.cash-session-history__status) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.cash-session-history__list strong {
+  color: var(--text);
+  font-size: 9.5px;
+}
+
+.cash-session-history__list small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+  overflow-wrap: anywhere;
+}
+
+.cash-session-history__status {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.cash-session-history__status.matched {
+  background: color-mix(in srgb, var(--green-600) 12%, var(--surface-raised));
+  color: var(--green-600);
+}
+
+.cash-session-history__status.variance {
+  background: color-mix(in srgb, var(--orange-500) 12%, var(--surface-raised));
+  color: var(--orange-600);
+}
+
+.cash-session-history__list article > b {
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 8.5px;
+  white-space: nowrap;
+}
+
+.cash-session-history__list article > b.matched {
+  background: color-mix(in srgb, var(--green-600) 10%, var(--surface-raised));
+  color: var(--green-600);
+}
+
+.cash-session-history__list article > b.variance {
+  background: color-mix(in srgb, var(--orange-500) 10%, var(--surface-raised));
+  color: var(--orange-600);
+}
+
 .non-cash-note,
 .day-close-truth {
   min-height: 64px;
@@ -19965,9 +20071,58 @@ tbody tr:hover {
 }
 
 .cash-close-dialog,
+.cash-handover-dialog,
 .day-close-dialog {
   display: grid;
   gap: 12px;
+}
+
+.cash-handover-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.cash-handover-route article,
+.cash-handover-route label {
+  min-width: 0;
+  min-height: 82px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-soft);
+}
+
+.cash-handover-route small {
+  color: var(--text-faint);
+  font-size: 8.5px;
+}
+
+.cash-handover-route strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.cash-handover-route span {
+  color: var(--text-soft);
+  font-size: 9px;
+}
+
+.cash-handover-route select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
 }
 
 .cash-close-summary,
@@ -20108,6 +20263,24 @@ tbody tr:hover {
   .cash-session-close-result,
   .day-close-review {
     grid-template-columns: 1fr;
+  }
+
+  .cash-session-history__list article {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+  }
+
+  .cash-session-history__list article > span:nth-child(3),
+  .cash-session-history__list article > span:nth-child(4) {
+    grid-column: 2 / -1;
+  }
+
+  .cash-handover-route {
+    grid-template-columns: 1fr;
+  }
+
+  .cash-handover-route > svg {
+    margin: -3px auto;
+    transform: rotate(90deg);
   }
 
   .cash-session-close-result > p {
