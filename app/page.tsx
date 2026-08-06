@@ -576,6 +576,7 @@ type CourierSettlement = {
     compensationType: CourierCompensationType;
     settlementCycle: CourierSettlementCycle;
   } | null;
+  requestedDebtPayment?: number;
   debtPayment: number;
   expectedCash: number;
   actualCash: number;
@@ -722,6 +723,26 @@ type TreasuryMovement = {
     | "courierPayouts"
     | "senderAccountHistory";
   linkedMovementId?: string;
+  sourceDocument?: {
+    type:
+      | "courier_settlement"
+      | "courier_payout"
+      | "sender_receipt"
+      | "manual_voucher"
+      | "treasury_transfer"
+      | "reversal";
+    id: string;
+  };
+  breakdown?: {
+    kind:
+      | "shipment_collection"
+      | "courier_debt_payment"
+      | "cash_difference";
+    amount: number;
+    label: Localized;
+  }[];
+  reversalOf?: string;
+  reversedBy?: string;
 };
 
 type TreasuryCashSession = {
@@ -24533,7 +24554,7 @@ function TreasuryScreen({
   const [selectedMovement, setSelectedMovement] =
     useState<TreasuryMovement | null>(null);
   const [dialog, setDialog] = useState<
-    "movement" | "transfer" | "close-session" | "close-day" | null
+    "movement" | "transfer" | "reverse" | "close-session" | "close-day" | null
   >(null);
   const [manualDirection, setManualDirection] =
     useState<TreasuryMovement["direction"]>("out");
@@ -24547,6 +24568,7 @@ function TreasuryScreen({
     useState<TreasuryAccount["id"]>("bank");
   const [actualCash, setActualCash] = useState("");
   const [closingNote, setClosingNote] = useState("");
+  const [reverseReason, setReverseReason] = useState("");
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -24683,6 +24705,7 @@ function TreasuryScreen({
     setManualDescription("");
     setActualCash("");
     setClosingNote("");
+    setReverseReason("");
   }
 
   function openMovementDialog() {
@@ -24699,6 +24722,13 @@ function TreasuryScreen({
     setTransferTo(destination);
     setFormError("");
     setDialog("transfer");
+  }
+
+  function openReverseDialog() {
+    if (!selectedMovement || selectedMovement.source !== "manual") return;
+    setReverseReason("");
+    setFormError("");
+    setDialog("reverse");
   }
 
   function openCloseSessionDialog() {
@@ -24719,6 +24749,14 @@ function TreasuryScreen({
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const amount = Number(manualAmount);
+    if (selectedAccount.state !== "active") {
+      setFormError(
+        lang === "ar"
+          ? "هذا الحساب موقوف ولا يقبل حركات جديدة."
+          : "This account is stopped and cannot accept new movements.",
+      );
+      return;
+    }
     if (
       selectedAccount.kind === "cash" &&
       cashSession.state !== "open"
@@ -24736,6 +24774,22 @@ function TreasuryScreen({
       );
       return;
     }
+    if (manualDirection === "out" && amount > currentBalance) {
+      setFormError(
+        lang === "ar"
+          ? "لا يمكن إثبات مبلغ خارج أكبر من الرصيد الحالي."
+          : "An outflow cannot exceed the current balance.",
+      );
+      return;
+    }
+    if (!manualParty.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "حدد الشخص أو الجهة المرتبطة بالحركة."
+          : "Enter the person or entity linked to the movement.",
+      );
+      return;
+    }
     if (!manualDescription.trim()) {
       setFormError(
         lang === "ar"
@@ -24745,6 +24799,23 @@ function TreasuryScreen({
       return;
     }
     const now = Date.now();
+    const reference =
+      manualReference.trim() || `MAN-${now.toString().slice(-6)}`;
+    if (
+      manualReference.trim() &&
+      movements.some(
+        (movement) =>
+          movement.reference.trim().toLowerCase() ===
+          manualReference.trim().toLowerCase(),
+      )
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "هذا المرجع مستخدم في حركة أخرى. اكتب مرجعًا مختلفًا."
+          : "This reference is already used by another movement.",
+      );
+      return;
+    }
     const category =
       manualDirection === "in" &&
       ["operating_expense", "other_expense"].includes(manualCategory)
@@ -24760,15 +24831,14 @@ function TreasuryScreen({
       category,
       amount,
       party: {
-        ar: manualParty.trim() || "بدون طرف",
-        en: manualParty.trim() || "No counterparty",
+        ar: manualParty.trim(),
+        en: manualParty.trim(),
       },
       description: {
         ar: manualDescription.trim(),
         en: manualDescription.trim(),
       },
-      reference:
-        manualReference.trim() || `MAN-${now.toString().slice(-6)}`,
+      reference,
       source: "manual",
       createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
       timestamp: {
@@ -24786,6 +24856,10 @@ function TreasuryScreen({
         }).format(new Date(now)),
       },
       sequence: now,
+      sourceDocument: {
+        type: "manual_voucher",
+        id: reference,
+      },
     };
     onMovementsChange([movement, ...movements]);
     resetDialog();
@@ -24802,6 +24876,17 @@ function TreasuryScreen({
     const destinationAccount = accounts.find(
       (account) => account.id === transferTo,
     );
+    if (
+      selectedAccount.state !== "active" ||
+      destinationAccount?.state !== "active"
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "التحويل يحتاج حساب مصدر وحساب وجهة بحالة نشطة."
+          : "Transfers require active source and destination accounts.",
+      );
+      return;
+    }
     if (
       cashSession.state !== "open" &&
       (selectedAccount.kind === "cash" ||
@@ -24849,6 +24934,21 @@ function TreasuryScreen({
     const now = Date.now();
     const reference =
       manualReference.trim() || `TF-${now.toString().slice(-6)}`;
+    if (
+      manualReference.trim() &&
+      movements.some(
+        (movement) =>
+          movement.reference.trim().toLowerCase() ===
+          manualReference.trim().toLowerCase(),
+      )
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "مرجع التحويل مستخدم من قبل. اكتب مرجعًا مختلفًا."
+          : "This transfer reference is already in use.",
+      );
+      return;
+    }
     const timestamp = {
       ar: new Intl.DateTimeFormat("ar-EG", {
         day: "numeric",
@@ -24882,6 +24982,7 @@ function TreasuryScreen({
       timestamp,
       sequence: now,
       linkedMovementId: inId,
+      sourceDocument: { type: "treasury_transfer", id: reference },
     };
     const inMovement: TreasuryMovement = {
       id: inId,
@@ -24900,6 +25001,7 @@ function TreasuryScreen({
       timestamp,
       sequence: now + 1,
       linkedMovementId: outId,
+      sourceDocument: { type: "treasury_transfer", id: reference },
     };
     onMovementsChange([inMovement, outMovement, ...movements]);
     resetDialog();
@@ -24907,6 +25009,121 @@ function TreasuryScreen({
       lang === "ar"
         ? `تم تحويل ${money.format(amount)} بنجاح`
         : `${money.format(amount)} transferred successfully`,
+    );
+  }
+
+  function submitReversal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedMovement || selectedMovement.source !== "manual") {
+      setFormError(
+        lang === "ar"
+          ? "يمكن عكس الحركات اليدوية فقط من هذه الشاشة."
+          : "Only manual movements can be reversed here.",
+      );
+      return;
+    }
+    if (selectedMovement.reversedBy) {
+      setFormError(
+        lang === "ar"
+          ? "هذه الحركة تم عكسها بالفعل."
+          : "This movement has already been reversed.",
+      );
+      return;
+    }
+    const movementAccount = accounts.find(
+      (account) => account.id === selectedMovement.accountId,
+    );
+    if (!movementAccount || movementAccount.state !== "active") {
+      setFormError(
+        lang === "ar"
+          ? "حساب الحركة موقوف ولا يمكن إثبات التصحيح عليه."
+          : "The movement account is stopped and cannot accept a reversal.",
+      );
+      return;
+    }
+    if (
+      movementAccount.kind === "cash" &&
+      cashSession.state !== "open"
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "افتح جلسة النقد قبل إثبات حركة التصحيح."
+          : "Open the cash session before posting the reversal.",
+      );
+      return;
+    }
+    if (!reverseReason.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "سبب التصحيح إلزامي."
+          : "A correction reason is required.",
+      );
+      return;
+    }
+    const oppositeDirection =
+      selectedMovement.direction === "in" ? "out" : "in";
+    if (
+      oppositeDirection === "out" &&
+      accountBalance(movementAccount) < selectedMovement.amount
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "الرصيد الحالي لا يكفي لإثبات عكس هذه الحركة."
+          : "The current balance is insufficient to post this reversal.",
+      );
+      return;
+    }
+    const now = Date.now();
+    const reversalId = `TM-REV-${now.toString().slice(-9)}`;
+    const reference = `REV-${selectedMovement.id}`;
+    const reversal: TreasuryMovement = {
+      id: reversalId,
+      accountId: selectedMovement.accountId,
+      direction: oppositeDirection,
+      category:
+        oppositeDirection === "in" ? "other_income" : "other_expense",
+      amount: selectedMovement.amount,
+      party: selectedMovement.party,
+      description: {
+        ar: `عكس الحركة ${selectedMovement.id} — ${reverseReason.trim()}`,
+        en: `Reversal of ${selectedMovement.id} — ${reverseReason.trim()}`,
+      },
+      reference,
+      source: "manual",
+      createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      timestamp: {
+        ar: new Intl.DateTimeFormat("ar-EG", {
+          day: "numeric",
+          month: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(now)),
+        en: new Intl.DateTimeFormat("en-US", {
+          day: "numeric",
+          month: "short",
+          hour: "numeric",
+          minute: "2-digit",
+        }).format(new Date(now)),
+      },
+      sequence: now,
+      sourceDocument: { type: "reversal", id: selectedMovement.id },
+      reversalOf: selectedMovement.id,
+      linkedMovementId: selectedMovement.id,
+    };
+    onMovementsChange([
+      reversal,
+      ...movements.map((movement) =>
+        movement.id === selectedMovement.id
+          ? { ...movement, reversedBy: reversalId }
+          : movement,
+      ),
+    ]);
+    setSelectedMovement(null);
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? `تم إثبات حركة التصحيح ${reversalId}`
+        : `Reversal ${reversalId} was posted`,
     );
   }
 
@@ -25355,7 +25572,14 @@ function TreasuryScreen({
                   >
                     <span className="treasury-ledger-id">
                       <strong>{movement.id}</strong>
-                      <small>{movement.timestamp[lang]}</small>
+                      <small>
+                        {movement.timestamp[lang]}
+                        {movement.reversedBy && (
+                          <b className="treasury-reversal-badge">
+                            {lang === "ar" ? "معكوسة" : "Reversed"}
+                          </b>
+                        )}
+                      </small>
                     </span>
                     <span>
                       <b className={`treasury-direction treasury-direction--${movement.direction}`}>
@@ -25840,7 +26064,81 @@ function TreasuryScreen({
                 <dt>{lang === "ar" ? "الرصيد بعد الحركة" : "Balance after movement"}</dt>
                 <dd>{money.format(balanceAfter.get(selectedMovement.id) ?? 0)}</dd>
               </div>
+              {selectedMovement.sourceDocument && (
+                <div>
+                  <dt>{lang === "ar" ? "مستند المصدر" : "Source document"}</dt>
+                  <dd>
+                    {selectedMovement.sourceDocument.type === "courier_settlement"
+                      ? lang === "ar"
+                        ? "تسوية مندوب"
+                        : "Courier settlement"
+                      : selectedMovement.sourceDocument.type === "courier_payout"
+                        ? lang === "ar"
+                          ? "إيصال صرف مندوب"
+                          : "Courier payout receipt"
+                        : selectedMovement.sourceDocument.type === "sender_receipt"
+                          ? lang === "ar"
+                            ? "إيصال راسل"
+                            : "Sender receipt"
+                          : selectedMovement.sourceDocument.type === "treasury_transfer"
+                            ? lang === "ar"
+                              ? "تحويل خزنة"
+                              : "Treasury transfer"
+                            : selectedMovement.sourceDocument.type === "reversal"
+                              ? lang === "ar"
+                                ? "تصحيح حركة"
+                                : "Movement reversal"
+                              : lang === "ar"
+                                ? "سند يدوي"
+                                : "Manual voucher"}{" "}
+                    · {selectedMovement.sourceDocument.id}
+                  </dd>
+                </div>
+              )}
             </dl>
+            {selectedMovement.breakdown &&
+              selectedMovement.breakdown.length > 0 && (
+                <div className="treasury-breakdown">
+                  <span>
+                    <ReceiptText size={17} />
+                    <strong>
+                      {lang === "ar"
+                        ? "تفصيل المبلغ المستلم فعليًا"
+                        : "Actual received amount breakdown"}
+                    </strong>
+                  </span>
+                  {selectedMovement.breakdown.map((item) => (
+                    <div
+                      className="treasury-breakdown__item"
+                      key={`${selectedMovement.id}-${item.kind}`}
+                    >
+                      <span>{item.label[lang]}</span>
+                      <b>{money.format(item.amount)}</b>
+                    </div>
+                  ))}
+                </div>
+              )}
+            {(selectedMovement.reversedBy || selectedMovement.reversalOf) && (
+              <div className="treasury-reversal-box">
+                <RotateCcw size={18} />
+                <span>
+                  <strong>
+                    {selectedMovement.reversedBy
+                      ? lang === "ar"
+                        ? "تم عكس هذه الحركة"
+                        : "This movement was reversed"
+                      : lang === "ar"
+                        ? "هذه حركة تصحيح"
+                        : "This is a reversal movement"}
+                  </strong>
+                  <small>
+                    {selectedMovement.reversedBy
+                      ? `${lang === "ar" ? "حركة التصحيح" : "Reversal"}: ${selectedMovement.reversedBy}`
+                      : `${lang === "ar" ? "الحركة الأصلية" : "Original movement"}: ${selectedMovement.reversalOf}`}
+                  </small>
+                </span>
+              </div>
+            )}
             <div className="treasury-drawer__audit">
               <LockKeyhole size={17} />
               <span>
@@ -25854,6 +26152,20 @@ function TreasuryScreen({
                 </small>
               </span>
             </div>
+            {selectedMovement.source === "manual" &&
+              !selectedMovement.reversedBy &&
+              !selectedMovement.reversalOf && (
+                <button
+                  className="secondary-button treasury-drawer__reversal"
+                  type="button"
+                  onClick={openReverseDialog}
+                >
+                  <RotateCcw size={17} />
+                  {lang === "ar"
+                    ? "تصحيح بعكس الحركة"
+                    : "Correct with reversal"}
+                </button>
+              )}
             {selectedMovement.linkedScreen && (
               <button
                 className="secondary-button treasury-drawer__source"
@@ -25889,6 +26201,8 @@ function TreasuryScreen({
             onSubmit={
               dialog === "transfer"
                 ? submitTransfer
+                : dialog === "reverse"
+                  ? submitReversal
                 : dialog === "movement"
                   ? submitManualMovement
                   : dialog === "close-session"
@@ -25904,6 +26218,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "حركتان مرتبطتان"
                       : "Two linked movements"
+                    : dialog === "reverse"
+                      ? lang === "ar"
+                        ? "تصحيح دون حذف الأصل"
+                        : "Correction without deleting history"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "مطابقة النقد الفعلي"
@@ -25921,6 +26239,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "تحويل بين الخزن"
                       : "Transfer between accounts"
+                    : dialog === "reverse"
+                      ? lang === "ar"
+                        ? "عكس حركة خزنة"
+                        : "Reverse treasury movement"
                     : dialog === "close-session"
                       ? lang === "ar"
                         ? "عد وإغلاق جلسة الخزنة"
@@ -25944,7 +26266,69 @@ function TreasuryScreen({
               </button>
             </div>
 
-            {dialog === "close-session" ? (
+            {dialog === "reverse" ? (
+              <div className="treasury-reversal-dialog">
+                <div className="treasury-reversal-box">
+                  <RotateCcw size={19} />
+                  <span>
+                    <strong>
+                      {lang === "ar"
+                        ? "الحركة الأصلية لا تُحذف"
+                        : "The original movement is not deleted"}
+                    </strong>
+                    <small>
+                      {selectedMovement
+                        ? `${selectedMovement.id} · ${money.format(selectedMovement.amount)}`
+                        : ""}
+                    </small>
+                  </span>
+                </div>
+                <div className="treasury-reversal-preview">
+                  <article>
+                    <small>{lang === "ar" ? "الأصل" : "Original"}</small>
+                    <strong>
+                      {selectedMovement?.direction === "in"
+                        ? lang === "ar"
+                          ? "مبلغ داخل"
+                          : "Money in"
+                        : lang === "ar"
+                          ? "مبلغ خارج"
+                          : "Money out"}
+                    </strong>
+                  </article>
+                  <RotateCcw size={20} />
+                  <article>
+                    <small>{lang === "ar" ? "التصحيح" : "Correction"}</small>
+                    <strong>
+                      {selectedMovement?.direction === "in"
+                        ? lang === "ar"
+                          ? "مبلغ خارج بنفس القيمة"
+                          : "Equal money out"
+                        : lang === "ar"
+                          ? "مبلغ داخل بنفس القيمة"
+                          : "Equal money in"}
+                    </strong>
+                  </article>
+                </div>
+                <label className="treasury-form-field">
+                  <span>
+                    {lang === "ar"
+                      ? "سبب التصحيح — إلزامي"
+                      : "Correction reason — required"}
+                  </span>
+                  <textarea
+                    value={reverseReason}
+                    onChange={(event) => setReverseReason(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "اشرح الخطأ الذي حدث ولماذا تُعكس الحركة..."
+                        : "Explain the error and why the movement is being reversed..."
+                    }
+                    autoFocus
+                  />
+                </label>
+              </div>
+            ) : dialog === "close-session" ? (
               <div className="cash-close-dialog">
                 <div className="cash-close-summary">
                   <article>
@@ -26203,6 +26587,10 @@ function TreasuryScreen({
                   ? lang === "ar"
                     ? "التأكيد ينشئ حركة خروج وحركة دخول بنفس المرجع."
                     : "Confirmation creates linked outflow and inflow movements."
+                  : dialog === "reverse"
+                    ? lang === "ar"
+                      ? "التأكيد ينشئ حركة مقابلة مرتبطة بالأصل؛ لا يحذف الحركة القديمة ولا يعدّل الرصيد يدويًا."
+                      : "Confirmation creates a linked opposite movement; it neither deletes history nor edits the balance directly."
                   : dialog === "close-session"
                     ? lang === "ar"
                       ? "الإغلاق يثبت العد والفرق فقط؛ لا يغيّر حركة قديمة ولا يصنع مصروفًا أو دينًا."
@@ -26232,6 +26620,10 @@ function TreasuryScreen({
                   ? lang === "ar"
                     ? "تأكيد التحويل"
                     : "Confirm transfer"
+                  : dialog === "reverse"
+                    ? lang === "ar"
+                      ? "تأكيد حركة التصحيح"
+                      : "Confirm reversal"
                   : dialog === "close-session"
                     ? lang === "ar"
                       ? "تأكيد العد وإغلاق الجلسة"
@@ -30302,6 +30694,7 @@ function CourierPayoutsScreen({
       timestamp,
       sequence: nextSequence,
       linkedScreen: "courierPayouts",
+      sourceDocument: { type: "courier_payout", id: receiptId },
     };
 
     onPayoutsChange([...payouts, payout]);
@@ -30910,7 +31303,7 @@ function CourierAccountScreen({
     (sum, item) => sum + (item.event.returnedPieces ?? 0),
     0,
   );
-  const debtPayment =
+  const requestedDebtPayment =
     debtMode === "full"
       ? debtBalance
       : debtMode === "partial"
@@ -30919,12 +31312,20 @@ function CourierAccountScreen({
             Math.max(0, Number(partialDebtInput) || 0),
           )
         : 0;
-  const expectedCash = currentCompanyDue + debtPayment;
+  const expectedCash = currentCompanyDue + requestedDebtPayment;
   const actualCash = customAmountOpen
     ? Math.max(0, Number(actualCashInput) || 0)
     : expectedCash;
-  const shortage = Math.max(0, expectedCash - actualCash);
-  const surplus = Math.max(0, actualCash - expectedCash);
+  const currentSettlementCash = Math.min(actualCash, currentCompanyDue);
+  const debtPayment = Math.min(
+    requestedDebtPayment,
+    Math.max(0, actualCash - currentSettlementCash),
+  );
+  const shortage = Math.max(0, currentCompanyDue - currentSettlementCash);
+  const surplus = Math.max(
+    0,
+    actualCash - currentSettlementCash - debtPayment,
+  );
   const latestSettlement = settlements
     .filter(
       (settlement) =>
@@ -30975,7 +31376,7 @@ function CourierAccountScreen({
       );
       return;
     }
-    if (debtMode === "partial" && debtPayment <= 0) {
+    if (debtMode === "partial" && requestedDebtPayment <= 0) {
       setError(
         lang === "ar"
           ? "أدخل قيمة السداد الجزئي من المديونية."
@@ -31173,6 +31574,7 @@ function CourierAccountScreen({
               settlementCycle: activePlan.settlementCycle,
             }
           : null,
+        requestedDebtPayment,
         debtPayment,
         expectedCash,
         actualCash,
@@ -40393,6 +40795,49 @@ export default function Home() {
           timestamp: settlement.timestamp,
           sequence: Date.now() + index,
           linkedScreen: "courierAccount",
+          sourceDocument: {
+            type: "courier_settlement",
+            id: settlement.id,
+          },
+          breakdown: [
+            {
+              kind: "shipment_collection",
+              amount: Math.max(
+                0,
+                settlement.actualCash -
+                  settlement.debtPayment -
+                  Math.max(0, settlement.difference),
+              ),
+              label: {
+                ar: "تحصيل الشحنات المستلم فعليًا",
+                en: "Actual shipment collection",
+              },
+            },
+            ...(settlement.debtPayment > 0
+              ? [
+                  {
+                    kind: "courier_debt_payment" as const,
+                    amount: settlement.debtPayment,
+                    label: {
+                      ar: "سداد مديونية مندوب",
+                      en: "Courier debt payment",
+                    },
+                  },
+                ]
+              : []),
+            ...(settlement.difference > 0
+              ? [
+                  {
+                    kind: "cash_difference" as const,
+                    amount: settlement.difference,
+                    label: {
+                      ar: "زيادة نقدية تحت المراجعة",
+                      en: "Cash surplus under review",
+                    },
+                  },
+                ]
+              : []),
+          ].filter((item) => item.amount > 0),
         });
       });
       sharedSenderReceipts.forEach((receipt, index) => {
@@ -40423,6 +40868,10 @@ export default function Home() {
           timestamp: receipt.timestamp,
           sequence: Date.now() + sharedCourierSettlements.length + index,
           linkedScreen: "senderAccountHistory",
+          sourceDocument: {
+            type: "sender_receipt",
+            id: receipt.id,
+          },
         });
       });
       return additions.length ? [...additions, ...current] : current;

@@ -69,6 +69,12 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /type FinancialDayCloseSnapshot/);
   assert.match(page, /submitSessionClose/);
   assert.match(page, /submitDayClose/);
+  assert.match(page, /requestedDebtPayment/);
+  assert.match(page, /currentSettlementCash/);
+  assert.match(page, /sourceDocument/);
+  assert.match(page, /breakdown/);
+  assert.match(page, /submitReversal/);
+  assert.match(page, /الحركة الأصلية لا تُحذف/);
   assert.match(page, /financialDayCloses:\s*sharedFinancialDayCloses/);
   assert.match(page, /normalizeCourierRatePlan/);
   assert.match(page, /normalizeCourierPlans/);
@@ -123,6 +129,9 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /treasury-tabs/);
   assert.match(css, /cash-session-space/);
   assert.match(css, /financial-day-space/);
+  assert.match(css, /treasury-breakdown/);
+  assert.match(css, /treasury-reversal-badge/);
+  assert.match(css, /treasury-reversal-box/);
   assert.match(css, /courier-quick-selector/);
   assert.match(css, /courier-status-payer/);
   assert.match(css, /courier-contract-v2/);
