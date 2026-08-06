@@ -49,9 +49,11 @@ import {
   Phone,
   Printer,
   ReceiptText,
+  RotateCcw,
   Search,
   Save,
   ScanBarcode,
+  Send,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
@@ -412,6 +414,33 @@ type Shipment = {
       decidedBy?: Localized;
       decidedAt?: Localized;
       decisionReason?: string;
+      reviewHistory?: {
+        id: string;
+        decision: "approved" | "rejected";
+        decidedBy: Localized;
+        decidedAt: Localized;
+        reason: string;
+      }[];
+      correctionHistory?: {
+        id: string;
+        correctedBy: Localized;
+        correctedAt: Localized;
+        reason: string;
+        before: {
+          collectedAmount: number | null;
+          deliveredPieces: number | null;
+          returnedPieces: number | null;
+          shippingPayer?: "recipient" | "sender";
+          shippingPayerReason?: string;
+        };
+        after: {
+          collectedAmount: number | null;
+          deliveredPieces: number | null;
+          returnedPieces: number | null;
+          shippingPayer?: "recipient" | "sender";
+          shippingPayerReason?: string;
+        };
+      }[];
     };
   }[];
   pieces: number;
@@ -3002,8 +3031,10 @@ function senderSettlementLines(
       }
 
       const configuredPrice = priceList?.prices[areaId]?.[statusEvent.statusPolicyId];
-      const shippingCharge =
-        typeof configuredPrice === "number" ? configuredPrice : shipment.shippingFee;
+      if (!priceList || !areaId || typeof configuredPrice !== "number") {
+        return [];
+      }
+      const shippingCharge = configuredPrice;
       const recipientShippingCharge =
         shipmentAccountingRecipientShippingCharge(shipment);
       const otherFees = statusEvent.senderOtherFees ?? 0;
@@ -27150,7 +27181,9 @@ function SenderAccountPreparationScreen({
       shipment.sender.en === selectedSender.en
         ? count +
           (shipment.statusHistory ?? []).filter(
-            (event) => event.financialApproval?.state === "pending",
+            (event) =>
+              event.financialApproval &&
+              event.financialApproval.state !== "approved",
           ).length
         : count,
     0,
@@ -27400,13 +27433,13 @@ function SenderAccountPreparationScreen({
               <span>
                 <strong>
                   {lang === "ar"
-                    ? `${senderApprovalCount} واقعة لهذا الراسل تنتظر اعتماد أثرها المالي`
-                    : `${senderApprovalCount} event(s) for this sender await financial approval`}
+                    ? `${senderApprovalCount} واقعة لهذا الراسل موقوفة بين الاعتماد أو التصحيح`
+                    : `${senderApprovalCount} event(s) for this sender await approval or correction`}
                 </strong>
                 <small>
                   {lang === "ar"
-                    ? "ليست مفقودة؛ ستظهر هنا تلقائيًا بعد اعتمادها من مركز التنبيهات."
-                    : "They are not missing; they will appear here automatically after approval in Alerts."}
+                    ? "ليست مفقودة؛ ستظهر هنا تلقائيًا بعد تصحيح المرفوض واعتماد النسخة السليمة."
+                    : "They are not missing; they will appear automatically after rejected data is corrected and approved."}
                 </small>
               </span>
               <button className="secondary-button" type="button" onClick={() => onNavigate("alerts")}>
@@ -28930,6 +28963,9 @@ function AlertsScreen({
   theme,
   shipmentRecords,
   settlements,
+  statuses,
+  governorates,
+  priceLists,
   onShipmentsChange,
   onLang,
   onTheme,
@@ -28941,6 +28977,9 @@ function AlertsScreen({
   theme: Theme;
   shipmentRecords: Shipment[];
   settlements: CourierSettlement[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  priceLists: PriceListRecord[];
   onShipmentsChange: (records: Shipment[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -28950,7 +28989,9 @@ function AlertsScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [filter, setFilter] = useState<"all" | "approval" | "payer" | "cash">("all");
+  const [filter, setFilter] = useState<
+    "all" | "approval" | "exception" | "payer" | "cash"
+  >("all");
   const [approvalDecision, setApprovalDecision] = useState<{
     shipmentId: string;
     eventId: string;
@@ -28958,6 +28999,18 @@ function AlertsScreen({
   } | null>(null);
   const [decisionReason, setDecisionReason] = useState("");
   const [decisionError, setDecisionError] = useState("");
+  const [correctionTarget, setCorrectionTarget] = useState<{
+    shipmentId: string;
+    eventId: string;
+  } | null>(null);
+  const [correctionCollectedAmount, setCorrectionCollectedAmount] = useState("");
+  const [correctionDeliveredPieces, setCorrectionDeliveredPieces] = useState("");
+  const [correctionReturnedPieces, setCorrectionReturnedPieces] = useState("");
+  const [correctionShippingPayer, setCorrectionShippingPayer] =
+    useState<"recipient" | "sender">("recipient");
+  const [correctionPayerReason, setCorrectionPayerReason] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [correctionError, setCorrectionError] = useState("");
   const [toast, setToast] = useState("");
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
     style: "currency",
@@ -28977,14 +29030,92 @@ function AlertsScreen({
       .filter((event) => event.financialApproval?.state === "pending")
       .map((event) => ({ shipment, event })),
   );
+  const correctionRequests = shipmentRecords.flatMap((shipment) =>
+    (shipment.statusHistory ?? [])
+      .filter((event) => event.financialApproval?.state === "rejected")
+      .map((event) => ({ shipment, event })),
+  );
+  const commissionExceptions = shipmentRecords.flatMap((shipment) =>
+    (shipment.statusHistory ?? [])
+      .filter((event) => {
+        const snapshot = event.courierCommissionSnapshot;
+        return (
+          snapshot &&
+          (snapshot.amount === null ||
+            snapshot.resolution === "missing_plan" ||
+            snapshot.resolution === "missing_area" ||
+            snapshot.resolution === "missing_rate")
+        );
+      })
+      .map((event) => ({ shipment, event })),
+  );
+  const pricingExceptions = shipmentRecords.flatMap((shipment) => {
+    const senderLists = priceLists
+      .filter(
+        (priceList) =>
+          priceList.state === "active" &&
+          priceList.senders.some((sender) => sender.en === shipment.sender.en),
+      )
+      .sort(
+        (first, second) =>
+          Number(first.isDefault) - Number(second.isDefault),
+      );
+    const priceList =
+      senderLists[0] ??
+      priceLists.find(
+        (candidate) => candidate.state === "active" && candidate.isDefault,
+      ) ??
+      null;
+    const areaId =
+      governorates
+        .flatMap((governorate) => governorate.areas)
+        .find(
+          (area) =>
+            area.name.en === shipment.area.en ||
+            area.name.ar === shipment.area.ar,
+        )?.id ?? "";
+    return (shipment.statusHistory ?? [])
+      .filter((event) => {
+        if (!statusEventFinanciallyApproved(event)) return false;
+        const status = statuses.find(
+          (candidate) => candidate.id === event.statusPolicyId,
+        );
+        if (
+          !status ||
+          status.state !== "published" ||
+          !status.appearsInPricing
+        ) {
+          return false;
+        }
+        return (
+          !priceList ||
+          !areaId ||
+          typeof priceList.prices[areaId]?.[event.statusPolicyId] !== "number"
+        );
+      })
+      .map((event) => ({ shipment, event, priceList, areaId }));
+  });
   const visibleApprovals =
     filter === "all" || filter === "approval" ? approvalRequests : [];
+  const visibleCorrections =
+    filter === "all" || filter === "exception" ? correctionRequests : [];
+  const visibleCommissionExceptions =
+    filter === "all" || filter === "exception" ? commissionExceptions : [];
+  const visiblePricingExceptions =
+    filter === "all" || filter === "exception" ? pricingExceptions : [];
   const visiblePayerAlerts =
     filter === "all" || filter === "payer" ? payerAlerts : [];
   const visibleCashAlerts =
     filter === "all" || filter === "cash" ? cashAlerts : [];
+  const exceptionCount =
+    correctionRequests.length +
+    commissionExceptions.length +
+    pricingExceptions.length;
   const totalAlerts =
-    approvalRequests.length + payerAlerts.length + cashAlerts.length;
+    approvalRequests.length +
+    exceptionCount +
+    payerAlerts.length +
+    cashAlerts.length;
 
   function openApprovalDecision(
     shipmentId: string,
@@ -29072,6 +29203,19 @@ function AlertsScreen({
                     },
                     decidedAt,
                     decisionReason: decisionReason.trim(),
+                    reviewHistory: [
+                      ...(event.financialApproval.reviewHistory ?? []),
+                      {
+                        id: `approval-review-${Date.now()}`,
+                        decision: approvalDecision.decision,
+                        decidedBy: {
+                          ar: "مسؤول الاعتماد",
+                          en: "Approval supervisor",
+                        },
+                        decidedAt,
+                        reason: decisionReason.trim(),
+                      },
+                    ],
                   },
                 }
               : event,
@@ -29090,6 +29234,210 @@ function AlertsScreen({
         : lang === "ar"
           ? "تم رفض الأثر المالي مع الحفاظ على الحالة والحيازة المسجلتين"
           : "Financial effect rejected; recorded status and custody were preserved",
+    );
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function openCorrection(
+    shipment: Shipment,
+    event: NonNullable<Shipment["statusHistory"]>[number],
+  ) {
+    setCorrectionTarget({ shipmentId: shipment.id, eventId: event.id });
+    setCorrectionCollectedAmount(
+      event.collectedAmount === null ? "" : String(event.collectedAmount),
+    );
+    setCorrectionDeliveredPieces(
+      event.deliveredPieces === null ? "" : String(event.deliveredPieces),
+    );
+    setCorrectionReturnedPieces(
+      event.returnedPieces === null ? "" : String(event.returnedPieces),
+    );
+    setCorrectionShippingPayer(
+      event.financialApproval?.proposedShippingPayer ??
+        shipment.shippingPayer,
+    );
+    setCorrectionPayerReason(
+      event.financialApproval?.proposedShippingPayerReason ?? "",
+    );
+    setCorrectionReason("");
+    setCorrectionError("");
+    setApprovalDecision(null);
+  }
+
+  function closeCorrection() {
+    setCorrectionTarget(null);
+    setCorrectionError("");
+  }
+
+  function saveCorrection() {
+    if (!correctionTarget) return;
+    const shipment = shipmentRecords.find(
+      (candidate) => candidate.id === correctionTarget.shipmentId,
+    );
+    const targetEvent = shipment?.statusHistory?.find(
+      (event) => event.id === correctionTarget.eventId,
+    );
+    if (!shipment || !targetEvent?.financialApproval) return;
+    const collected =
+      correctionCollectedAmount.trim() === ""
+        ? null
+        : Number(correctionCollectedAmount);
+    const delivered =
+      correctionDeliveredPieces.trim() === ""
+        ? null
+        : Number(correctionDeliveredPieces);
+    const returned =
+      correctionReturnedPieces.trim() === ""
+        ? null
+        : Number(correctionReturnedPieces);
+    if (!correctionReason.trim()) {
+      setCorrectionError(
+        lang === "ar"
+          ? "اكتب سبب التصحيح؛ لا يجوز تعديل واقعة مالية بدون تفسير."
+          : "Enter a correction reason; a financial event cannot change without an explanation.",
+      );
+      return;
+    }
+    if (
+      (collected !== null && (!Number.isFinite(collected) || collected < 0)) ||
+      (delivered !== null &&
+        (!Number.isInteger(delivered) ||
+          delivered < 0 ||
+          delivered > shipment.pieces)) ||
+      (returned !== null &&
+        (!Number.isInteger(returned) || returned < 0))
+    ) {
+      setCorrectionError(
+        lang === "ar"
+          ? "راجع المبلغ والقطع: لا توجد قيم سالبة، والمسلم لا يتجاوز قطع الشحنة."
+          : "Review amount and pieces: values cannot be negative and delivered pieces cannot exceed the shipment.",
+      );
+      return;
+    }
+    if (
+      correctionShippingPayer !== shipment.shippingPayer &&
+      !correctionPayerReason.trim()
+    ) {
+      setCorrectionError(
+        lang === "ar"
+          ? "سبب تغيير متحمل الشحن مطلوب."
+          : "A shipping-payer change reason is required.",
+      );
+      return;
+    }
+    const now = new Date();
+    const correctedAt: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+      en: now.toLocaleString("en-EG", {
+        day: "numeric",
+        month: "short",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    };
+    const before = {
+      collectedAmount: targetEvent.collectedAmount,
+      deliveredPieces: targetEvent.deliveredPieces,
+      returnedPieces: targetEvent.returnedPieces,
+      shippingPayer:
+        targetEvent.financialApproval.proposedShippingPayer,
+      shippingPayerReason:
+        targetEvent.financialApproval.proposedShippingPayerReason,
+    };
+    const after = {
+      collectedAmount: collected,
+      deliveredPieces: delivered,
+      returnedPieces: returned,
+      shippingPayer: correctionShippingPayer,
+      shippingPayerReason:
+        correctionShippingPayer === shipment.shippingPayer
+          ? ""
+          : correctionPayerReason.trim(),
+    };
+    onShipmentsChange(
+      shipmentRecords.map((record) =>
+        record.id !== shipment.id
+          ? record
+          : {
+              ...record,
+              lastEvent: {
+                ar: `صحح محاسب التشغيل بيانات الأثر المالي لحالة «${targetEvent.status.ar}» وأعاد إرسالها للاعتماد`,
+                en: `Operations accountant corrected the financial effect of “${targetEvent.status.en}” and resubmitted it`,
+              },
+              statusHistory: (record.statusHistory ?? []).map((event) =>
+                event.id !== targetEvent.id || !event.financialApproval
+                  ? event
+                  : {
+                      ...event,
+                      collectedAmount: collected,
+                      deliveredPieces: delivered,
+                      returnedPieces: returned,
+                      settlementStatus: "pending" as const,
+                      financialApproval: {
+                        ...event.financialApproval,
+                        state: "pending" as const,
+                        requestedBy: {
+                          ar: "محاسب التشغيل",
+                          en: "Operations accountant",
+                        },
+                        requestedAt: correctedAt,
+                        proposedShippingPayer: correctionShippingPayer,
+                        proposedShippingPayerReason:
+                          after.shippingPayerReason,
+                        reviewHistory:
+                          event.financialApproval.reviewHistory?.length
+                            ? event.financialApproval.reviewHistory
+                            : event.financialApproval.decisionReason
+                              ? [
+                                  {
+                                    id: `approval-review-migrated-${event.id}`,
+                                    decision: "rejected" as const,
+                                    decidedBy:
+                                      event.financialApproval.decidedBy ?? {
+                                        ar: "مسؤول الاعتماد",
+                                        en: "Approval supervisor",
+                                      },
+                                    decidedAt:
+                                      event.financialApproval.decidedAt ??
+                                      event.timestamp,
+                                    reason:
+                                      event.financialApproval.decisionReason,
+                                  },
+                                ]
+                              : [],
+                        decidedBy: undefined,
+                        decidedAt: undefined,
+                        decisionReason: undefined,
+                        correctionHistory: [
+                          ...(event.financialApproval.correctionHistory ?? []),
+                          {
+                            id: `financial-correction-${Date.now()}`,
+                            correctedBy: {
+                              ar: "محاسب التشغيل",
+                              en: "Operations accountant",
+                            },
+                            correctedAt,
+                            reason: correctionReason.trim(),
+                            before,
+                            after,
+                          },
+                        ],
+                      },
+                    },
+              ),
+            },
+      ),
+    );
+    closeCorrection();
+    setToast(
+      lang === "ar"
+        ? "تم حفظ التصحيح وإعادة إرسال الأثر المالي للاعتماد"
+        : "Correction saved and the financial effect was resubmitted",
     );
     window.setTimeout(() => setToast(""), 2800);
   }
@@ -29184,6 +29532,15 @@ function AlertsScreen({
             </button>
             <button
               type="button"
+              className={filter === "exception" ? "is-active" : ""}
+              onClick={() => setFilter("exception")}
+            >
+              <span><CircleAlert size={18} /></span>
+              <small>{lang === "ar" ? "استثناءات وتصحيح" : "Exceptions & correction"}</small>
+              <strong>{exceptionCount}</strong>
+            </button>
+            <button
+              type="button"
               className={filter === "payer" ? "is-active" : ""}
               onClick={() => setFilter("payer")}
             >
@@ -29203,6 +29560,149 @@ function AlertsScreen({
           </section>
 
           <section className="alerts-list">
+            {visibleCorrections.map(({ shipment, event }) => {
+              const request = event.financialApproval!;
+              const isOpen =
+                correctionTarget?.shipmentId === shipment.id &&
+                correctionTarget.eventId === event.id;
+              return (
+                <article
+                  className="alert-record alert-record--correction"
+                  key={`correction-${shipment.id}-${event.id}`}
+                >
+                  <span className="alert-record__icon"><RotateCcw size={20} /></span>
+                  <div className="alert-record__content">
+                    <span className="alert-record__title">
+                      <strong>
+                        {lang === "ar"
+                          ? "أثر مالي مرفوض يحتاج تصحيح"
+                          : "Rejected financial effect needs correction"}
+                      </strong>
+                      <em>{request.decidedAt?.[lang] ?? event.timestamp[lang]}</em>
+                    </span>
+                    <p>
+                      <b>{shipment.id}</b> · {shipment.recipient[lang]} · {shipment.sender[lang]}
+                    </p>
+                    <div className="alert-record__facts">
+                      <span>
+                        <small>{lang === "ar" ? "الحالة التشغيلية" : "Operational status"}</small>
+                        <strong>{event.status[lang]}</strong>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "المبلغ المرفوض" : "Rejected amount"}</small>
+                        <strong>{money.format(event.collectedAmount ?? 0)}</strong>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "القطع" : "Pieces"}</small>
+                        <strong>
+                          {lang === "ar" ? "مسلم" : "Delivered"} {event.deliveredPieces ?? "—"} · {lang === "ar" ? "مرتجع" : "Returned"} {event.returnedPieces ?? "—"}
+                        </strong>
+                      </span>
+                    </div>
+                    <p className="alert-record__reason">
+                      <b>{lang === "ar" ? "سبب الرفض:" : "Rejection reason:"}</b>{" "}
+                      {request.decisionReason ||
+                        (lang === "ar" ? "غير مسجل" : "Not recorded")}
+                    </p>
+                    <p className="correction-safety-note">
+                      <LockKeyhole size={14} />
+                      {lang === "ar"
+                        ? "التصحيح لا يغير حالة الشحنة أو حيازتها؛ يعدل بيانات التسوية فقط ويحفظ نسخة قبل وبعد."
+                        : "Correction does not change status or custody; it updates settlement data only and saves before/after snapshots."}
+                    </p>
+                    {isOpen && (
+                      <div className="financial-correction-box">
+                        <div className="financial-correction-grid">
+                          <label>
+                            <span>{lang === "ar" ? "المبلغ المحصل" : "Collected amount"}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={correctionCollectedAmount}
+                              onChange={(changeEvent) => setCorrectionCollectedAmount(changeEvent.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>{lang === "ar" ? "عدد القطع المسلمة" : "Delivered pieces"}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={shipment.pieces}
+                              value={correctionDeliveredPieces}
+                              onChange={(changeEvent) => setCorrectionDeliveredPieces(changeEvent.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>{lang === "ar" ? "عدد القطع المرتجعة" : "Returned pieces"}</span>
+                            <input
+                              type="number"
+                              min="0"
+                              value={correctionReturnedPieces}
+                              onChange={(changeEvent) => setCorrectionReturnedPieces(changeEvent.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>{lang === "ar" ? "متحمل مصاريف الشحن" : "Shipping payer"}</span>
+                            <select
+                              value={correctionShippingPayer}
+                              onChange={(changeEvent) =>
+                                setCorrectionShippingPayer(
+                                  changeEvent.target.value as "recipient" | "sender",
+                                )
+                              }
+                            >
+                              <option value="recipient">{lang === "ar" ? "المستلم" : "Recipient"}</option>
+                              <option value="sender">{lang === "ar" ? "الراسل" : "Sender"}</option>
+                            </select>
+                          </label>
+                        </div>
+                        {correctionShippingPayer !== shipment.shippingPayer && (
+                          <label>
+                            <span>{lang === "ar" ? "سبب تغيير متحمل الشحن" : "Shipping-payer change reason"}</span>
+                            <input
+                              value={correctionPayerReason}
+                              onChange={(changeEvent) => setCorrectionPayerReason(changeEvent.target.value)}
+                              placeholder={lang === "ar" ? "سبب محاسبي واضح..." : "Clear accounting reason..."}
+                            />
+                          </label>
+                        )}
+                        <label>
+                          <span>{lang === "ar" ? "سبب التصحيح الإلزامي" : "Required correction reason"}</span>
+                          <textarea
+                            value={correctionReason}
+                            onChange={(changeEvent) => {
+                              setCorrectionReason(changeEvent.target.value);
+                              setCorrectionError("");
+                            }}
+                            placeholder={lang === "ar" ? "ما الخطأ؟ وما الذي تم تصحيحه؟" : "What was wrong and what was corrected?"}
+                          />
+                        </label>
+                        {correctionError && <p className="field-error">{correctionError}</p>}
+                        <div className="financial-correction-actions">
+                          <button type="button" className="secondary-button" onClick={closeCorrection}>
+                            {lang === "ar" ? "إلغاء" : "Cancel"}
+                          </button>
+                          <button type="button" className="primary-button" onClick={saveCorrection}>
+                            <Send size={16} />
+                            {lang === "ar" ? "حفظ وإعادة الإرسال" : "Save & resubmit"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="alert-record__actions">
+                    <button type="button" className="secondary-button" onClick={() => onOpenShipment(shipment.id)}>
+                      <Eye size={16} />
+                      {lang === "ar" ? "فتح الشحنة" : "Open shipment"}
+                    </button>
+                    <button type="button" className="primary-button" onClick={() => openCorrection(shipment, event)}>
+                      <Pencil size={16} />
+                      {lang === "ar" ? "تصحيح البيانات" : "Correct data"}
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
             {visibleApprovals.map(({ shipment, event }) => {
               const request = event.financialApproval!;
               const isOpen =
@@ -29307,6 +29807,70 @@ function AlertsScreen({
                 </article>
               );
             })}
+            {visibleCommissionExceptions.map(({ shipment, event }) => (
+              <article
+                className="alert-record alert-record--danger"
+                key={`commission-gap-${shipment.id}-${event.id}`}
+              >
+                <span className="alert-record__icon"><CircleAlert size={20} /></span>
+                <div className="alert-record__content">
+                  <span className="alert-record__title">
+                    <strong>{lang === "ar" ? "فجوة في عمولة المندوب" : "Courier commission gap"}</strong>
+                    <em>{event.timestamp[lang]}</em>
+                  </span>
+                  <p><b>{shipment.id}</b> · {event.recordedBy[lang]} · {shipment.area[lang]} · {event.status[lang]}</p>
+                  <p className="alert-record__reason">
+                    {lang === "ar"
+                      ? "لم يجد النظام اتفاقًا أو منطقة أو سعر عمولة صالحًا. الواقعة محفوظة لكنها لا تُغلق ماليًا كصفر."
+                      : "No valid agreement, area, or commission rate was found. The event is saved but cannot close financially as zero."}
+                  </p>
+                </div>
+                <div className="alert-record__actions">
+                  <button type="button" className="secondary-button" onClick={() => onOpenShipment(shipment.id)}>
+                    <Eye size={16} />{lang === "ar" ? "فتح الشحنة" : "Open shipment"}
+                  </button>
+                  <button type="button" className="primary-button" onClick={() => onNavigate("courierRates")}>
+                    <Truck size={16} />{lang === "ar" ? "فتح اتفاق المندوب" : "Open courier agreement"}
+                  </button>
+                </div>
+              </article>
+            ))}
+            {visiblePricingExceptions.map(({ shipment, event, priceList, areaId }) => (
+              <article
+                className="alert-record alert-record--warning"
+                key={`pricing-gap-${shipment.id}-${event.id}`}
+              >
+                <span className="alert-record__icon"><CircleAlert size={20} /></span>
+                <div className="alert-record__content">
+                  <span className="alert-record__title">
+                    <strong>{lang === "ar" ? "سعر الراسل غير مكتمل" : "Sender price is incomplete"}</strong>
+                    <em>{event.timestamp[lang]}</em>
+                  </span>
+                  <p><b>{shipment.id}</b> · {shipment.sender[lang]} · {shipment.area[lang]} · {event.status[lang]}</p>
+                  <p className="alert-record__reason">
+                    {lang === "ar"
+                      ? !priceList
+                        ? "لا توجد قائمة أسعار فعالة لهذا الراسل ولا قائمة افتراضية صالحة."
+                        : !areaId
+                          ? "منطقة الشحنة غير مرتبطة بسجل مناطق صالح."
+                          : `السعر غير مسجل داخل قائمة «${priceList.name.ar}» لهذه المنطقة والحالة.`
+                      : !priceList
+                        ? "No active sender price list or valid default list exists."
+                        : !areaId
+                          ? "The shipment area is not linked to a valid area record."
+                          : `No price exists in “${priceList.name.en}” for this area and status.`}
+                  </p>
+                </div>
+                <div className="alert-record__actions">
+                  <button type="button" className="secondary-button" onClick={() => onOpenShipment(shipment.id)}>
+                    <Eye size={16} />{lang === "ar" ? "فتح الشحنة" : "Open shipment"}
+                  </button>
+                  <button type="button" className="primary-button" onClick={() => onNavigate("priceLists")}>
+                    <HandCoins size={16} />{lang === "ar" ? "استكمال السعر" : "Complete pricing"}
+                  </button>
+                </div>
+              </article>
+            ))}
             {visiblePayerAlerts.map((shipment) => (
               <article className="alert-record alert-record--warning" key={`payer-${shipment.id}`}>
                 <span className="alert-record__icon"><CircleAlert size={20} /></span>
@@ -29378,7 +29942,12 @@ function AlertsScreen({
                 </button>
               </article>
             ))}
-            {visibleApprovals.length === 0 && visiblePayerAlerts.length === 0 && visibleCashAlerts.length === 0 && (
+            {visibleApprovals.length === 0 &&
+              visibleCorrections.length === 0 &&
+              visibleCommissionExceptions.length === 0 &&
+              visiblePricingExceptions.length === 0 &&
+              visiblePayerAlerts.length === 0 &&
+              visibleCashAlerts.length === 0 && (
               <div className="alerts-empty">
                 <ShieldCheck size={32} />
                 <strong>{lang === "ar" ? "لا توجد اختلافات في العرض الحالي" : "No discrepancies in this view"}</strong>
@@ -30182,7 +30751,8 @@ function CourierAccountScreen({
       .filter(
         (event) =>
           event.recordedBy.en === selectedCourier.courier.en &&
-          event.financialApproval?.state === "pending",
+          event.financialApproval &&
+          event.financialApproval.state !== "approved",
       )
       .map((event) => ({ shipment, event })),
   );
@@ -30746,8 +31316,8 @@ function CourierAccountScreen({
               <span>
                 <strong>
                   {lang === "ar"
-                    ? `${awaitingApprovalItems.length} واقعة مسجلة فعليًا لكنها تنتظر اعتماد أثرها المالي`
-                    : `${awaitingApprovalItems.length} recorded event(s) await financial approval`}
+                    ? `${awaitingApprovalItems.length} واقعة مسجلة فعليًا لكنها تنتظر اعتمادًا أو تصحيحًا ماليًا`
+                    : `${awaitingApprovalItems.length} recorded event(s) await financial approval or correction`}
                 </strong>
                 <small>
                   {lang === "ar"
@@ -38028,6 +38598,16 @@ function Shipment360Screen({
                 ? `${lang === "ar" ? "الأثر المالي: معتمد" : "Financial effect: approved"}${event.financialApproval.decisionReason ? ` — ${event.financialApproval.decisionReason}` : ""}`
                 : `${lang === "ar" ? "الأثر المالي: مرفوض" : "Financial effect: rejected"}${event.financialApproval.decisionReason ? ` — ${event.financialApproval.decisionReason}` : ""}`
             : "",
+          event.financialApproval?.correctionHistory?.length
+            ? `${lang === "ar" ? "مرات التصحيح" : "Corrections"}: ${event.financialApproval.correctionHistory.length}`
+            : "",
+          event.financialApproval?.reviewHistory?.length
+            ? `${lang === "ar" ? "آخر قرار مراجعة" : "Latest review"}: ${
+                event.financialApproval.reviewHistory[
+                  event.financialApproval.reviewHistory.length - 1
+                ].reason
+              }`
+            : "",
         ]
           .filter(Boolean)
           .join(" · "),
@@ -40170,6 +40750,9 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           settlements={sharedCourierSettlements}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          priceLists={sharedPriceLists}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>

@@ -103,6 +103,12 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /طلب اعتماد الأثر المالي/);
   assert.match(page, /الحالة والحيازة الفعلية مسجلتان/);
   assert.match(page, /الأثر المالي مرفوض وغير قابل للتسوية/);
+  assert.match(page, /correctionHistory/);
+  assert.match(page, /reviewHistory/);
+  assert.match(page, /أثر مالي مرفوض يحتاج تصحيح/);
+  assert.match(page, /حفظ وإعادة الإرسال/);
+  assert.match(page, /فجوة في عمولة المندوب/);
+  assert.match(page, /سعر الراسل غير مكتمل/);
   assert.doesNotMatch(page, /className="courier-payer-review"/);
   assert.match(page, /سعر المنطقة غير مكتمل للراسل البديل/);
   assert.match(page, /tasleem-control-center-v2/);
@@ -134,6 +140,8 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /courier-private-rate-list/);
   assert.match(css, /alert-record--approval/);
   assert.match(css, /approval-decision-box/);
+  assert.match(css, /financial-correction-box/);
+  assert.match(css, /alert-record--correction/);
   assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.sidebar\s*\{[\s\S]*?z-index:\s*75/);
   assert.match(layout, /Tasleem ERP/);
   assert.match(packageJson, /"build":\s*"vinext build"/);
