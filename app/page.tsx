@@ -46910,7 +46910,7 @@ export default function Home() {
           onNavigate={setScreen}
           onLogout={() => setScreen("login")}
         />
-      ) : (
+      ) : screen === "shipmentPolicies" ? (
         <ShipmentPoliciesScreen
           lang={lang}
           theme={theme}
@@ -46931,7 +46931,7 @@ export default function Home() {
           }}
           onLogout={() => setScreen("login")}
         />
-      )}
+      ) : null}
     </div>
   );
 }
