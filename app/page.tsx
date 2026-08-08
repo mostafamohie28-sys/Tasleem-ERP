@@ -72,6 +72,10 @@ type Lang = "ar" | "en";
 type Theme = "light" | "dark";
 type Screen =
   | "login"
+  | "dashboard"
+  | "reports"
+  | "settings"
+  | "help"
   | "shipments"
   | "shipment360"
   | "services"
@@ -5765,7 +5769,7 @@ function Sidebar({
   const sections = [
     {
       label: "",
-      items: [{ label: t.overview, icon: LayoutDashboard }],
+      items: [{ label: t.overview, icon: LayoutDashboard, screen: "dashboard" as const }],
     },
     {
       label: t.operations,
@@ -5853,6 +5857,11 @@ function Sidebar({
             lang === "ar" ? "الخزنة والحركات المالية" : "Treasury & cash movements",
           icon: Landmark,
           screen: "treasury" as const,
+        },
+        {
+          label: lang === "ar" ? "التقارير" : "Reports",
+          icon: ReceiptText,
+          screen: "reports" as const,
         },
         {
           label: lang === "ar" ? "التنبيهات والاختلافات" : "Alerts & discrepancies",
@@ -5955,7 +5964,8 @@ function Sidebar({
           icon: ClipboardCheck,
           screen: "shipmentPolicies" as const,
         },
-        { label: t.settings, icon: Settings2 },
+        { label: t.settings, icon: Settings2, screen: "settings" as const },
+        { label: lang === "ar" ? "مركز المساعدة" : "Help center", icon: CircleHelp, screen: "help" as const },
       ],
     },
   ];
@@ -45320,6 +45330,66 @@ function ShipmentsScreen({
   );
 }
 
+function SystemHubScreen({
+  lang,
+  theme,
+  screen,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  screen: "dashboard" | "reports" | "settings" | "help";
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const content = {
+    dashboard: {
+      title: { ar: "الرئيسية", en: "Dashboard" },
+      subtitle: { ar: "نظرة سريعة على التشغيل اليومي وما يحتاج إجراء.", en: "A quick view of daily operations and actions needed." },
+      cards: [
+        { title: { ar: "إدارة الشحنات", en: "Manage shipments" }, body: { ar: "البحث، المتابعة، وتفاصيل كل شحنة.", en: "Search, follow up, and inspect every shipment." }, target: "shipments" as const },
+        { title: { ar: "إسناد وتجهيز", en: "Assign & dispatch" }, body: { ar: "جهّز الشحنات المؤهلة وأسندها للمندوب.", en: "Prepare eligible shipments and assign them to couriers." }, target: "assignment" as const },
+        { title: { ar: "الموافقات المالية", en: "Financial approvals" }, body: { ar: "راجع الفروق والقرارات المالية المعلقة.", en: "Review open financial differences and decisions." }, target: "treasury" as const },
+      ],
+    },
+    reports: {
+      title: { ar: "التقارير", en: "Reports" },
+      subtitle: { ar: "صفحة التقارير المرئية؛ سنعتمد مؤشرات كل تقرير معًا قبل ربط التصدير النهائي.", en: "Visible reporting workspace; we will approve each metric before final export wiring." },
+      cards: [
+        { title: { ar: "تقرير التشغيل", en: "Operations report" }, body: { ar: "الشحنات حسب الحالة والمنطقة والمندوب.", en: "Shipments by status, area, and courier." }, target: "shipments" as const },
+        { title: { ar: "تقرير التحصيل", en: "Collection report" }, body: { ar: "التحصيل والتسويات والمستحقات.", en: "Collections, settlements, and entitlements." }, target: "courierAccount" as const },
+        { title: { ar: "تقرير الخزنة", en: "Treasury report" }, body: { ar: "الحركات والفروق وإغلاق اليوم.", en: "Movements, differences, and day close." }, target: "treasury" as const },
+      ],
+    },
+    settings: {
+      title: { ar: "الإعدادات العامة", en: "General settings" },
+      subtitle: { ar: "إدارة شكل الشركة والسياسات العامة دون تغيير كود.", en: "Manage company appearance and base policies without changing code." },
+      cards: [
+        { title: { ar: "سياسات الشحن", en: "Shipment policies" }, body: { ar: "الحقول، الإلزام، الاستكمال والتأكيد.", en: "Fields, requirements, completion, and confirmation." }, target: "shipmentPolicies" as const },
+        { title: { ar: "الحالات والتسعير", en: "Statuses & pricing" }, body: { ar: "الحالات، المحافظات، المناطق وقوائم الأسعار.", en: "Statuses, governorates, areas, and price lists." }, target: "statuses" as const },
+        { title: { ar: "الأدوار والصلاحيات", en: "Roles & permissions" }, body: { ar: "من يرى ومن ينفذ ومن يعتمد.", en: "Who sees, acts, and approves." }, target: "roles" as const },
+      ],
+    },
+    help: {
+      title: { ar: "مركز المساعدة", en: "Help center" },
+      subtitle: { ar: "شرح بسيط لكل جزء من النظام حسب العمل الحقيقي داخل شركة الشحن.", en: "Plain guidance for each area based on real shipping-company work." },
+      cards: [
+        { title: { ar: "كيف تسجل شحنة؟", en: "How do I register a shipment?" }, body: { ar: "أضف الشحنة الموجودة فعليًا بالشركة، ثم تتجه للمخزن أو الاستكمال حسب سياسة الراسل.", en: "Add a shipment physically at the company, then it moves to warehouse or completion based on sender policy." }, target: "addShipment" as const },
+        { title: { ar: "كيف أجهز حساب مندوب؟", en: "How do I settle a courier?" }, body: { ar: "راجع شحنات المندوب أولًا ثم نفذ التسوية من حسابه.", en: "Review courier shipments first, then settle from the courier account." }, target: "courierAccount" as const },
+        { title: { ar: "كيف أراجع حساب راسل؟", en: "How do I settle a sender?" }, body: { ar: "اختر الشحنات في تجهيز الحساب قبل أي دفع أو مرتجع.", en: "Select shipments in account preparation before any payment or return." }, target: "senderAccountPrep" as const },
+      ],
+    },
+  }[screen];
+  return <div className="app-shell"><Sidebar lang={lang} activeScreen={screen} collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onMobileClose={() => setMobileOpen(false)} onNavigate={onNavigate} onLogout={onLogout} /><div className="workspace"><header className="topbar"><button className="square-button" type="button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><span className="workspace-title"><strong>{content.title[lang]}</strong><small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small></span><div className="topbar__actions"><LanguageThemeControls lang={lang} theme={theme} onLang={onLang} onTheme={onTheme} subtle /></div></header><main className="page-content"><div className="welcome-row page-heading-row"><div><h1>{content.title[lang]}</h1><p>{content.subtitle[lang]}</p></div></div><section className="treasury-reconciliation-accounts">{content.cards.map((card) => <article key={card.target}><span className="source-icon"><LayoutDashboard size={20} /></span><span><small>{content.title[lang]}</small><strong>{card.title[lang]}</strong><b>{card.body[lang]}</b></span><button className="primary-button" type="button" onClick={() => onNavigate(card.target)}>{lang === "ar" ? "فتح" : "Open"}<ChevronLeft size={16} /></button></article>)}</section></main></div></div>;
+}
+
 export default function Home() {
   const [lang, setLang] = useState<Lang>("ar");
   const [theme, setTheme] = useState<Theme>("light");
@@ -46218,6 +46288,16 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onEnter={() => setScreen("shipments")}
+        />
+      ) : screen === "dashboard" || screen === "reports" || screen === "settings" || screen === "help" ? (
+        <SystemHubScreen
+          lang={lang}
+          theme={theme}
+          screen={screen}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
         />
       ) : screen === "shipments" ? (
         <ShipmentsScreen
