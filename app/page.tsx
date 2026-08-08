@@ -892,27 +892,47 @@ type TreasuryStatementLine = {
   direction: "in" | "out";
   amount: number;
   description: string;
-  state: "unmatched" | "matched";
+  state: "unmatched" | "partially_matched" | "matched";
   /** Legacy single-link field kept for old saved prototype data. */
   matchedMovementId?: string;
   /** One statement line can be settled by a complete group of ledger movements. */
   matchedMovementIds?: string[];
+  allocations?: { movementId: string; amount: number }[];
   createdAt: Localized;
   matchHistory: {
-    action: "matched" | "corrected" | "suggestion_confirmed" | "grouped";
+    action:
+      | "matched"
+      | "corrected"
+      | "suggestion_confirmed"
+      | "grouped"
+      | "partial_allocated";
     movementId: string;
     movementIds?: string[];
+    allocations?: { movementId: string; amount: number }[];
     performedBy: Localized;
     performedAt: Localized;
   }[];
 };
 
 function statementLineMatchedMovementIds(line: TreasuryStatementLine) {
-  return line.matchedMovementIds?.length
+  return line.allocations?.length
+    ? line.allocations.map((allocation) => allocation.movementId)
+    : line.matchedMovementIds?.length
     ? line.matchedMovementIds
     : line.matchedMovementId
       ? [line.matchedMovementId]
       : [];
+}
+
+function statementLineAllocationsFor(
+  line: TreasuryStatementLine,
+  movements: TreasuryMovement[],
+) {
+  if (line.allocations?.length) return line.allocations;
+  return statementLineMatchedMovementIds(line).flatMap((movementId) => {
+    const movement = movements.find((candidate) => candidate.id === movementId);
+    return movement ? [{ movementId, amount: movement.amount }] : [];
+  });
 }
 
 type StatementLineImportDraft = {
@@ -24839,9 +24859,9 @@ function TreasuryScreen({
   const [statementLineDescription, setStatementLineDescription] = useState("");
   const [selectedStatementLine, setSelectedStatementLine] =
     useState<TreasuryStatementLine | null>(null);
-  const [statementLineMovementIds, setStatementLineMovementIds] = useState<
-    string[]
-  >([]);
+  const [statementLineAllocations, setStatementLineAllocations] = useState<
+    Record<string, string>
+  >({});
   const [statementLineImportRows, setStatementLineImportRows] = useState<
     StatementLineImportDraft[]
   >([]);
@@ -25087,9 +25107,32 @@ function TreasuryScreen({
   const unmatchedStatementLines = activeStatementLines.filter(
     (line) => line.state === "unmatched",
   );
-  const matchedStatementMovementIds = new Set(
-    statementLines.flatMap((line) => statementLineMatchedMovementIds(line)),
-  );
+  const allocatedStatementMovementAmounts = new Map<string, number>();
+  statementLines.forEach((line) => {
+    statementLineAllocationsFor(line, movements).forEach((allocation) => {
+      allocatedStatementMovementAmounts.set(
+        allocation.movementId,
+        (allocatedStatementMovementAmounts.get(allocation.movementId) ?? 0) +
+          allocation.amount,
+      );
+    });
+  });
+  const availableStatementMovementAmount = (
+    movement: TreasuryMovement,
+    currentLine?: TreasuryStatementLine | null,
+  ) => {
+    const currentLineAllocation = currentLine
+      ? statementLineAllocationsFor(currentLine, movements).find(
+          (allocation) => allocation.movementId === movement.id,
+        )?.amount ?? 0
+      : 0;
+    return Math.max(
+      0,
+      movement.amount -
+        (allocatedStatementMovementAmounts.get(movement.id) ?? 0) +
+        currentLineAllocation,
+    );
+  };
   const normalizeStatementReference = (value: string) =>
     value.toLowerCase().replace(/[^a-z0-9ء-ي]/g, "");
   const statementMatchSuggestions = unmatchedStatementLines.flatMap((line) => {
@@ -25100,7 +25143,8 @@ function TreasuryScreen({
         movement.accountId === line.accountId &&
         movement.direction === line.direction &&
         movement.amount === line.amount &&
-        !matchedStatementMovementIds.has(movement.id),
+        Math.round(availableStatementMovementAmount(movement) * 100) ===
+          Math.round(movement.amount * 100),
     );
     const referenceMatches = candidates.filter((movement) => {
       const movementReference = normalizeStatementReference(movement.reference);
@@ -25129,7 +25173,7 @@ function TreasuryScreen({
     ? movements.filter(
         (movement) =>
           movement.accountId === activeStatementReconciliation.accountId &&
-          !matchedStatementMovementIds.has(movement.id),
+          availableStatementMovementAmount(movement) > 0,
       )
     : [];
   const availableStatementLineMovements = selectedStatementLine
@@ -25138,20 +25182,22 @@ function TreasuryScreen({
           (movement) =>
             movement.accountId === selectedStatementLine.accountId &&
             movement.direction === selectedStatementLine.direction &&
-            (!matchedStatementMovementIds.has(movement.id) ||
-              statementLineMatchedMovementIds(selectedStatementLine).includes(
-                movement.id,
-              )),
+            availableStatementMovementAmount(movement, selectedStatementLine) > 0,
         )
         .sort((a, b) => b.sequence - a.sequence)
     : [];
   const selectedStatementLineMovementTotal =
-    availableStatementLineMovements
-      .filter((movement) => statementLineMovementIds.includes(movement.id))
-      .reduce((sum, movement) => sum + movement.amount, 0);
+    Object.values(statementLineAllocations).reduce(
+      (sum, amount) => sum + (Number(amount) || 0),
+      0,
+    );
   const selectedStatementLineMovementTotalIsExact = selectedStatementLine
     ? Math.round(selectedStatementLineMovementTotal * 100) ===
       Math.round(selectedStatementLine.amount * 100)
+    : false;
+  const selectedStatementLineMovementTotalIsPartial = selectedStatementLine
+    ? selectedStatementLineMovementTotal > 0 &&
+      selectedStatementLineMovementTotal < selectedStatementLine.amount
     : false;
   const normalizedSearch = search.trim().toLowerCase();
   const filteredMovements = [...accountMovements]
@@ -25230,7 +25276,7 @@ function TreasuryScreen({
     setStatementLineAmount("");
     setStatementLineDescription("");
     setSelectedStatementLine(null);
-    setStatementLineMovementIds([]);
+    setStatementLineAllocations({});
     setStatementLineImportRows([]);
     setStatementLineImportErrors([]);
     setStatementLineImportFileName("");
@@ -25387,7 +25433,14 @@ function TreasuryScreen({
 
   function openStatementLineMatchDialog(line: TreasuryStatementLine) {
     setSelectedStatementLine(line);
-    setStatementLineMovementIds(statementLineMatchedMovementIds(line));
+    setStatementLineAllocations(
+      Object.fromEntries(
+        statementLineAllocationsFor(line, movements).map((allocation) => [
+          allocation.movementId,
+          String(allocation.amount),
+        ]),
+      ),
+    );
     setFormError("");
     setDialog("statement-line-match");
   }
@@ -27126,20 +27179,21 @@ function TreasuryScreen({
 
   function confirmStatementLineMatch(
     lineId: string,
-    requestedMovementIds: string[],
+    requestedAllocations: { movementId: string; amount: number }[],
     action: TreasuryStatementLine["matchHistory"][number]["action"],
   ) {
     const currentLine = statementLines.find((line) => line.id === lineId);
-    const movementIds = [...new Set(requestedMovementIds)];
-    const matchedMovements = movementIds
-      .map((movementId) =>
-        movements.find((candidate) => candidate.id === movementId),
-      )
-      .filter((movement): movement is TreasuryMovement => Boolean(movement));
+    const allocations = requestedAllocations.filter(
+      (allocation) => allocation.amount > 0,
+    );
+    const movementIds = allocations.map((allocation) => allocation.movementId);
+    const matchedMovements = allocations.map((allocation) =>
+      movements.find((candidate) => candidate.id === allocation.movementId),
+    );
     if (
       !currentLine ||
       !movementIds.length ||
-      matchedMovements.length !== movementIds.length
+      matchedMovements.some((movement) => !movement)
     ) {
       setFormError(
         lang === "ar"
@@ -27151,8 +27205,9 @@ function TreasuryScreen({
     if (
       matchedMovements.some(
         (movement) =>
-          movement.accountId !== currentLine.accountId ||
-          movement.direction !== currentLine.direction,
+          movement &&
+          (movement.accountId !== currentLine.accountId ||
+            movement.direction !== currentLine.direction),
       )
     ) {
       setFormError(
@@ -27162,31 +27217,26 @@ function TreasuryScreen({
       );
       return false;
     }
-    const matchedTotal = matchedMovements.reduce(
-      (sum, movement) => sum + movement.amount,
+    const matchedTotal = allocations.reduce(
+      (sum, allocation) => sum + allocation.amount,
       0,
     );
-    if (Math.round(matchedTotal * 100) !== Math.round(currentLine.amount * 100)) {
+    if (Math.round(matchedTotal * 100) > Math.round(currentLine.amount * 100)) {
       setFormError(
         lang === "ar"
-          ? "إجمالي الحركات المختارة يجب أن يساوي قيمة بند كشف الحساب بالضبط."
-          : "The selected movement total must exactly equal the statement line amount.",
+          ? "إجمالي التخصيصات لا يمكن أن يتجاوز قيمة بند كشف الحساب."
+          : "Allocation total cannot exceed the statement line amount.",
       );
       return false;
     }
-    if (
-      statementLines.some(
-        (line) =>
-          line.id !== currentLine.id &&
-          statementLineMatchedMovementIds(line).some((movementId) =>
-            movementIds.includes(movementId),
-          ),
-      )
-    ) {
+    if (allocations.some((allocation) => {
+      const movement = movements.find((candidate) => candidate.id === allocation.movementId);
+      return !movement || Math.round(allocation.amount * 100) > Math.round(availableStatementMovementAmount(movement, currentLine) * 100);
+    })) {
       setFormError(
         lang === "ar"
-          ? "إحدى الحركات المختارة مرتبطة بالفعل ببند كشف آخر."
-          : "One of the selected movements is already linked to another statement line.",
+          ? "أحد مبالغ التخصيص أكبر من الرصيد المتاح للحركة."
+          : "An allocation exceeds the movement's available balance.",
       );
       return false;
     }
@@ -27205,6 +27255,7 @@ function TreasuryScreen({
       action,
       movementId: movementIds[0],
       movementIds,
+      allocations,
       performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
       performedAt: timestamp,
     };
@@ -27213,10 +27264,14 @@ function TreasuryScreen({
         line.id === currentLine.id
           ? {
             ...line,
-            state: "matched",
+            state:
+              Math.round(matchedTotal * 100) === Math.round(currentLine.amount * 100)
+                ? "matched"
+                : "partially_matched",
             matchedMovementId:
               movementIds.length === 1 ? movementIds[0] : undefined,
             matchedMovementIds: movementIds,
+            allocations,
             matchHistory: [...line.matchHistory, historyEntry],
             }
           : line,
@@ -27233,7 +27288,7 @@ function TreasuryScreen({
     if (
       confirmStatementLineMatch(
         line.id,
-        [movement.id],
+        [{ movementId: movement.id, amount: movement.amount }],
         "suggestion_confirmed",
       )
     ) {
@@ -27247,7 +27302,10 @@ function TreasuryScreen({
 
   function submitStatementLineMatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedStatementLine || !statementLineMovementIds.length) {
+    const allocations = Object.entries(statementLineAllocations)
+      .map(([movementId, amount]) => ({ movementId, amount: Number(amount) }))
+      .filter((allocation) => allocation.amount > 0);
+    if (!selectedStatementLine || !allocations.length) {
       setFormError(
         lang === "ar"
           ? "اختر بند كشف الحساب وحركة الدفتر المطلوب ربطها."
@@ -27257,21 +27315,27 @@ function TreasuryScreen({
     }
     const action = statementLineMatchedMovementIds(selectedStatementLine).length
       ? "corrected"
-      : statementLineMovementIds.length > 1
+      : selectedStatementLineMovementTotalIsPartial
+        ? "partial_allocated"
+        : allocations.length > 1
         ? "grouped"
         : "matched";
     if (
       confirmStatementLineMatch(
         selectedStatementLine.id,
-        statementLineMovementIds,
+        allocations,
         action,
       )
     ) {
       resetDialog();
       showToast(
         lang === "ar"
-          ? `تمت مطابقة بند ${selectedStatementLine.reference} مع ${statementLineMovementIds.length} حركة دفتر.`
-          : `Line ${selectedStatementLine.reference} matched to ${statementLineMovementIds.length} ledger movement(s).`,
+          ? selectedStatementLineMovementTotalIsPartial
+            ? `تم تسجيل تخصيص جزئي لبند ${selectedStatementLine.reference}.`
+            : `تمت مطابقة بند ${selectedStatementLine.reference} مع ${allocations.length} حركة دفتر.`
+          : selectedStatementLineMovementTotalIsPartial
+            ? `Partial allocation saved for ${selectedStatementLine.reference}.`
+            : `Line ${selectedStatementLine.reference} matched to ${allocations.length} ledger movement(s).`,
       );
     }
   }
@@ -28631,6 +28695,8 @@ function TreasuryScreen({
                               <span className={`statement-line-match ${line.state}`}>
                                 {line.state === "matched" ? (
                                   <Check size={15} />
+                                ) : line.state === "partially_matched" ? (
+                                  <Clock3 size={15} />
                                 ) : (
                                   <CircleAlert size={15} />
                                 )}
@@ -28640,6 +28706,10 @@ function TreasuryScreen({
                                       ? lang === "ar"
                                         ? "مطابق"
                                         : "Matched"
+                                      : line.state === "partially_matched"
+                                        ? lang === "ar"
+                                          ? "مطابقة جزئية"
+                                          : "Partially matched"
                                       : lang === "ar"
                                         ? "غير مطابق"
                                         : "Unmatched"}
@@ -28663,7 +28733,8 @@ function TreasuryScreen({
                                 onClick={() => openStatementLineMatchDialog(line)}
                               >
                                 <Link2 size={15} />
-                                {line.state === "matched"
+                                {line.state === "matched" ||
+                                line.state === "partially_matched"
                                   ? lang === "ar"
                                     ? "تصحيح المطابقة"
                                     : "Correct match"
@@ -29643,33 +29714,65 @@ function TreasuryScreen({
                 <div className="treasury-dialog__notice">
                   <ShieldCheck size={18} />
                   <span>
-                    <strong>{lang === "ar" ? "اختر حركة واحدة أو مجموعة حركات من نفس الحساب والاتجاه" : "Choose one movement or a group from the same account and direction"}</strong>
-                    <small>{lang === "ar" ? "لن تُعتمد المطابقة إلا إذا ساوى إجمالي الاختيار بند كشف الحساب بالضبط. لا يمكن ربط نفس حركة الدفتر بأكثر من بند كشف واحد." : "The match is accepted only when the selected total exactly equals the statement line. A movement cannot be linked to more than one statement line."}</small>
+                    <strong>{lang === "ar" ? "اختر حركة وحدد المبلغ المخصص منها لهذا البند" : "Choose a movement and allocate its amount to this line"}</strong>
+                    <small>{lang === "ar" ? "يمكن حفظ جزء من بند الكشف للمتابعة، أو إغلاقه عند اكتمال الإجمالي. لا يمكن تجاوز الرصيد المتاح لأي حركة." : "You can save part of the statement line for follow-up, or close it when the total is complete. No allocation may exceed a movement's available balance."}</small>
                   </span>
                 </div>
                 {availableStatementLineMovements.length ? (
                   <>
                     <div className="statement-line-match-options">
                       {availableStatementLineMovements.map((movement) => {
-                        const selected = statementLineMovementIds.includes(movement.id);
+                        const allocatedAmount = statementLineAllocations[movement.id] ?? "";
+                        const selected = Number(allocatedAmount) > 0;
+                        const availableAmount = availableStatementMovementAmount(
+                          movement,
+                          selectedStatementLine,
+                        );
                         return (
                           <label key={movement.id} className={selected ? "selected" : ""}>
                             <input
                               type="checkbox"
                               checked={selected}
                               onChange={() =>
-                                setStatementLineMovementIds((current) =>
-                                  current.includes(movement.id)
-                                    ? current.filter((id) => id !== movement.id)
-                                    : [...current, movement.id],
-                                )
+                                setStatementLineAllocations((current) => {
+                                  const next = { ...current };
+                                  if (Number(next[movement.id]) > 0) {
+                                    delete next[movement.id];
+                                  } else {
+                                    const remaining = Math.max(
+                                      0,
+                                      selectedStatementLine.amount - selectedStatementLineMovementTotal,
+                                    );
+                                    next[movement.id] = String(
+                                      Math.min(availableAmount, remaining || availableAmount),
+                                    );
+                                  }
+                                  return next;
+                                })
                               }
                             />
                             <span>
                               <strong>{movement.id} · {movement.reference}</strong>
                               <small>{movement.description[lang]}</small>
                             </span>
-                            <b>{money.format(movement.amount)}</b>
+                            <b>{money.format(availableAmount)}</b>
+                            {selected && (
+                              <input
+                                className="statement-line-allocation-input"
+                                type="number"
+                                min="0.01"
+                                max={availableAmount}
+                                step="0.01"
+                                value={allocatedAmount}
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) =>
+                                  setStatementLineAllocations((current) => ({
+                                    ...current,
+                                    [movement.id]: event.target.value,
+                                  }))
+                                }
+                              />
+                            )}
                           </label>
                         );
                       })}
@@ -29688,6 +29791,10 @@ function TreasuryScreen({
                           ? lang === "ar"
                             ? "مطابقة كاملة وجاهزة للاعتماد"
                             : "Exact match — ready for approval"
+                          : selectedStatementLineMovementTotalIsPartial
+                            ? lang === "ar"
+                              ? "تخصيص جزئي يمكن حفظه للمتابعة"
+                              : "Partial allocation can be saved for follow-up"
                           : lang === "ar"
                             ? "الاختيار غير مكتمل"
                             : "Selection is not complete"}
@@ -31001,7 +31108,8 @@ function TreasuryScreen({
                 type="submit"
                 disabled={
                   dialog === "statement-line-match" &&
-                  !selectedStatementLineMovementTotalIsExact
+                  !selectedStatementLineMovementTotalIsExact &&
+                  !selectedStatementLineMovementTotalIsPartial
                 }
               >
                 <Save size={17} />

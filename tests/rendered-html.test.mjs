@@ -97,12 +97,15 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /acceptStatementMatchSuggestion/);
   assert.match(page, /suggestion_confirmed/);
   assert.match(page, /matchedMovementIds/);
+  assert.match(page, /partially_matched/);
+  assert.match(page, /partial_allocated/);
+  assert.match(page, /availableStatementMovementAmount/);
   assert.match(page, /selectedStatementLineMovementTotalIsExact/);
-  assert.match(page, /The selected movement total must exactly equal the statement line amount/);
+  assert.match(page, /Allocation total cannot exceed the statement line amount/);
   assert.match(page, /Statement matching assistant/);
   assert.match(page, /treasuryStatementLines/);
   assert.match(page, /بنود كشف الحساب التفصيلية/);
-  assert.match(page, /لا يمكن ربط نفس حركة الدفتر بأكثر من بند كشف واحد/);
+  assert.match(page, /No allocation may exceed a movement's available balance/);
   assert.match(page, /handleStatementLineImportFile/);
   assert.match(page, /submitStatementLineImport/);
   assert.match(page, /لا استيراد جزئي/);

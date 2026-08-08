@@ -20517,7 +20517,7 @@ tbody tr:hover {
 
 .statement-line-match-options > label {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(72px, 0.55fr);
   align-items: center;
   gap: 8px;
   padding: 9px;
@@ -20564,6 +20564,19 @@ tbody tr:hover {
   color: var(--text);
   font-size: 9px;
   white-space: nowrap;
+}
+
+.statement-line-allocation-input {
+  min-width: 0;
+  min-height: 31px;
+  padding: 5px 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: 9px;
+  text-align: center;
 }
 
 .statement-line-match-preview {
@@ -22176,6 +22189,10 @@ tbody tr:hover {
   }
 
   .statement-line-match-options > label > b {
+    grid-column: 2;
+  }
+
+  .statement-line-allocation-input {
     grid-column: 2;
   }
 
