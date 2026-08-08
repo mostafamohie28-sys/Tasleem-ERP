@@ -5556,12 +5556,14 @@ function LoginScreen({
   onLang,
   onTheme,
   onEnter,
+  onHelp,
 }: {
   lang: Lang;
   theme: Theme;
   onLang: () => void;
   onTheme: () => void;
   onEnter: () => void;
+  onHelp: () => void;
 }) {
   const t = copy[lang];
 
@@ -5723,7 +5725,7 @@ function LoginScreen({
           </form>
 
           <div className="login-help">
-            <button className="text-button" type="button">
+            <button className="text-button" type="button" onClick={onHelp}>
               <CircleHelp size={17} />
               {t.help}
             </button>
@@ -46288,6 +46290,7 @@ export default function Home() {
             setTheme((value) => (value === "light" ? "dark" : "light"))
           }
           onEnter={() => setScreen("shipments")}
+          onHelp={() => setScreen("help")}
         />
       ) : screen === "dashboard" || screen === "reports" || screen === "settings" || screen === "help" ? (
         <SystemHubScreen
