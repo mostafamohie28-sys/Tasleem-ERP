@@ -41217,12 +41217,6 @@ function AddShipmentScreen({
     shipmentPrice +
     recipientShippingCharge +
     customFinancialSnapshot.recipientAdditions;
-  const senderDue =
-    shipmentPrice +
-    recipientShippingCharge -
-    shippingFee -
-    customFinancialSnapshot.senderDeductions;
-  const senderShippingDifference = recipientShippingCharge - shippingFee;
 
   function fieldVisible(code: string) {
     return fieldMap.has(code);
@@ -42253,13 +42247,13 @@ function AddShipmentScreen({
                     <span>
                       <strong>
                         {lang === "ar"
-                          ? "التوقع المالي عند التسجيل"
-                          : "Financial expectation at registration"}
+                          ? "التحصيل ومصاريف الشحن"
+                          : "Collection and shipping fees"}
                       </strong>
                       <small>
                         {lang === "ar"
-                          ? "تعليمات التحصيل الآن؛ يعتمد محاسب التشغيل الحساب النهائي عند تسوية المندوب."
-                          : "Current collection instruction; operations accounting confirms the final treatment during courier settlement."}
+                          ? "هذه بيانات التحصيل للمندوب؛ الحساب النهائي للراسل يعتمد لاحقًا عند تسوية المندوب."
+                          : "These are courier collection instructions; the sender's final account is approved later during courier settlement."}
                       </small>
                     </span>
                   </div>
@@ -42393,26 +42387,12 @@ function AddShipmentScreen({
                       <small>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</small>
                       <strong>{money.format(shippingFee)}</strong>
                     </span>
-                    <span>
-                      <small>{lang === "ar" ? "فرق الشحن للراسل" : "Sender shipping difference"}</small>
-                      <strong>{money.format(senderShippingDifference)}</strong>
-                    </span>
                     {customFinancialSnapshot.recipientAdditions > 0 && (
                       <span>
                         <small>{lang === "ar" ? "إضافات على المستلم" : "Recipient additions"}</small>
                         <strong>{money.format(customFinancialSnapshot.recipientAdditions)}</strong>
                       </span>
                     )}
-                    {customFinancialSnapshot.senderDeductions > 0 && (
-                      <span>
-                        <small>{lang === "ar" ? "خصومات من الراسل" : "Sender deductions"}</small>
-                        <strong>{money.format(customFinancialSnapshot.senderDeductions)}</strong>
-                      </span>
-                    )}
-                    <span>
-                      <small>{lang === "ar" ? "مستحق الراسل المتوقع" : "Expected sender due"}</small>
-                      <strong>{money.format(senderDue)}</strong>
-                    </span>
                   </div>
                 </div>
 
