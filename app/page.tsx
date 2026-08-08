@@ -710,6 +710,8 @@ type TreasuryMovement = {
     | "cash_shortage"
     | "cash_surplus"
     | "employee_debt_payment"
+    | "bank_fee"
+    | "bank_credit"
     | "other_income"
     | "other_expense"
     | "transfer";
@@ -735,6 +737,7 @@ type TreasuryMovement = {
       | "treasury_transfer"
       | "cash_variance_review"
       | "employee_debt_payment"
+      | "statement_difference_review"
       | "reversal";
     id: string;
   };
@@ -850,6 +853,20 @@ type EmployeeTreasuryDebtPayment = {
   treasuryMovementId: string;
 };
 
+type StatementDifferenceReview = {
+  id: string;
+  decision:
+    | "timing_difference"
+    | "bank_fee"
+    | "documented_credit"
+    | "linked_existing_movement";
+  note: string;
+  reviewedBy: Localized;
+  reviewedAt: Localized;
+  treasuryMovementId?: string;
+  linkedReference?: string;
+};
+
 type TreasuryStatementReconciliation = {
   id: string;
   accountId: TreasuryAccount["id"];
@@ -863,6 +880,7 @@ type TreasuryStatementReconciliation = {
   note: string;
   reconciledBy: Localized;
   reconciledAt: Localized;
+  reviewHistory?: StatementDifferenceReview[];
 };
 
 type TreasuryVarianceIssue = {
@@ -24715,6 +24733,7 @@ function TreasuryScreen({
     | "variance-review"
     | "employee-debt-payment"
     | "statement-reconciliation"
+    | "statement-difference-review"
     | "close-session"
     | "close-day"
     | null
@@ -24752,6 +24771,12 @@ function TreasuryScreen({
   const [statementDate, setStatementDate] = useState(
     new Date().toISOString().slice(0, 10),
   );
+  const [selectedStatementReconciliation, setSelectedStatementReconciliation] =
+    useState<TreasuryStatementReconciliation | null>(null);
+  const [statementDifferenceDecision, setStatementDifferenceDecision] =
+    useState<StatementDifferenceReview["decision"]>("timing_difference");
+  const [statementDifferenceReference, setStatementDifferenceReference] =
+    useState("");
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -24775,6 +24800,8 @@ function TreasuryScreen({
       ar: "سداد مديونية موظف",
       en: "Employee debt payment",
     },
+    bank_fee: { ar: "رسوم بنك أو محفظة", en: "Bank or wallet fee" },
+    bank_credit: { ar: "إيداع بنكي موثق", en: "Documented bank credit" },
     other_income: { ar: "إيراد آخر", en: "Other income" },
     other_expense: { ar: "مصروف آخر", en: "Other expense" },
     transfer: { ar: "تحويل بين الخزن", en: "Treasury transfer" },
@@ -25038,6 +25065,9 @@ function TreasuryScreen({
     setStatementBalance("");
     setStatementReference("");
     setStatementDate(new Date().toISOString().slice(0, 10));
+    setSelectedStatementReconciliation(null);
+    setStatementDifferenceDecision("timing_difference");
+    setStatementDifferenceReference("");
   }
 
   function openMovementDialog() {
@@ -25153,6 +25183,20 @@ function TreasuryScreen({
     setClosingNote("");
     setFormError("");
     setDialog("statement-reconciliation");
+  }
+
+  function openStatementDifferenceReviewDialog(
+    reconciliation: TreasuryStatementReconciliation,
+  ) {
+    if (reconciliation.state !== "under_review") return;
+    setSelectedStatementReconciliation(reconciliation);
+    setStatementDifferenceDecision(
+      reconciliation.difference < 0 ? "bank_fee" : "timing_difference",
+    );
+    setStatementDifferenceReference("");
+    setClosingNote("");
+    setFormError("");
+    setDialog("statement-difference-review");
   }
 
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
@@ -26346,6 +26390,162 @@ function TreasuryScreen({
     );
   }
 
+  function submitStatementDifferenceReview(
+    event: FormEvent<HTMLFormElement>,
+  ) {
+    event.preventDefault();
+    const reconciliation = selectedStatementReconciliation;
+    if (!reconciliation || reconciliation.state !== "under_review") {
+      setFormError(
+        lang === "ar"
+          ? "فرق الكشف لم يعد متاحًا للمراجعة."
+          : "This statement difference is no longer available for review.",
+      );
+      return;
+    }
+    const account = accounts.find(
+      (candidate) => candidate.id === reconciliation.accountId,
+    );
+    if (!account || account.kind === "cash" || account.state !== "active") {
+      setFormError(
+        lang === "ar"
+          ? "حساب البنك أو المحفظة غير نشط، ولا يمكن اعتماد قرار عليه."
+          : "The bank or wallet account is inactive and cannot accept a review decision.",
+      );
+      return;
+    }
+    if (!closingNote.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب سبب قرار المراجعة ومصدره."
+          : "Document the review decision and its source.",
+      );
+      return;
+    }
+    if (
+      (statementDifferenceDecision === "bank_fee" &&
+        reconciliation.difference >= 0) ||
+      (statementDifferenceDecision === "documented_credit" &&
+        reconciliation.difference <= 0)
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "هذا القرار لا يطابق اتجاه فرق كشف الحساب."
+          : "This decision does not match the direction of the statement difference.",
+      );
+      return;
+    }
+    if (
+      statementDifferenceDecision !== "timing_difference" &&
+      !statementDifferenceReference.trim()
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب مرجع المستند أو الحركة المرتبطة قبل الاعتماد."
+          : "Enter the related document or movement reference before approval.",
+      );
+      return;
+    }
+
+    const now = new Date();
+    const reviewId = `TSRR-${now.getTime().toString().slice(-9)}`;
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const requiresMovement =
+      statementDifferenceDecision === "bank_fee" ||
+      statementDifferenceDecision === "documented_credit";
+    const movementId = requiresMovement
+      ? `TMV-${now.getTime().toString().slice(-9)}`
+      : undefined;
+    const review: StatementDifferenceReview = {
+      id: reviewId,
+      decision: statementDifferenceDecision,
+      note: closingNote.trim(),
+      reviewedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      reviewedAt: timestamp,
+      treasuryMovementId: movementId,
+      linkedReference: statementDifferenceReference.trim() || undefined,
+    };
+    const resolved = statementDifferenceDecision !== "timing_difference";
+    const updatedReconciliation: TreasuryStatementReconciliation = {
+      ...reconciliation,
+      state: resolved ? "resolved" : "under_review",
+      reviewHistory: [...(reconciliation.reviewHistory ?? []), review],
+    };
+    const nextReconciliations = statementReconciliations.map((candidate) =>
+      candidate.id === reconciliation.id ? updatedReconciliation : candidate,
+    );
+    const differenceAmount = Math.abs(reconciliation.difference);
+    if (requiresMovement && movementId) {
+      const movement: TreasuryMovement = {
+        id: movementId,
+        accountId: account.id,
+        direction:
+          statementDifferenceDecision === "bank_fee" ? "out" : "in",
+        category:
+          statementDifferenceDecision === "bank_fee"
+            ? "bank_fee"
+            : "bank_credit",
+        amount: differenceAmount,
+        party: account.name,
+        description:
+          statementDifferenceDecision === "bank_fee"
+            ? {
+                ar: `رسوم مثبتة من كشف ${reconciliation.statementReference}: ${closingNote.trim()}`,
+                en: `Fee documented from statement ${reconciliation.statementReference}: ${closingNote.trim()}`,
+              }
+            : {
+                ar: `إيداع موثق من كشف ${reconciliation.statementReference}: ${closingNote.trim()}`,
+                en: `Documented credit from statement ${reconciliation.statementReference}: ${closingNote.trim()}`,
+              },
+        reference: statementDifferenceReference.trim(),
+        source: "system",
+        createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        timestamp,
+        sequence:
+          Math.max(0, ...movements.map((movement) => movement.sequence)) + 1,
+        sourceDocument: {
+          type: "statement_difference_review",
+          id: reviewId,
+        },
+        breakdown: [
+          {
+            kind: "cash_difference",
+            amount: differenceAmount,
+            label: {
+              ar: `فرق كشف ${reconciliation.statementReference}`,
+              en: `Statement difference ${reconciliation.statementReference}`,
+            },
+          },
+        ],
+      };
+      onMovementsChange([movement, ...movements]);
+    }
+    onStatementReconciliationsChange(nextReconciliations);
+    resetDialog();
+    showToast(
+      statementDifferenceDecision === "timing_difference"
+        ? lang === "ar"
+          ? "سُجل فرق التوقيت وبقي مفتوحًا للمتابعة دون حركة مالية"
+          : "Timing difference recorded and kept open without a movement"
+        : statementDifferenceDecision === "linked_existing_movement"
+          ? lang === "ar"
+            ? "تم ربط الفرق بحركة قائمة وإغلاق مراجعته"
+            : "Difference linked to an existing movement and closed"
+          : lang === "ar"
+            ? "تم اعتماد القرار وإنشاء الحركة المالية المرتبطة"
+            : "Decision approved and the linked financial movement was posted",
+    );
+  }
+
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
       <Sidebar
@@ -27503,6 +27703,8 @@ function TreasuryScreen({
                         >
                           {reconciliation.state === "matched" ? (
                             <Check size={17} />
+                          ) : reconciliation.state === "resolved" ? (
+                            <ShieldCheck size={17} />
                           ) : (
                             <CircleAlert size={17} />
                           )}
@@ -27557,14 +27759,57 @@ function TreasuryScreen({
                               ? lang === "ar"
                                 ? "مطابق"
                                 : "Matched"
+                              : reconciliation.state === "resolved"
+                                ? lang === "ar"
+                                  ? "تمت المراجعة"
+                                  : "Reviewed"
                               : lang === "ar"
                                 ? "تحت المراجعة"
                                 : "Under review"}
                           </strong>
                         </span>
+                        {reconciliation.state === "under_review" && (
+                          <button
+                            className="secondary-button treasury-reconciliation-review"
+                            type="button"
+                            onClick={() =>
+                              openStatementDifferenceReviewDialog(
+                                reconciliation,
+                              )
+                            }
+                          >
+                            <ClipboardCheck size={15} />
+                            {lang === "ar" ? "مراجعة الفرق" : "Review difference"}
+                          </button>
+                        )}
                         {reconciliation.note && (
                           <p>{reconciliation.note}</p>
                         )}
+                        {reconciliation.reviewHistory?.length ? (
+                          <p className="treasury-reconciliation-review-note">
+                            {(() => {
+                              const review = reconciliation.reviewHistory.at(-1);
+                              if (!review) return "";
+                              const decision =
+                                review.decision === "timing_difference"
+                                  ? lang === "ar"
+                                    ? "فرق توقيت قيد المتابعة"
+                                    : "Timing difference under follow-up"
+                                  : review.decision === "bank_fee"
+                                    ? lang === "ar"
+                                      ? "رسوم بنك أو محفظة مثبتة"
+                                      : "Bank or wallet fee posted"
+                                    : review.decision === "documented_credit"
+                                      ? lang === "ar"
+                                        ? "إيداع بنكي موثق"
+                                        : "Documented bank credit posted"
+                                      : lang === "ar"
+                                        ? "مرتبط بحركة قائمة"
+                                        : "Linked to an existing movement";
+                              return `${decision} · ${review.reviewedAt[lang]}${review.linkedReference ? ` · ${review.linkedReference}` : ""}`;
+                            })()}
+                          </p>
+                        ) : null}
                       </article>
                     ))}
                   </div>
@@ -27900,7 +28145,11 @@ function TreasuryScreen({
                               ? lang === "ar"
                                 ? "إيصال سداد مديونية موظف"
                                 : "Employee debt payment receipt"
-                            : selectedMovement.sourceDocument.type === "reversal"
+                              : selectedMovement.sourceDocument.type === "statement_difference_review"
+                                ? lang === "ar"
+                                  ? "قرار مراجعة فرق كشف"
+                                  : "Statement difference review"
+                              : selectedMovement.sourceDocument.type === "reversal"
                               ? lang === "ar"
                                 ? "تصحيح حركة"
                                 : "Movement reversal"
@@ -28027,6 +28276,8 @@ function TreasuryScreen({
                   ? submitVarianceReview
                 : dialog === "employee-debt-payment"
                   ? submitEmployeeDebtPayment
+                : dialog === "statement-difference-review"
+                  ? submitStatementDifferenceReview
                 : dialog === "statement-reconciliation"
                   ? submitStatementReconciliation
                 : dialog === "movement"
@@ -28064,6 +28315,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "إيصال تحصيل مستقل"
                         : "Independent collection receipt"
+                    : dialog === "statement-difference-review"
+                      ? lang === "ar"
+                        ? "قرار فرق موثق"
+                        : "Documented difference decision"
                     : dialog === "statement-reconciliation"
                       ? lang === "ar"
                         ? "مقارنة دون تعديل الرصيد"
@@ -28105,6 +28360,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "استلام سداد مديونية موظف"
                         : "Receive employee debt payment"
+                    : dialog === "statement-difference-review"
+                      ? lang === "ar"
+                        ? "مراجعة فرق كشف الحساب"
+                        : "Review statement difference"
                     : dialog === "statement-reconciliation"
                       ? lang === "ar"
                         ? "مطابقة كشف بنك أو محفظة"
@@ -28132,7 +28391,209 @@ function TreasuryScreen({
               </button>
             </div>
 
-            {dialog === "statement-reconciliation" &&
+            {dialog === "statement-difference-review" &&
+            selectedStatementReconciliation ? (
+              <div className="statement-difference-review-dialog">
+                <div className="statement-difference-summary">
+                  <span>
+                    <CircleAlert size={19} />
+                  </span>
+                  <span>
+                    <small>
+                      {selectedStatementReconciliation.accountName[lang]}
+                    </small>
+                    <strong>
+                      {selectedStatementReconciliation.statementReference}
+                    </strong>
+                    <b>{selectedStatementReconciliation.statementDate}</b>
+                  </span>
+                  <article>
+                    <small>
+                      {lang === "ar" ? "الرصيد الدفتري" : "Ledger snapshot"}
+                    </small>
+                    <strong>
+                      {money.format(
+                        selectedStatementReconciliation.ledgerBalance,
+                      )}
+                    </strong>
+                  </article>
+                  <article>
+                    <small>
+                      {lang === "ar" ? "رصيد الكشف" : "Statement balance"}
+                    </small>
+                    <strong>
+                      {money.format(
+                        selectedStatementReconciliation.statementBalance,
+                      )}
+                    </strong>
+                  </article>
+                  <article>
+                    <small>{lang === "ar" ? "الفرق" : "Difference"}</small>
+                    <strong>
+                      {selectedStatementReconciliation.difference > 0 ? "+" : ""}
+                      {money.format(selectedStatementReconciliation.difference)}
+                    </strong>
+                  </article>
+                </div>
+
+                <div className="statement-difference-decision">
+                  <button
+                    className={
+                      statementDifferenceDecision === "timing_difference"
+                        ? "active"
+                        : ""
+                    }
+                    type="button"
+                    onClick={() => setStatementDifferenceDecision("timing_difference")}
+                  >
+                    <Clock3 size={18} />
+                    <span>
+                      <strong>{lang === "ar" ? "فرق توقيت" : "Timing difference"}</strong>
+                      <small>
+                        {lang === "ar"
+                          ? "لا ينشئ حركة ويظل مفتوحًا للمتابعة."
+                          : "Creates no movement and stays open for follow-up."}
+                      </small>
+                    </span>
+                  </button>
+                  <button
+                    className={
+                      statementDifferenceDecision === "linked_existing_movement"
+                        ? "active"
+                        : ""
+                    }
+                    type="button"
+                    onClick={() =>
+                      setStatementDifferenceDecision("linked_existing_movement")
+                    }
+                  >
+                    <Link2 size={18} />
+                    <span>
+                      <strong>
+                        {lang === "ar" ? "مرتبط بحركة قائمة" : "Linked movement"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "الحركة موجودة بالفعل وسنربط مرجعها فقط."
+                          : "The movement is already posted; only its reference is linked."}
+                      </small>
+                    </span>
+                  </button>
+                  {selectedStatementReconciliation.difference < 0 && (
+                    <button
+                      className={`danger ${
+                        statementDifferenceDecision === "bank_fee" ? "active" : ""
+                      }`}
+                      type="button"
+                      onClick={() => setStatementDifferenceDecision("bank_fee")}
+                    >
+                      <ReceiptText size={18} />
+                      <span>
+                        <strong>
+                          {lang === "ar" ? "رسوم بنك أو محفظة" : "Bank or wallet fee"}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "ينشئ مصروفًا بنفس قيمة العجز بعد التوثيق."
+                            : "Posts an expense equal to the shortage after documentation."}
+                        </small>
+                      </span>
+                    </button>
+                  )}
+                  {selectedStatementReconciliation.difference > 0 && (
+                    <button
+                      className={
+                        statementDifferenceDecision === "documented_credit"
+                          ? "active"
+                          : ""
+                      }
+                      type="button"
+                      onClick={() =>
+                        setStatementDifferenceDecision("documented_credit")
+                      }
+                    >
+                      <Landmark size={18} />
+                      <span>
+                        <strong>
+                          {lang === "ar" ? "إيداع بنكي موثق" : "Documented bank credit"}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "ينشئ إيداعًا بنفس قيمة الزيادة بعد التوثيق."
+                            : "Posts a deposit equal to the surplus after documentation."}
+                        </small>
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                {statementDifferenceDecision !== "timing_difference" && (
+                  <label className="treasury-form-field">
+                    <span>
+                      {lang === "ar"
+                        ? statementDifferenceDecision === "linked_existing_movement"
+                          ? "مرجع الحركة القائمة — إلزامي"
+                          : "مرجع المستند المؤيد — إلزامي"
+                        : statementDifferenceDecision === "linked_existing_movement"
+                          ? "Existing movement reference — required"
+                          : "Supporting document reference — required"}
+                    </span>
+                    <input
+                      value={statementDifferenceReference}
+                      onChange={(event) =>
+                        setStatementDifferenceReference(event.target.value)
+                      }
+                      placeholder={
+                        lang === "ar"
+                          ? "رقم سند، رقم حركة، أو مرجع البنك"
+                          : "Voucher, movement, or bank reference"
+                      }
+                    />
+                  </label>
+                )}
+
+                <div className="treasury-dialog__notice">
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>
+                      {statementDifferenceDecision === "timing_difference"
+                        ? lang === "ar"
+                          ? "لا توجد حركة مالية في هذا القرار"
+                          : "This decision creates no financial movement"
+                        : statementDifferenceDecision === "linked_existing_movement"
+                          ? lang === "ar"
+                            ? "لن تُكرر الحركة الموجودة"
+                            : "No existing movement will be duplicated"
+                          : lang === "ar"
+                            ? "سيُنشأ سند مالي بقيمة الفرق فقط"
+                            : "A financial voucher will be posted for the exact difference only"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "أصل كشف الحساب ونتيجة المطابقة محفوظان كما هما؛ القرار الجديد يضاف إلى تاريخ المراجعة."
+                        : "The original statement and reconciliation remain unchanged; this decision is added to the review history."}
+                    </small>
+                  </span>
+                </div>
+
+                <label className="treasury-form-field">
+                  <span>
+                    {lang === "ar"
+                      ? "سبب القرار وتفاصيله — إلزامي"
+                      : "Decision reason and details — required"}
+                  </span>
+                  <textarea
+                    value={closingNote}
+                    onChange={(event) => setClosingNote(event.target.value)}
+                    placeholder={
+                      lang === "ar"
+                        ? "اشرح ما الذي راجعته ولماذا اخترت هذا القرار..."
+                        : "Explain what you reviewed and why this decision was selected..."
+                    }
+                  />
+                </label>
+              </div>
+            ) : dialog === "statement-reconciliation" &&
             reconciliationAccount ? (
               <div className="statement-reconciliation-dialog">
                 <div className="statement-reconciliation-account">
@@ -29231,6 +29692,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "تأكيد الاستلام وإصدار الإيصال"
                       : "Confirm receipt & issue voucher"
+                  : dialog === "statement-difference-review"
+                    ? lang === "ar"
+                      ? "اعتماد قرار فرق الكشف"
+                      : "Approve statement difference decision"
                   : dialog === "statement-reconciliation"
                     ? lang === "ar"
                       ? "حفظ المطابقة"
