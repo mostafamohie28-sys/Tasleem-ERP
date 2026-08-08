@@ -903,6 +903,15 @@ type TreasuryStatementLine = {
   }[];
 };
 
+type StatementLineImportDraft = {
+  rowNumber: number;
+  transactionDate: string;
+  reference: string;
+  direction: TreasuryStatementLine["direction"];
+  amount: number;
+  description: string;
+};
+
 type TreasuryVarianceIssue = {
   id: string;
   sessionId: string;
@@ -24762,6 +24771,7 @@ function TreasuryScreen({
     | "statement-difference-review"
     | "statement-line"
     | "statement-line-match"
+    | "statement-line-import"
     | "close-session"
     | "close-day"
     | null
@@ -24818,6 +24828,15 @@ function TreasuryScreen({
   const [selectedStatementLine, setSelectedStatementLine] =
     useState<TreasuryStatementLine | null>(null);
   const [statementLineMovementId, setStatementLineMovementId] = useState("");
+  const [statementLineImportRows, setStatementLineImportRows] = useState<
+    StatementLineImportDraft[]
+  >([]);
+  const [statementLineImportErrors, setStatementLineImportErrors] = useState<
+    string[]
+  >([]);
+  const [statementLineImportFileName, setStatementLineImportFileName] =
+    useState("");
+  const statementLineImportInputRef = useRef<HTMLInputElement>(null);
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -25149,6 +25168,9 @@ function TreasuryScreen({
     setStatementLineDescription("");
     setSelectedStatementLine(null);
     setStatementLineMovementId("");
+    setStatementLineImportRows([]);
+    setStatementLineImportErrors([]);
+    setStatementLineImportFileName("");
   }
 
   function openMovementDialog() {
@@ -25306,6 +25328,224 @@ function TreasuryScreen({
     setStatementLineMovementId(line.matchedMovementId ?? "");
     setFormError("");
     setDialog("statement-line-match");
+  }
+
+  function openStatementLineImportDialog() {
+    if (!activeStatementReconciliation) {
+      showToast(
+        lang === "ar"
+          ? "سجل كشف حساب أولًا قبل استيراد بنوده."
+          : "Record a statement reconciliation before importing its lines.",
+      );
+      return;
+    }
+    setStatementLineImportRows([]);
+    setStatementLineImportErrors([]);
+    setStatementLineImportFileName("");
+    setFormError("");
+    setDialog("statement-line-import");
+  }
+
+  function normalizeStatementImportText(value: unknown) {
+    return String(value ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_\-().]/g, "");
+  }
+
+  function formatStatementImportDate(value: unknown) {
+    const raw = String(value ?? "").trim();
+    if (/^\d{4,6}$/.test(raw)) {
+      const excelSerial = Number(raw);
+      if (excelSerial >= 1 && excelSerial <= 100000) {
+        return new Date(Date.UTC(1899, 11, 30) + excelSerial * 86400000)
+          .toISOString()
+          .slice(0, 10);
+      }
+    }
+    const directMatch = raw.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})$/);
+    if (directMatch) {
+      return `${directMatch[1]}-${directMatch[2].padStart(2, "0")}-${directMatch[3].padStart(2, "0")}`;
+    }
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return "";
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  function parseCsvRows(contents: string) {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let value = "";
+    let quoted = false;
+    for (let index = 0; index < contents.length; index += 1) {
+      const character = contents[index];
+      const nextCharacter = contents[index + 1];
+      if (character === '"' && quoted && nextCharacter === '"') {
+        value += '"';
+        index += 1;
+      } else if (character === '"') {
+        quoted = !quoted;
+      } else if (character === "," && !quoted) {
+        row.push(value.trim());
+        value = "";
+      } else if ((character === "\n" || character === "\r") && !quoted) {
+        if (character === "\r" && nextCharacter === "\n") index += 1;
+        row.push(value.trim());
+        if (row.some((cell) => cell)) rows.push(row);
+        row = [];
+        value = "";
+      } else {
+        value += character;
+      }
+    }
+    row.push(value.trim());
+    if (row.some((cell) => cell)) rows.push(row);
+    return rows;
+  }
+
+  function parseStatementLineDirection(value: unknown) {
+    const normalized = normalizeStatementImportText(value);
+    if (["in", "credit", "داخل", "وارد", "مبلغداخل"].includes(normalized)) {
+      return "in" as const;
+    }
+    if (["out", "debit", "خارج", "صادر", "مبلغخارج"].includes(normalized)) {
+      return "out" as const;
+    }
+    return null;
+  }
+
+  function parseStatementLineAmount(value: unknown) {
+    const arabicDigits = "٠١٢٣٤٥٦٧٨٩";
+    const normalized = String(value ?? "")
+      .replace(/[٠-٩]/g, (digit) => String(arabicDigits.indexOf(digit)))
+      .replace(/[٬,\s]/g, "")
+      .replace(/٫/g, ".");
+    const amount = Number(normalized);
+    return Number.isFinite(amount) && amount > 0 ? amount : null;
+  }
+
+  async function handleStatementLineImportFile(file?: File) {
+    const reconciliation = activeStatementReconciliation;
+    if (!file || !reconciliation) return;
+    const validExtension = /\.csv$/i.test(file.name);
+    if (!validExtension) {
+      setStatementLineImportRows([]);
+      setStatementLineImportErrors([
+        lang === "ar"
+          ? "اختر ملف CSV فقط."
+          : "Choose a CSV file only.",
+      ]);
+      return;
+    }
+    setStatementLineImportFileName(file.name);
+    setStatementLineImportRows([]);
+    setStatementLineImportErrors([]);
+    try {
+      const nonEmptyRows = parseCsvRows(await file.text());
+      if (nonEmptyRows.length < 2) {
+        setStatementLineImportErrors([
+          lang === "ar"
+            ? "الملف يحتاج صف عناوين وصف بند واحد على الأقل."
+            : "The file needs a header row and at least one statement line.",
+        ]);
+        return;
+      }
+      const header = nonEmptyRows[0].map(normalizeStatementImportText);
+      const findColumn = (aliases: string[]) =>
+        header.findIndex((value) => aliases.includes(value));
+      const dateColumn = findColumn(["date", "transactiondate", "تاريخ", "تاريخالحركة"]);
+      const referenceColumn = findColumn(["reference", "ref", "مرجع", "مرجعالبند"]);
+      const directionColumn = findColumn(["direction", "اتجاه", "نوعالحركة"]);
+      const amountColumn = findColumn(["amount", "value", "المبلغ", "القيمة"]);
+      const descriptionColumn = findColumn(["description", "details", "وصف", "التفاصيل"]);
+      const missingColumns = [
+        dateColumn < 0 && (lang === "ar" ? "تاريخ" : "date"),
+        referenceColumn < 0 && (lang === "ar" ? "مرجع" : "reference"),
+        directionColumn < 0 && (lang === "ar" ? "اتجاه" : "direction"),
+        amountColumn < 0 && (lang === "ar" ? "القيمة" : "amount"),
+      ].filter(Boolean) as string[];
+      if (missingColumns.length) {
+        setStatementLineImportErrors([
+          lang === "ar"
+            ? `عناوين مفقودة في الملف: ${missingColumns.join("، ")}. استخدم: تاريخ، مرجع، اتجاه، قيمة، وصف.`
+            : `Missing file headers: ${missingColumns.join(", ")}. Use: date, reference, direction, amount, description.`,
+        ]);
+        return;
+      }
+      const errors: string[] = [];
+      const drafts: StatementLineImportDraft[] = [];
+      const seenReferences = new Set(
+        statementLines
+          .filter((line) => line.reconciliationId === reconciliation.id)
+          .map((line) => line.reference.toLowerCase()),
+      );
+      const today = new Date().toISOString().slice(0, 10);
+      nonEmptyRows.slice(1).forEach((row, rowOffset) => {
+        const rowNumber = rowOffset + 2;
+        const transactionDate = formatStatementImportDate(row[dateColumn]);
+        const reference = String(row[referenceColumn] ?? "").trim();
+        const direction = parseStatementLineDirection(row[directionColumn]);
+        const amount = parseStatementLineAmount(row[amountColumn]);
+        const description = descriptionColumn >= 0
+          ? String(row[descriptionColumn] ?? "").trim()
+          : "";
+        if (!transactionDate || transactionDate > today) {
+          errors.push(
+            lang === "ar"
+              ? `الصف ${rowNumber}: تاريخ الحركة غير صحيح أو في المستقبل.`
+              : `Row ${rowNumber}: transaction date is invalid or in the future.`,
+          );
+        }
+        if (!reference) {
+          errors.push(
+            lang === "ar"
+              ? `الصف ${rowNumber}: مرجع البند مطلوب.`
+              : `Row ${rowNumber}: line reference is required.`,
+          );
+        } else if (seenReferences.has(reference.toLowerCase())) {
+          errors.push(
+            lang === "ar"
+              ? `الصف ${rowNumber}: مرجع البند ${reference} مكرر داخل الكشف.`
+              : `Row ${rowNumber}: line reference ${reference} is duplicated in this statement.`,
+          );
+        } else {
+          seenReferences.add(reference.toLowerCase());
+        }
+        if (!direction) {
+          errors.push(
+            lang === "ar"
+              ? `الصف ${rowNumber}: الاتجاه يجب أن يكون داخل أو خارج.`
+              : `Row ${rowNumber}: direction must be in or out.`,
+          );
+        }
+        if (!amount) {
+          errors.push(
+            lang === "ar"
+              ? `الصف ${rowNumber}: القيمة يجب أن تكون أكبر من صفر.`
+              : `Row ${rowNumber}: amount must be greater than zero.`,
+          );
+        }
+        if (transactionDate && reference && direction && amount) {
+          drafts.push({
+            rowNumber,
+            transactionDate,
+            reference,
+            direction,
+            amount,
+            description,
+          });
+        }
+      });
+      setStatementLineImportRows(drafts);
+      setStatementLineImportErrors(errors.slice(0, 12));
+    } catch {
+      setStatementLineImportRows([]);
+      setStatementLineImportErrors([
+        lang === "ar"
+          ? "تعذر قراءة الملف. تأكد من أنه CSV صالح ومشفّر بـ UTF-8."
+          : "The file could not be read. Ensure it is a valid UTF-8 CSV file.",
+      ]);
+    }
   }
 
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
@@ -26751,6 +26991,77 @@ function TreasuryScreen({
     );
   }
 
+  function submitStatementLineImport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const reconciliation = activeStatementReconciliation;
+    if (!reconciliation) {
+      setFormError(
+        lang === "ar"
+          ? "اختر كشف حساب صالحًا قبل الحفظ."
+          : "Choose a valid statement before saving.",
+      );
+      return;
+    }
+    if (!statementLineImportFileName) {
+      setFormError(
+        lang === "ar" ? "اختر ملفًا أولًا." : "Choose a file first.",
+      );
+      return;
+    }
+    if (statementLineImportErrors.length > 0 || statementLineImportRows.length === 0) {
+      setFormError(
+        lang === "ar"
+          ? "صحح كل أخطاء الملف قبل الحفظ؛ لا يوجد استيراد جزئي."
+          : "Fix every file error before saving; partial import is not allowed.",
+      );
+      return;
+    }
+    const account = accounts.find(
+      (candidate) => candidate.id === reconciliation.accountId,
+    );
+    if (!account || account.kind === "cash") {
+      setFormError(
+        lang === "ar"
+          ? "لا يمكن ربط البنود بهذا الحساب."
+          : "The statement lines cannot be linked to this account.",
+      );
+      return;
+    }
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const lines: TreasuryStatementLine[] = statementLineImportRows.map(
+      (row, index) => ({
+        id: `TSL-${(now.getTime() + index).toString().slice(-9)}`,
+        reconciliationId: reconciliation.id,
+        accountId: account.id,
+        transactionDate: row.transactionDate,
+        reference: row.reference,
+        direction: row.direction,
+        amount: row.amount,
+        description: row.description,
+        state: "unmatched",
+        createdAt: timestamp,
+        matchHistory: [],
+      }),
+    );
+    onStatementLinesChange([...lines, ...statementLines]);
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? `تم استيراد ${lines.length} بندًا بنجاح. ابدأ المطابقة الآن.`
+        : `${lines.length} lines imported successfully. You can start matching now.`,
+    );
+  }
+
   function submitStatementLineMatch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const selectedLine = selectedStatementLine;
@@ -27999,14 +28310,24 @@ function TreasuryScreen({
                     </span>
                   </span>
                   {activeStatementReconciliation && (
-                    <button
-                      className="primary-button"
-                      type="button"
-                      onClick={openStatementLineDialog}
-                    >
-                      <Plus size={16} />
-                      {lang === "ar" ? "إضافة بند كشف" : "Add statement line"}
-                    </button>
+                    <span className="statement-lines-head__actions">
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        onClick={openStatementLineImportDialog}
+                      >
+                        <Upload size={16} />
+                        {lang === "ar" ? "استيراد CSV" : "Import CSV"}
+                      </button>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={openStatementLineDialog}
+                      >
+                        <Plus size={16} />
+                        {lang === "ar" ? "إضافة بند كشف" : "Add statement line"}
+                      </button>
+                    </span>
                   )}
                 </div>
 
@@ -28783,6 +29104,8 @@ function TreasuryScreen({
                   ? submitStatementLine
                 : dialog === "statement-line-match"
                   ? submitStatementLineMatch
+                : dialog === "statement-line-import"
+                  ? submitStatementLineImport
                 : dialog === "statement-reconciliation"
                   ? submitStatementReconciliation
                 : dialog === "movement"
@@ -28832,6 +29155,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "ربط واحد لواحد"
                         : "One-to-one link"
+                    : dialog === "statement-line-import"
+                      ? lang === "ar"
+                        ? "فحص كامل قبل الحفظ"
+                        : "Full validation before saving"
                     : dialog === "statement-reconciliation"
                       ? lang === "ar"
                         ? "مقارنة دون تعديل الرصيد"
@@ -28885,6 +29212,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "مطابقة بند كشف بحركة دفتر"
                         : "Match statement line to ledger movement"
+                    : dialog === "statement-line-import"
+                      ? lang === "ar"
+                        ? "استيراد بنود كشف الحساب"
+                        : "Import statement lines"
                     : dialog === "statement-reconciliation"
                       ? lang === "ar"
                         ? "مطابقة كشف بنك أو محفظة"
@@ -28912,7 +29243,114 @@ function TreasuryScreen({
               </button>
             </div>
 
-            {dialog === "statement-line" && activeStatementReconciliation ? (
+            {dialog === "statement-line-import" && activeStatementReconciliation ? (
+              <div className="statement-line-import-dialog">
+                <div className="statement-line-dialog__context">
+                  <FileSpreadsheet size={19} />
+                  <span>
+                    <small>{lang === "ar" ? "الكشف المختار" : "Selected statement"}</small>
+                    <strong>
+                      {activeStatementReconciliation.accountName[lang]} · {activeStatementReconciliation.statementReference}
+                    </strong>
+                  </span>
+                </div>
+                <div className="statement-import-template">
+                  <strong>{lang === "ar" ? "شكل الأعمدة المطلوب" : "Required columns"}</strong>
+                  <span>{lang === "ar" ? "تاريخ، مرجع، اتجاه، قيمة، وصف" : "date, reference, direction, amount, description"}</span>
+                  <small>
+                    {lang === "ar"
+                      ? "الاتجاه يقبل: داخل / خارج أو in / out. الوصف اختياري."
+                      : "Direction accepts: داخل / خارج or in / out. Description is optional."}
+                  </small>
+                </div>
+                <input
+                  className="statement-import-input"
+                  ref={statementLineImportInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(event) => {
+                    void handleStatementLineImportFile(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+                <button
+                  className="statement-import-picker"
+                  type="button"
+                  onClick={() => statementLineImportInputRef.current?.click()}
+                >
+                  <Upload size={20} />
+                  <span>
+                    <strong>
+                      {statementLineImportFileName
+                        ? statementLineImportFileName
+                        : lang === "ar"
+                          ? "اختر ملف CSV"
+                          : "Choose a CSV file"}
+                    </strong>
+                    <small>
+                      {lang === "ar"
+                        ? "لن يُحفظ أي سطر قبل اكتمال الفحص."
+                        : "No row is saved before validation is complete."}
+                    </small>
+                  </span>
+                </button>
+                {statementLineImportErrors.length > 0 && (
+                  <div className="statement-import-errors" role="alert">
+                    <CircleAlert size={18} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? `${statementLineImportErrors.length} خطأ يمنع الاستيراد`
+                          : `${statementLineImportErrors.length} error(s) block import`}
+                      </strong>
+                      {statementLineImportErrors.map((error) => (
+                        <small key={error}>{error}</small>
+                      ))}
+                    </span>
+                  </div>
+                )}
+                {statementLineImportRows.length > 0 && (
+                  <div className="statement-import-preview">
+                    <div>
+                      <strong>
+                        {lang === "ar"
+                          ? `معاينة ${statementLineImportRows.length} بند جاهز للحفظ`
+                          : `Previewing ${statementLineImportRows.length} line(s) ready to save`}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "هذه معاينة فقط؛ الحفظ يتم دفعة واحدة بعد التأكيد."
+                          : "This is a preview only; all lines save together after confirmation."}
+                      </small>
+                    </div>
+                    {statementLineImportRows.slice(0, 6).map((row) => (
+                      <article key={`${row.rowNumber}-${row.reference}`}>
+                        <span>{row.rowNumber}</span>
+                        <strong>{row.reference}</strong>
+                        <small>{row.transactionDate}</small>
+                        <b className={row.direction}>
+                          {row.direction === "in" ? "+" : "−"}{money.format(row.amount)}
+                        </b>
+                      </article>
+                    ))}
+                    {statementLineImportRows.length > 6 && (
+                      <small className="statement-import-preview__more">
+                        {lang === "ar"
+                          ? `+ ${statementLineImportRows.length - 6} بند آخر`
+                          : `+ ${statementLineImportRows.length - 6} more line(s)`}
+                      </small>
+                    )}
+                  </div>
+                )}
+                <div className="treasury-dialog__notice">
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>{lang === "ar" ? "لا استيراد جزئي" : "No partial import"}</strong>
+                    <small>{lang === "ar" ? "لو الملف فيه خطأ واحد، صححه ثم أعد اختياره. لا تُحفظ الصفوف السليمة وحدها." : "If the file has one error, correct it and choose it again. Valid rows are not saved alone."}</small>
+                  </span>
+                </div>
+              </div>
+            ) : dialog === "statement-line" && activeStatementReconciliation ? (
               <div className="statement-line-dialog">
                 <div className="statement-line-dialog__context">
                   <FileSpreadsheet size={19} />
@@ -30350,6 +30788,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "تأكيد المطابقة"
                       : "Confirm match"
+                  : dialog === "statement-line-import"
+                    ? lang === "ar"
+                      ? "تأكيد وحفظ كل البنود"
+                      : "Confirm and save all lines"
                   : dialog === "statement-reconciliation"
                     ? lang === "ar"
                       ? "حفظ المطابقة"

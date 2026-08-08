@@ -96,6 +96,10 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /treasuryStatementLines/);
   assert.match(page, /بنود كشف الحساب التفصيلية/);
   assert.match(page, /لا يمكن ربط نفس حركة الدفتر بأكثر من بند كشف واحد/);
+  assert.match(page, /handleStatementLineImportFile/);
+  assert.match(page, /submitStatementLineImport/);
+  assert.match(page, /لا استيراد جزئي/);
+  assert.match(page, /استيراد CSV/);
   assert.match(page, /التأكيد ينشئ إيصالًا وحركة داخل الخزنة/);
   assert.match(page, /إذا كان المبلغ يساوي المتبقي اختر/);
   assert.match(page, /submitVarianceReview/);
@@ -178,6 +182,8 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /statement-difference-decision/);
   assert.match(css, /statement-lines-workspace/);
   assert.match(css, /statement-line-match-dialog/);
+  assert.match(css, /statement-line-import-dialog/);
+  assert.match(css, /statement-import-picker/);
   assert.match(css, /financial-day-space/);
   assert.match(css, /treasury-breakdown/);
   assert.match(css, /treasury-reversal-badge/);
@@ -204,4 +210,5 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /@media \(max-width:\s*1120px\)[\s\S]*?\.sidebar\s*\{[\s\S]*?z-index:\s*75/);
   assert.match(layout, /Tasleem ERP/);
   assert.match(packageJson, /"build":\s*"vinext build"/);
+  assert.doesNotMatch(packageJson, /"xlsx"/);
 });
