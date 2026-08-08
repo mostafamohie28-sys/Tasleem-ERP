@@ -3592,6 +3592,19 @@ const permissionCatalog: PermissionCatalogEntry[] = [
     sensitivity: "sensitive",
   },
   {
+    id: "treasury.reopen_statement_review",
+    module: { ar: "المالية", en: "Finance" },
+    label: {
+      ar: "إعادة فتح مراجعة كشف الحساب",
+      en: "Reopen statement review",
+    },
+    description: {
+      ar: "فتح مراجعة كشف حساب مقفلة بعد كتابة سبب موثق؛ لا يمنح صلاحية تسجيل حركة مالية.",
+      en: "Reopen a closed statement review with a documented reason; it does not grant financial posting.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
     id: "access.users",
     module: { ar: "الوصول والأمان", en: "Access & security" },
     label: { ar: "إدارة المستخدمين", en: "Manage users" },
@@ -24892,6 +24905,33 @@ function TreasuryScreen({
   const statementLineImportInputRef = useRef<HTMLInputElement>(null);
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
+  // The prototype runs as the first active accepted user. The real sign-in
+  // session will provide this identity to the same permission check.
+  const actingUser =
+    users.find(
+      (user) =>
+        user.state === "active" && user.invitationState === "accepted",
+    ) ?? null;
+  const actingEmployee = actingUser
+    ? employees.find((employee) => employee.id === actingUser.employeeId) ?? null
+    : null;
+  const actingPermissionIds = new Set(
+    actingUser
+      ? actingUser.roleIds.flatMap(
+          (roleId) =>
+            roles.find(
+              (role) => role.id === roleId && role.state === "active",
+            )?.permissionIds ?? [],
+        )
+      : [],
+  );
+  const canReopenStatementReview = actingPermissionIds.has(
+    "treasury.reopen_statement_review",
+  );
+  const actingFinancialUser: Localized = actingEmployee?.name ?? {
+    ar: "مستخدم النظام",
+    en: "System user",
+  };
   const money = useMemo(
     () =>
       new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-US", {
@@ -25536,6 +25576,14 @@ function TreasuryScreen({
 
   function openStatementReopenDialog() {
     if (!activeStatementReconciliation?.closure || !isActiveStatementReviewClosed) return;
+    if (!canReopenStatementReview) {
+      showToast(
+        lang === "ar"
+          ? "ليس لديك صلاحية إعادة فتح مراجعة كشف الحساب. اطلب من مالك الشركة منحها لدورك."
+          : "You do not have permission to reopen statement reviews. Ask the company owner to grant it to your role.",
+      );
+      return;
+    }
     setSelectedStatementReconciliation(activeStatementReconciliation);
     setStatementReopenReason("");
     setFormError("");
@@ -27456,6 +27504,14 @@ function TreasuryScreen({
     event.preventDefault();
     const reconciliation = selectedStatementReconciliation;
     if (!reconciliation?.closure) return;
+    if (!canReopenStatementReview) {
+      setFormError(
+        lang === "ar"
+          ? "ليس لديك صلاحية إعادة فتح مراجعة كشف الحساب."
+          : "You do not have permission to reopen statement reviews.",
+      );
+      return;
+    }
     if (!statementReopenReason.trim()) {
       setFormError(
         lang === "ar"
@@ -27476,7 +27532,7 @@ function TreasuryScreen({
               ...candidate,
               closure: {
                 ...candidate.closure,
-                reopenedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                reopenedBy: actingFinancialUser,
                 reopenedAt: timestamp,
                 reopenReason: statementReopenReason.trim(),
                 history: [
@@ -27484,7 +27540,7 @@ function TreasuryScreen({
                   {
                     action: "reopened",
                     note: statementReopenReason.trim(),
-                    performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                    performedBy: actingFinancialUser,
                     performedAt: timestamp,
                   },
                 ],

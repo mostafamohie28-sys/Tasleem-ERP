@@ -103,6 +103,8 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /statement-close/);
   assert.match(page, /submitStatementReopen/);
   assert.match(page, /statement-reopen/);
+  assert.match(page, /treasury\.reopen_statement_review/);
+  assert.match(page, /canReopenStatementReview/);
   assert.match(page, /Reason for reopening the review/);
   assert.match(page, /Statement review is closed/);
   assert.match(page, /remainingLineCount/);
