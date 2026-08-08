@@ -896,7 +896,7 @@ type TreasuryStatementLine = {
   matchedMovementId?: string;
   createdAt: Localized;
   matchHistory: {
-    action: "matched" | "corrected";
+    action: "matched" | "corrected" | "suggestion_confirmed";
     movementId: string;
     performedBy: Localized;
     performedAt: Localized;
@@ -25078,6 +25078,48 @@ function TreasuryScreen({
       .map((line) => line.matchedMovementId)
       .filter((movementId): movementId is string => Boolean(movementId)),
   );
+  const normalizeStatementReference = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9ء-ي]/g, "");
+  const statementMatchSuggestions = unmatchedStatementLines.flatMap((line) => {
+    const lineReference = normalizeStatementReference(line.reference);
+    if (!lineReference) return [];
+    const candidates = movements.filter(
+      (movement) =>
+        movement.accountId === line.accountId &&
+        movement.direction === line.direction &&
+        movement.amount === line.amount &&
+        !matchedStatementMovementIds.has(movement.id),
+    );
+    const referenceMatches = candidates.filter((movement) => {
+      const movementReference = normalizeStatementReference(movement.reference);
+      const movementDescription = normalizeStatementReference(
+        movement.description.ar + movement.description.en,
+      );
+      return (
+        (movementReference.length > 0 &&
+          (movementReference === lineReference ||
+            movementReference.includes(lineReference) ||
+            lineReference.includes(movementReference))) ||
+        movementDescription.includes(lineReference)
+      );
+    });
+    return referenceMatches.length === 1
+      ? [{ line, movement: referenceMatches[0] }]
+      : [];
+  });
+  const suggestedStatementLineIds = new Set(
+    statementMatchSuggestions.map((suggestion) => suggestion.line.id),
+  );
+  const unmatchedStatementLinesWithoutSuggestion = unmatchedStatementLines.filter(
+    (line) => !suggestedStatementLineIds.has(line.id),
+  );
+  const unlinkedLedgerMovements = activeStatementReconciliation
+    ? movements.filter(
+        (movement) =>
+          movement.accountId === activeStatementReconciliation.accountId &&
+          !matchedStatementMovementIds.has(movement.id),
+      )
+    : [];
   const availableStatementLineMovements = selectedStatementLine
     ? movements
         .filter(
@@ -27062,38 +27104,20 @@ function TreasuryScreen({
     );
   }
 
-  function submitStatementLineMatch(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const selectedLine = selectedStatementLine;
-    if (!selectedLine) {
+  function confirmStatementLineMatch(
+    lineId: string,
+    movementId: string,
+    action: TreasuryStatementLine["matchHistory"][number]["action"],
+  ) {
+    const currentLine = statementLines.find((line) => line.id === lineId);
+    const movement = movements.find((candidate) => candidate.id === movementId);
+    if (!currentLine || !movement) {
       setFormError(
         lang === "ar"
-          ? "اختر بند كشف الحساب المطلوب مطابقته."
-          : "Choose the statement line to match.",
+          ? "بند كشف الحساب أو حركة الدفتر لم يعودا متاحين."
+          : "The statement line or ledger movement is no longer available.",
       );
-      return;
-    }
-    const currentLine = statementLines.find(
-      (line) => line.id === selectedLine.id,
-    );
-    if (!currentLine) {
-      setFormError(
-        lang === "ar"
-          ? "بند كشف الحساب لم يعد موجودًا."
-          : "The statement line no longer exists.",
-      );
-      return;
-    }
-    const movement = movements.find(
-      (candidate) => candidate.id === statementLineMovementId,
-    );
-    if (!movement) {
-      setFormError(
-        lang === "ar"
-          ? "اختر حركة دفتر للمطابقة."
-          : "Choose a ledger movement to match.",
-      );
-      return;
+      return false;
     }
     if (
       movement.accountId !== currentLine.accountId ||
@@ -27105,19 +27129,20 @@ function TreasuryScreen({
           ? "لا يمكن مطابقة إلا حركة من نفس الحساب والاتجاه والقيمة."
           : "Only a movement with the same account, direction, and amount can be matched.",
       );
-      return;
+      return false;
     }
-    const alreadyMatchedByAnotherLine = statementLines.some(
-      (line) =>
-        line.id !== currentLine.id && line.matchedMovementId === movement.id,
-    );
-    if (alreadyMatchedByAnotherLine) {
+    if (
+      statementLines.some(
+        (line) =>
+          line.id !== currentLine.id && line.matchedMovementId === movement.id,
+      )
+    ) {
       setFormError(
         lang === "ar"
           ? "هذه الحركة مرتبطة بالفعل ببند كشف آخر."
           : "This movement is already linked to another statement line.",
       );
-      return;
+      return false;
     }
     const now = new Date();
     const timestamp: Localized = {
@@ -27131,7 +27156,7 @@ function TreasuryScreen({
       }),
     };
     const historyEntry: TreasuryStatementLine["matchHistory"][number] = {
-      action: currentLine.matchedMovementId ? "corrected" : "matched",
+      action,
       movementId: movement.id,
       performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
       performedAt: timestamp,
@@ -27148,12 +27173,59 @@ function TreasuryScreen({
           : line,
       ),
     );
-    resetDialog();
-    showToast(
-      lang === "ar"
-        ? `تمت مطابقة بند ${currentLine.reference} بالحركة ${movement.id}`
-        : `Line ${currentLine.reference} matched to movement ${movement.id}`,
-    );
+    return true;
+  }
+
+  function acceptStatementMatchSuggestion(
+    line: TreasuryStatementLine,
+    movement: TreasuryMovement,
+  ) {
+    setFormError("");
+    if (
+      confirmStatementLineMatch(
+        line.id,
+        movement.id,
+        "suggestion_confirmed",
+      )
+    ) {
+      showToast(
+        lang === "ar"
+          ? `تم اعتماد اقتراح مطابقة ${line.reference} بالحركة ${movement.id}`
+          : `Suggested match for ${line.reference} was approved with ${movement.id}`,
+      );
+    }
+  }
+
+  function submitStatementLineMatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedStatementLine || !statementLineMovementId) {
+      setFormError(
+        lang === "ar"
+          ? "اختر بند كشف الحساب وحركة الدفتر المطلوب ربطها."
+          : "Choose the statement line and the ledger movement to link.",
+      );
+      return;
+    }
+    const action = selectedStatementLine.matchedMovementId
+      ? "corrected"
+      : "matched";
+    if (
+      confirmStatementLineMatch(
+        selectedStatementLine.id,
+        statementLineMovementId,
+        action,
+      )
+    ) {
+      const movement = movements.find(
+        (candidate) => candidate.id === statementLineMovementId,
+      );
+      resetDialog();
+      showToast(
+        lang === "ar"
+          ? `تمت مطابقة بند ${selectedStatementLine.reference} بالحركة ${movement?.id ?? ""}`
+          : `Line ${selectedStatementLine.reference} matched to movement ${movement?.id ?? ""}`,
+      );
+    }
   }
 
   return (
@@ -28396,6 +28468,88 @@ function TreasuryScreen({
                           )}
                         </strong>
                       </article>
+                    </div>
+
+                    <div className="statement-match-assistant">
+                      <div className="statement-match-assistant__head">
+                        <span>
+                          <Calculator size={19} />
+                          <span>
+                            <strong>
+                              {lang === "ar"
+                                ? "مساعد مطابقة كشف الحساب"
+                                : "Statement matching assistant"}
+                            </strong>
+                            <small>
+                              {lang === "ar"
+                                ? "يعرض اقتراحًا فقط عند تطابق الحساب والاتجاه والقيمة والمرجع بشكل واضح؛ الاعتماد بيد المحاسب دائمًا."
+                                : "A suggestion appears only when account, direction, amount, and reference clearly match; approval always stays with the accountant."}
+                            </small>
+                          </span>
+                        </span>
+                        <b>
+                          {statementMatchSuggestions.length} {lang === "ar" ? "اقتراح" : "suggestion(s)"}
+                        </b>
+                      </div>
+                      <div className="statement-match-assistant__grid">
+                        <section className="statement-match-assistant__suggestions">
+                          <div>
+                            <strong>{lang === "ar" ? "مطابقات مقترحة" : "Suggested matches"}</strong>
+                            <small>{lang === "ar" ? "تحتاج اعتمادًا صريحًا" : "Need explicit approval"}</small>
+                          </div>
+                          {statementMatchSuggestions.length ? (
+                            statementMatchSuggestions.map(({ line, movement }) => (
+                              <article key={`${line.id}-${movement.id}`}>
+                                <span>
+                                  <strong>{line.reference}</strong>
+                                  <small>{line.direction === "in" ? "+" : "−"}{money.format(line.amount)}</small>
+                                </span>
+                                <ArrowLeftRight size={15} />
+                                <span>
+                                  <strong>{movement.id}</strong>
+                                  <small>{movement.reference}</small>
+                                </span>
+                                <button
+                                  type="button"
+                                  className="primary-button"
+                                  onClick={() => acceptStatementMatchSuggestion(line, movement)}
+                                >
+                                  <Check size={14} />
+                                  {lang === "ar" ? "اعتماد" : "Approve"}
+                                </button>
+                              </article>
+                            ))
+                          ) : (
+                            <p>{lang === "ar" ? "لا توجد اقتراحات قوية تحتاج اعتمادًا الآن." : "No strong suggestions need approval right now."}</p>
+                          )}
+                        </section>
+                        <section className="statement-match-assistant__queue">
+                          <div>
+                            <strong>{lang === "ar" ? "بنود كشف بلا اقتراح" : "Statement lines without a suggestion"}</strong>
+                            <b>{unmatchedStatementLinesWithoutSuggestion.length}</b>
+                          </div>
+                          <p>
+                            {unmatchedStatementLinesWithoutSuggestion.length
+                              ? lang === "ar"
+                                ? "راجعها يدويًا أو اتركها كفرق توقيت لحين ظهور الحركة الصحيحة."
+                                : "Review them manually or leave them as timing differences until the correct movement appears."
+                              : lang === "ar"
+                                ? "كل البنود غير المطابقة لديها اقتراح أو تمت مطابقتها."
+                                : "Every unmatched line has a suggestion or is already matched."}
+                          </p>
+                        </section>
+                        <section className="statement-match-assistant__queue">
+                          <div>
+                            <strong>{lang === "ar" ? "حركات دفتر غير مرتبطة" : "Unlinked ledger movements"}</strong>
+                            <b>{unlinkedLedgerMovements.length}</b>
+                          </div>
+                          <p>
+                            {lang === "ar"
+                              ? "هذه قائمة متابعة، وليست فرقًا تلقائيًا؛ قد تكون بعد تاريخ الكشف أو تخص كشفًا آخر."
+                              : "This is a follow-up list, not an automatic difference; a movement may be after the statement date or belong to another statement."}
+                          </p>
+                        </section>
+                      </div>
                     </div>
 
                     <div className="statement-lines-list">

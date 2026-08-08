@@ -93,6 +93,10 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /TreasuryStatementLine/);
   assert.match(page, /submitStatementLine/);
   assert.match(page, /submitStatementLineMatch/);
+  assert.match(page, /statementMatchSuggestions/);
+  assert.match(page, /acceptStatementMatchSuggestion/);
+  assert.match(page, /suggestion_confirmed/);
+  assert.match(page, /Statement matching assistant/);
   assert.match(page, /treasuryStatementLines/);
   assert.match(page, /بنود كشف الحساب التفصيلية/);
   assert.match(page, /لا يمكن ربط نفس حركة الدفتر بأكثر من بند كشف واحد/);
@@ -184,6 +188,7 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /statement-line-match-dialog/);
   assert.match(css, /statement-line-import-dialog/);
   assert.match(css, /statement-import-picker/);
+  assert.match(css, /statement-match-assistant/);
   assert.match(css, /financial-day-space/);
   assert.match(css, /treasury-breakdown/);
   assert.match(css, /treasury-reversal-badge/);

@@ -20047,6 +20047,163 @@ tbody tr:hover {
   color: var(--orange-600);
 }
 
+.statement-match-assistant {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--blue-600) 24%, var(--border));
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--blue-600) 7%, var(--surface-soft)), var(--surface-soft));
+}
+
+.statement-match-assistant__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.statement-match-assistant__head > span {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--blue-600);
+}
+
+.statement-match-assistant__head > span > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.statement-match-assistant__head strong,
+.statement-match-assistant__suggestions > div strong,
+.statement-match-assistant__queue strong {
+  color: var(--text);
+  font-size: 10.5px;
+}
+
+.statement-match-assistant__head small,
+.statement-match-assistant__suggestions > div small,
+.statement-match-assistant__queue p {
+  color: var(--text-faint);
+  font-size: 8.8px;
+  line-height: 1.6;
+}
+
+.statement-match-assistant__head > b {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--blue-600) 11%, var(--surface-raised));
+  color: var(--blue-600);
+  font-size: 9px;
+}
+
+.statement-match-assistant__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) repeat(2, minmax(145px, 0.8fr));
+  gap: 8px;
+}
+
+.statement-match-assistant__suggestions,
+.statement-match-assistant__queue {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+
+.statement-match-assistant__suggestions {
+  display: grid;
+  gap: 7px;
+}
+
+.statement-match-assistant__suggestions > div,
+.statement-match-assistant__queue > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+
+.statement-match-assistant__suggestions > div > span {
+  display: grid;
+  gap: 2px;
+}
+
+.statement-match-assistant__suggestions > article {
+  display: grid;
+  grid-template-columns: minmax(85px, 1fr) 17px minmax(85px, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+}
+
+.statement-match-assistant__suggestions > article > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.statement-match-assistant__suggestions > article strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 9.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statement-match-assistant__suggestions > article small {
+  overflow: hidden;
+  color: var(--text-faint);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.statement-match-assistant__suggestions > article > svg {
+  color: var(--blue-600);
+}
+
+.statement-match-assistant__suggestions .primary-button {
+  min-height: 30px;
+  padding: 5px 8px;
+  font-size: 8.5px;
+  white-space: nowrap;
+}
+
+.statement-match-assistant__suggestions > p,
+.statement-match-assistant__queue > p {
+  margin: 0;
+}
+
+.statement-match-assistant__suggestions > p {
+  color: var(--text-faint);
+  font-size: 8.8px;
+  line-height: 1.6;
+}
+
+.statement-match-assistant__queue {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.statement-match-assistant__queue > div > b {
+  min-width: 26px;
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--orange-600) 10%, var(--surface-soft));
+  color: var(--orange-600);
+  font-size: 10px;
+  text-align: center;
+}
+
 .statement-lines-list {
   display: grid;
   gap: 7px;
@@ -21681,6 +21838,14 @@ tbody tr:hover {
     grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(120px, 0.6fr));
   }
 
+  .statement-match-assistant__grid {
+    grid-template-columns: minmax(0, 1.25fr) minmax(160px, 0.75fr);
+  }
+
+  .statement-match-assistant__queue:last-child {
+    grid-column: 1 / -1;
+  }
+
   .statement-lines-list > article {
     grid-template-columns: 30px minmax(145px, 1fr) minmax(105px, 0.65fr) minmax(165px, 0.9fr);
   }
@@ -21861,6 +22026,28 @@ tbody tr:hover {
   .statement-lines-selector,
   .statement-lines-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .statement-match-assistant__head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .statement-match-assistant__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .statement-match-assistant__queue:last-child {
+    grid-column: auto;
+  }
+
+  .statement-match-assistant__suggestions > article {
+    grid-template-columns: minmax(0, 1fr) 17px minmax(0, 1fr);
+  }
+
+  .statement-match-assistant__suggestions .primary-button {
+    grid-column: 1 / -1;
+    justify-content: center;
   }
 
   .statement-lines-list > article {
