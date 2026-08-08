@@ -99,6 +99,9 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /matchedMovementIds/);
   assert.match(page, /partially_matched/);
   assert.match(page, /partial_allocated/);
+  assert.match(page, /submitStatementClose/);
+  assert.match(page, /statement-close/);
+  assert.match(page, /remainingLineCount/);
   assert.match(page, /availableStatementMovementAmount/);
   assert.match(page, /selectedStatementLineMovementTotalIsExact/);
   assert.match(page, /Allocation total cannot exceed the statement line amount/);
