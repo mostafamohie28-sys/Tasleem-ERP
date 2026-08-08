@@ -24954,6 +24954,7 @@ function TreasuryScreen({
   const canCloseFinancialDay = actingPermissionIds.has(
     "treasury.close_financial_day",
   );
+  const canApproveTreasuryCorrection = actingPermissionIds.has("treasury.approve");
   const actingFinancialUser: Localized = actingEmployee?.name ?? {
     ar: "مستخدم النظام",
     en: "System user",
@@ -25396,6 +25397,14 @@ function TreasuryScreen({
 
   function openReverseDialog() {
     if (!selectedMovement || selectedMovement.source !== "manual") return;
+    if (!canApproveTreasuryCorrection) {
+      showToast(lang === "ar" ? "ليس لديك صلاحية اعتماد تصحيح مالي." : "You do not have permission to approve a financial correction.");
+      return;
+    }
+    if (selectedMovement.createdBy.ar === actingFinancialUser.ar) {
+      showToast(lang === "ar" ? "لا يمكن لمن سجل الحركة اعتماد عكسها بنفسه. اختر محاسبًا آخر بصلاحية الاعتماد." : "The user who posted a movement cannot approve its own reversal. Use another authorized accountant.");
+      return;
+    }
     setReverseReason("");
     setFormError("");
     setDialog("reverse");
@@ -26110,6 +26119,14 @@ function TreasuryScreen({
       );
       return;
     }
+    if (!canApproveTreasuryCorrection) {
+      setFormError(lang === "ar" ? "ليس لديك صلاحية اعتماد تصحيح مالي." : "You do not have permission to approve a financial correction.");
+      return;
+    }
+    if (selectedMovement.createdBy.ar === actingFinancialUser.ar) {
+      setFormError(lang === "ar" ? "لا يمكن لمن سجل الحركة اعتماد عكسها بنفسه. اختر محاسبًا آخر بصلاحية الاعتماد." : "The user who posted a movement cannot approve its own reversal. Use another authorized accountant.");
+      return;
+    }
     if (selectedMovement.reversedBy) {
       setFormError(
         lang === "ar"
@@ -26178,7 +26195,7 @@ function TreasuryScreen({
       },
       reference,
       source: "manual",
-      createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      createdBy: actingFinancialUser,
       timestamp: {
         ar: new Intl.DateTimeFormat("ar-EG", {
           day: "numeric",
