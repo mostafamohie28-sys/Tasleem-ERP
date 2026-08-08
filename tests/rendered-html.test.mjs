@@ -101,6 +101,10 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /partial_allocated/);
   assert.match(page, /submitStatementClose/);
   assert.match(page, /statement-close/);
+  assert.match(page, /submitStatementReopen/);
+  assert.match(page, /statement-reopen/);
+  assert.match(page, /Reason for reopening the review/);
+  assert.match(page, /Statement review is closed/);
   assert.match(page, /remainingLineCount/);
   assert.match(page, /availableStatementMovementAmount/);
   assert.match(page, /selectedStatementLineMovementTotalIsExact/);

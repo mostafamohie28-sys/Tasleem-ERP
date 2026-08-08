@@ -886,6 +886,15 @@ type TreasuryStatementReconciliation = {
     closedBy: Localized;
     closedAt: Localized;
     remainingLineCount: number;
+    reopenedBy?: Localized;
+    reopenedAt?: Localized;
+    reopenReason?: string;
+    history?: {
+      action: "closed" | "reopened";
+      note: string;
+      performedBy: Localized;
+      performedAt: Localized;
+    }[];
   };
 };
 
@@ -24811,6 +24820,7 @@ function TreasuryScreen({
     | "statement-line-match"
     | "statement-line-import"
     | "statement-close"
+    | "statement-reopen"
     | "close-session"
     | "close-day"
     | null
@@ -24878,6 +24888,7 @@ function TreasuryScreen({
   const [statementLineImportFileName, setStatementLineImportFileName] =
     useState("");
   const [statementClosureNote, setStatementClosureNote] = useState("");
+  const [statementReopenReason, setStatementReopenReason] = useState("");
   const statementLineImportInputRef = useRef<HTMLInputElement>(null);
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
@@ -25120,6 +25131,10 @@ function TreasuryScreen({
   );
   const activeStatementReviewRemainingCount =
     unmatchedStatementLines.length + partiallyMatchedStatementLines.length;
+  const isActiveStatementReviewClosed = Boolean(
+    activeStatementReconciliation?.closure &&
+      !activeStatementReconciliation.closure.reopenedAt,
+  );
   const allocatedStatementMovementAmounts = new Map<string, number>();
   statementLines.forEach((line) => {
     statementLineAllocationsFor(line, movements).forEach((allocation) => {
@@ -25261,6 +25276,7 @@ function TreasuryScreen({
   function resetDialog() {
     setDialog(null);
     setFormError("");
+    setStatementReopenReason("");
     setManualAmount("");
     setManualParty("");
     setManualReference("");
@@ -25415,6 +25431,14 @@ function TreasuryScreen({
     reconciliation: TreasuryStatementReconciliation,
   ) {
     if (reconciliation.state !== "under_review") return;
+    if (reconciliation.closure && !reconciliation.closure.reopenedAt) {
+      showToast(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق أولًا."
+          : "This statement review is closed. Reopen it with a documented reason first.",
+      );
+      return;
+    }
     setSelectedStatementReconciliation(reconciliation);
     setStatementDifferenceDecision(
       reconciliation.difference < 0 ? "bank_fee" : "timing_difference",
@@ -25435,6 +25459,14 @@ function TreasuryScreen({
       );
       return;
     }
+    if (reconciliation.closure && !reconciliation.closure.reopenedAt) {
+      showToast(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق قبل إضافة بند."
+          : "This statement review is closed. Reopen it with a documented reason before adding a line.",
+      );
+      return;
+    }
     setStatementLineReconciliationId(reconciliation.id);
     setStatementLineDate(reconciliation.statementDate);
     setStatementLineReference("");
@@ -25446,6 +25478,17 @@ function TreasuryScreen({
   }
 
   function openStatementLineMatchDialog(line: TreasuryStatementLine) {
+    const reconciliation = statementReconciliations.find(
+      (candidate) => candidate.id === line.reconciliationId,
+    );
+    if (reconciliation?.closure && !reconciliation.closure.reopenedAt) {
+      showToast(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق قبل تصحيح المطابقة."
+          : "This statement review is closed. Reopen it with a documented reason before correcting a match.",
+      );
+      return;
+    }
     setSelectedStatementLine(line);
     setStatementLineAllocations(
       Object.fromEntries(
@@ -25468,6 +25511,14 @@ function TreasuryScreen({
       );
       return;
     }
+    if (isActiveStatementReviewClosed) {
+      showToast(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق قبل الاستيراد."
+          : "This statement review is closed. Reopen it with a documented reason before importing.",
+      );
+      return;
+    }
     setStatementLineImportRows([]);
     setStatementLineImportErrors([]);
     setStatementLineImportFileName("");
@@ -25481,6 +25532,14 @@ function TreasuryScreen({
     setStatementClosureNote(activeStatementReconciliation.closure?.note ?? "");
     setFormError("");
     setDialog("statement-close");
+  }
+
+  function openStatementReopenDialog() {
+    if (!activeStatementReconciliation?.closure || !isActiveStatementReviewClosed) return;
+    setSelectedStatementReconciliation(activeStatementReconciliation);
+    setStatementReopenReason("");
+    setFormError("");
+    setDialog("statement-reopen");
   }
 
   function normalizeStatementImportText(value: unknown) {
@@ -26889,6 +26948,14 @@ function TreasuryScreen({
       );
       return;
     }
+    if (reconciliation.closure && !reconciliation.closure.reopenedAt) {
+      setFormError(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق قبل إضافة بند."
+          : "This statement review is closed. Reopen it with a documented reason before adding a line.",
+      );
+      return;
+    }
     const account = accounts.find(
       (candidate) => candidate.id === reconciliation.accountId,
     );
@@ -27045,6 +27112,14 @@ function TreasuryScreen({
       );
       return;
     }
+    if (reconciliation.closure && !reconciliation.closure.reopenedAt) {
+      setFormError(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق قبل إضافة بند."
+          : "This statement review is closed. Reopen it with a documented reason before adding a line.",
+      );
+      return;
+    }
     const account = accounts.find(
       (candidate) => candidate.id === reconciliation.accountId,
     );
@@ -27139,6 +27214,14 @@ function TreasuryScreen({
       );
       return;
     }
+    if (reconciliation.closure && !reconciliation.closure.reopenedAt) {
+      setFormError(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق قبل الاستيراد."
+          : "This statement review is closed. Reopen it with a documented reason before importing.",
+      );
+      return;
+    }
     if (!statementLineImportFileName) {
       setFormError(
         lang === "ar" ? "اختر ملفًا أولًا." : "Choose a file first.",
@@ -27205,6 +27288,19 @@ function TreasuryScreen({
     action: TreasuryStatementLine["matchHistory"][number]["action"],
   ) {
     const currentLine = statementLines.find((line) => line.id === lineId);
+    const reconciliation = currentLine
+      ? statementReconciliations.find(
+          (candidate) => candidate.id === currentLine.reconciliationId,
+        )
+      : null;
+    if (reconciliation?.closure && !reconciliation.closure.reopenedAt) {
+      setFormError(
+        lang === "ar"
+          ? "مراجعة هذا الكشف مقفلة. أعد فتحها بسبب موثق قبل تعديل المطابقة."
+          : "This statement review is closed. Reopen it with a documented reason before changing a match.",
+      );
+      return false;
+    }
     const allocations = requestedAllocations.filter(
       (allocation) => allocation.amount > 0,
     );
@@ -27319,6 +27415,11 @@ function TreasuryScreen({
       return;
     }
     const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" }),
+      en: now.toLocaleString("en-EG", { dateStyle: "medium", timeStyle: "short" }),
+    };
+    const previousHistory = reconciliation.closure?.history ?? [];
     onStatementReconciliationsChange(
       statementReconciliations.map((candidate) =>
         candidate.id === reconciliation.id
@@ -27327,11 +27428,17 @@ function TreasuryScreen({
               closure: {
                 note: statementClosureNote.trim(),
                 closedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
-                closedAt: {
-                  ar: now.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" }),
-                  en: now.toLocaleString("en-EG", { dateStyle: "medium", timeStyle: "short" }),
-                },
+                closedAt: timestamp,
                 remainingLineCount: activeStatementReviewRemainingCount,
+                history: [
+                  ...previousHistory,
+                  {
+                    action: "closed",
+                    note: statementClosureNote.trim(),
+                    performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                    performedAt: timestamp,
+                  },
+                ],
               },
             }
           : candidate,
@@ -27342,6 +27449,55 @@ function TreasuryScreen({
       lang === "ar"
         ? "تم إغلاق مراجعة الكشف مع حفظ حالته الحالية."
         : "Statement review closed with its current status saved.",
+    );
+  }
+
+  function submitStatementReopen(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const reconciliation = selectedStatementReconciliation;
+    if (!reconciliation?.closure) return;
+    if (!statementReopenReason.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب سبب إعادة فتح المراجعة؛ هذا السجل سيظل ظاهرًا في تاريخ الكشف."
+          : "Write the reason for reopening; it remains visible in the statement history.",
+      );
+      return;
+    }
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" }),
+      en: now.toLocaleString("en-EG", { dateStyle: "medium", timeStyle: "short" }),
+    };
+    onStatementReconciliationsChange(
+      statementReconciliations.map((candidate) =>
+        candidate.id === reconciliation.id && candidate.closure
+          ? {
+              ...candidate,
+              closure: {
+                ...candidate.closure,
+                reopenedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                reopenedAt: timestamp,
+                reopenReason: statementReopenReason.trim(),
+                history: [
+                  ...(candidate.closure.history ?? []),
+                  {
+                    action: "reopened",
+                    note: statementReopenReason.trim(),
+                    performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+                    performedAt: timestamp,
+                  },
+                ],
+              },
+            }
+          : candidate,
+      ),
+    );
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? "أعيد فتح مراجعة الكشف بسبب موثق، ويمكن استكمال المطابقة الآن."
+        : "Statement review reopened with a documented reason; matching can continue now.",
     );
   }
 
@@ -28579,13 +28735,21 @@ function TreasuryScreen({
                       <button
                         className="secondary-button"
                         type="button"
-                        onClick={openStatementCloseDialog}
+                        onClick={
+                          isActiveStatementReviewClosed
+                            ? openStatementReopenDialog
+                            : openStatementCloseDialog
+                        }
                       >
-                        <LockKeyhole size={16} />
-                        {activeStatementReconciliation.closure
+                        {isActiveStatementReviewClosed ? (
+                          <RotateCcw size={16} />
+                        ) : (
+                          <LockKeyhole size={16} />
+                        )}
+                        {isActiveStatementReviewClosed
                           ? lang === "ar"
-                            ? "مراجعة الإغلاق"
-                            : "Review closure"
+                            ? "إعادة فتح المراجعة"
+                            : "Reopen review"
                           : lang === "ar"
                             ? "إغلاق مراجعة الكشف"
                             : "Close statement review"}
@@ -28634,6 +28798,32 @@ function TreasuryScreen({
                         </strong>
                       </span>
                     </div>
+
+                    {activeStatementReconciliation.closure && (
+                      <div className="treasury-dialog__notice">
+                        {isActiveStatementReviewClosed ? <LockKeyhole size={18} /> : <RotateCcw size={18} />}
+                        <span>
+                          <strong>
+                            {isActiveStatementReviewClosed
+                              ? lang === "ar"
+                                ? "مراجعة الكشف مقفلة"
+                                : "Statement review is closed"
+                              : lang === "ar"
+                                ? "أُعيد فتح مراجعة الكشف"
+                                : "Statement review was reopened"}
+                          </strong>
+                          <small>
+                            {isActiveStatementReviewClosed
+                              ? lang === "ar"
+                                ? `${activeStatementReconciliation.closure.closedBy[lang]} أغلقها في ${activeStatementReconciliation.closure.closedAt[lang]} — لا يمكن تعديل البنود قبل إعادة فتح موثقة.`
+                                : `${activeStatementReconciliation.closure.closedBy[lang]} closed it on ${activeStatementReconciliation.closure.closedAt[lang]} — lines cannot be changed before a documented reopening.`
+                              : lang === "ar"
+                                ? `${activeStatementReconciliation.closure.reopenedBy?.[lang] ?? ""} أعاد فتحها: ${activeStatementReconciliation.closure.reopenReason ?? ""}`
+                                : `${activeStatementReconciliation.closure.reopenedBy?.[lang] ?? ""} reopened it: ${activeStatementReconciliation.closure.reopenReason ?? ""}`}
+                          </small>
+                        </span>
+                      </div>
+                    )}
 
                     <div className="statement-lines-metrics">
                       <article>
@@ -29464,6 +29654,8 @@ function TreasuryScreen({
                   ? submitStatementLineMatch
                 : dialog === "statement-close"
                   ? submitStatementClose
+                : dialog === "statement-reopen"
+                  ? submitStatementReopen
                 : dialog === "statement-line-import"
                   ? submitStatementLineImport
                 : dialog === "statement-reconciliation"
@@ -29519,6 +29711,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "إقفال مراجعة دون تغيير الرصيد"
                         : "Close review without changing balance"
+                    : dialog === "statement-reopen"
+                      ? lang === "ar"
+                        ? "فتح موثق للتعديل"
+                        : "Documented reopening for changes"
                     : dialog === "statement-line-import"
                       ? lang === "ar"
                         ? "فحص كامل قبل الحفظ"
@@ -29580,6 +29776,10 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "إغلاق مراجعة كشف الحساب"
                         : "Close statement review"
+                    : dialog === "statement-reopen"
+                      ? lang === "ar"
+                        ? "إعادة فتح مراجعة كشف الحساب"
+                        : "Reopen statement review"
                     : dialog === "statement-line-import"
                       ? lang === "ar"
                         ? "استيراد بنود كشف الحساب"
@@ -29943,6 +30143,35 @@ function TreasuryScreen({
                   <span>{lang === "ar" ? "ملاحظة الإغلاق والمتابعة" : "Closure and follow-up note"}</span>
                   <textarea value={statementClosureNote} onChange={(event) => setStatementClosureNote(event.target.value)} placeholder={lang === "ar" ? "مثال: حركة التحويل ستظهر في كشف البنك القادم..." : "Example: the transfer will appear on the next bank statement..."} />
                 </label>
+              </div>
+            ) : dialog === "statement-reopen" && selectedStatementReconciliation?.closure ? (
+              <div className="statement-line-match-dialog">
+                <div className="statement-line-dialog__context">
+                  <RotateCcw size={19} />
+                  <span>
+                    <small>{lang === "ar" ? "الكشف الذي سيُعاد فتحه" : "Statement review to reopen"}</small>
+                    <strong>{selectedStatementReconciliation.accountName[lang]} · {selectedStatementReconciliation.statementReference}</strong>
+                  </span>
+                </div>
+                <div className="treasury-dialog__notice">
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>{lang === "ar" ? "إعادة الفتح لا تحذف الإغلاق السابق" : "Reopening never deletes the prior closure"}</strong>
+                    <small>{lang === "ar" ? "سيظهر اسم من أعاد الفتح وسببه في تاريخ كشف الحساب، ثم تستطيع إضافة البنود أو تصحيح المطابقات." : "The reopening user and reason remain in statement history, then lines and matches may be changed."}</small>
+                  </span>
+                </div>
+                <label className="treasury-form-field">
+                  <span>{lang === "ar" ? "سبب إعادة فتح المراجعة" : "Reason for reopening the review"}</span>
+                  <textarea autoFocus value={statementReopenReason} onChange={(event) => setStatementReopenReason(event.target.value)} placeholder={lang === "ar" ? "مثال: وصل إشعار البنك المتأخر ويجب مطابقة بند جديد." : "Example: a delayed bank notice arrived and a new line must be matched."} />
+                </label>
+                {selectedStatementReconciliation.closure.history?.length ? (
+                  <div className="statement-line-match-history">
+                    <small>{lang === "ar" ? "تاريخ الإغلاق وإعادة الفتح" : "Closure and reopening history"}</small>
+                    {selectedStatementReconciliation.closure.history.map((entry, index) => (
+                      <strong key={`${entry.action}-${index}`}>{entry.action === "closed" ? (lang === "ar" ? "إغلاق" : "Closed") : (lang === "ar" ? "إعادة فتح" : "Reopened")} · {entry.performedBy[lang]} · {entry.performedAt[lang]}</strong>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : dialog === "statement-difference-review" &&
             selectedStatementReconciliation ? (
@@ -31269,6 +31498,10 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "حفظ إغلاق المراجعة"
                       : "Save review closure"
+                  : dialog === "statement-reopen"
+                    ? lang === "ar"
+                      ? "تأكيد إعادة الفتح"
+                      : "Confirm reopening"
                   : dialog === "statement-line-import"
                     ? lang === "ar"
                       ? "تأكيد وحفظ كل البنود"
