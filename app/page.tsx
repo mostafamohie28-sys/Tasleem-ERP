@@ -24831,6 +24831,7 @@ function TreasuryScreen({
   const [activeTab, setActiveTab] =
     useState<
       "ledger" | "session" | "variance" | "reconciliation" | "day"
+      | "approvals"
     >("ledger");
   const [accountId, setAccountId] =
     useState<TreasuryAccount["id"]>("main-cash");
@@ -27948,6 +27949,17 @@ function TreasuryScreen({
             </button>
             <button
               type="button"
+              className={activeTab === "approvals" ? "active" : ""}
+              onClick={() => setActiveTab("approvals")}
+            >
+              <ShieldCheck size={18} />
+              <span>
+                <strong>{lang === "ar" ? "الموافقات المالية" : "Financial approvals"}</strong>
+                <small>{lang === "ar" ? `${openVarianceIssues.length + openStatementDifferences.length} قرار للمراجعة` : `${openVarianceIssues.length + openStatementDifferences.length} decisions to review`}</small>
+              </span>
+            </button>
+            <button
+              type="button"
               className={activeTab === "day" ? "active" : ""}
               onClick={() => setActiveTab("day")}
             >
@@ -28693,6 +28705,38 @@ function TreasuryScreen({
                   ))}
                 </div>
               )}
+            </section>
+          )}
+
+          {activeTab === "approvals" && (
+            <section className="treasury-reconciliation-space">
+              <div className="treasury-reconciliation-truth">
+                <ShieldCheck size={20} />
+                <span>
+                  <strong>{lang === "ar" ? "قرارات مالية تحتاج اعتمادًا موثقًا" : "Financial decisions awaiting documented approval"}</strong>
+                  <small>{lang === "ar" ? "اعتماد القرار لا يحذف الأصل؛ يسجل من طلبه ومن اعتمده أو رفضه." : "Approval never deletes the original; it records requester and approver or rejection."}</small>
+                </span>
+                <b>{openVarianceIssues.length + openStatementDifferences.length}</b>
+              </div>
+              <div className="treasury-reconciliation-accounts">
+                {openVarianceIssues.map((issue) => (
+                  <article key={issue.id}>
+                    <span className="source-icon"><CircleAlert size={20} /></span>
+                    <span><small>{lang === "ar" ? "فرق عهدة" : "Custody variance"}</small><strong>{issue.responsible[lang]} · {money.format(Math.abs(issue.variance))}</strong><b>{issue.note || (lang === "ar" ? "سبب بانتظار المراجعة" : "Reason awaiting review")}</b></span>
+                    <button className="secondary-button" type="button" onClick={() => { setActiveTab("variance"); openVarianceReviewDialog(issue); }}><ClipboardCheck size={16} />{lang === "ar" ? "مراجعة" : "Review"}</button>
+                  </article>
+                ))}
+                {openStatementDifferences.map((reconciliation) => (
+                  <article key={reconciliation.id}>
+                    <span className="source-icon"><Landmark size={20} /></span>
+                    <span><small>{lang === "ar" ? "فرق كشف حساب" : "Statement difference"}</small><strong>{reconciliation.accountName[lang]} · {money.format(Math.abs(reconciliation.difference))}</strong><b>{reconciliation.statementReference} · {reconciliation.statementDate}</b></span>
+                    <button className="secondary-button" type="button" onClick={() => { setActiveTab("reconciliation"); openStatementDifferenceReviewDialog(reconciliation); }}><ClipboardCheck size={16} />{lang === "ar" ? "مراجعة" : "Review"}</button>
+                  </article>
+                ))}
+                {!openVarianceIssues.length && !openStatementDifferences.length && (
+                  <div className="statement-lines-empty"><ShieldCheck size={24} /><span><strong>{lang === "ar" ? "لا توجد موافقات مالية معلقة" : "No financial approvals are pending"}</strong><small>{lang === "ar" ? "الفروق المفتوحة وقراراتها ستظهر هنا فورًا." : "Open differences and their decisions will appear here."}</small></span></div>
+                )}
+              </div>
             </section>
           )}
 
