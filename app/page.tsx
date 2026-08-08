@@ -41920,24 +41920,55 @@ function AddShipmentScreen({
                             value={draft.phone}
                             onChange={(event) => {
                               const phone = event.target.value;
-                              setDraft((current) => ({
-                                ...current,
-                                phone,
-                                recipientProfileId:
-                                  current.recipientProfileId &&
-                                  recipients
-                                    .find(
-                                      (recipient) =>
-                                        recipient.id === current.recipientProfileId,
+                              const exactMatches =
+                                policySettings.phoneLookupEnabled && phone.length >= 6
+                                  ? recipients.filter((recipient) =>
+                                      recipient.phones.some(
+                                        (savedPhone) =>
+                                          normalizePhone(savedPhone) ===
+                                          normalizePhone(phone),
+                                      ),
                                     )
-                                    ?.phones.some(
-                                      (savedPhone) =>
-                                        normalizePhone(savedPhone) ===
-                                        normalizePhone(phone),
-                                    )
-                                    ? current.recipientProfileId
-                                    : "",
-                              }));
+                                  : [];
+                              const automaticRecipient =
+                                exactMatches.length === 1 ? exactMatches[0] : undefined;
+                              const savedAddress = automaticRecipient
+                                ? automaticRecipient.addresses.find(
+                                    (address) => address.primary,
+                                  ) ?? automaticRecipient.addresses[0]
+                                : undefined;
+                              setDraft((current) =>
+                                automaticRecipient && savedAddress
+                                  ? {
+                                      ...current,
+                                      phone,
+                                      recipientProfileId: automaticRecipient.id,
+                                      recipientName: automaticRecipient.name[lang],
+                                      secondaryPhone:
+                                        automaticRecipient.phones[1] ?? "",
+                                      governorateId: savedAddress.governorateId,
+                                      areaId: savedAddress.areaId,
+                                      address: savedAddress.address[lang],
+                                    }
+                                  : {
+                                      ...current,
+                                      phone,
+                                      recipientProfileId:
+                                        current.recipientProfileId &&
+                                        recipients
+                                          .find(
+                                            (recipient) =>
+                                              recipient.id === current.recipientProfileId,
+                                          )
+                                          ?.phones.some(
+                                            (savedPhone) =>
+                                              normalizePhone(savedPhone) ===
+                                              normalizePhone(phone),
+                                          )
+                                          ? current.recipientProfileId
+                                          : "",
+                                    },
+                              );
                               setError("");
                               setSavedCount(0);
                             }}
