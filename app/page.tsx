@@ -41796,17 +41796,13 @@ function AddShipmentScreen({
             <div className="entry-service-selector__head">
               <span className="entry-step">2</span>
               <span>
-                <strong>{lang === "ar" ? "نوع الشحنة" : "Shipment type"}</strong>
+                <strong>{lang === "ar" ? "نوع الخدمة" : "Service type"}</strong>
                 <small>
                   {lang === "ar"
                     ? "النوع يحدد الحقول والحالات والحركة الحقيقية للشحنة."
                     : "The type controls fields, statuses, and the shipment’s real movement."}
                 </small>
               </span>
-              <button type="button" onClick={() => onNavigate("services")}>
-                <SlidersHorizontal size={15} />
-                {lang === "ar" ? "إدارة الأنواع" : "Manage types"}
-              </button>
             </div>
             <div className="entry-service-options">
               {availableServiceTypes.map((service) => (
