@@ -105,6 +105,10 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /statement-reopen/);
   assert.match(page, /treasury\.reopen_statement_review/);
   assert.match(page, /canReopenStatementReview/);
+  assert.match(page, /treasury\.approve_statement_difference/);
+  assert.match(page, /canApproveStatementDifference/);
+  assert.match(page, /treasury\.close_financial_day/);
+  assert.match(page, /canCloseFinancialDay/);
   assert.match(page, /Reason for reopening the review/);
   assert.match(page, /Statement review is closed/);
   assert.match(page, /remainingLineCount/);

@@ -3605,6 +3605,26 @@ const permissionCatalog: PermissionCatalogEntry[] = [
     sensitivity: "sensitive",
   },
   {
+    id: "treasury.approve_statement_difference",
+    module: { ar: "المالية", en: "Finance" },
+    label: { ar: "اعتماد فرق كشف الحساب", en: "Approve statement difference" },
+    description: {
+      ar: "تسجيل قرار موثق لفرق كشف البنك أو المحفظة، وقد ينتج عنه قيد رسوم أو إيداع حسب القرار.",
+      en: "Record a documented bank or wallet statement-difference decision, which may post a fee or credit depending on the decision.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
+    id: "treasury.close_financial_day",
+    module: { ar: "المالية", en: "Finance" },
+    label: { ar: "إغلاق اليوم المالي", en: "Close financial day" },
+    description: {
+      ar: "اعتماد لقطة إغلاق اليوم بعد إغلاق جلسة النقد ومراجعة الفروق المفتوحة.",
+      en: "Approve the day-close snapshot after the cash session is closed and open differences are reviewed.",
+    },
+    sensitivity: "sensitive",
+  },
+  {
     id: "access.users",
     module: { ar: "الوصول والأمان", en: "Access & security" },
     label: { ar: "إدارة المستخدمين", en: "Manage users" },
@@ -24928,6 +24948,12 @@ function TreasuryScreen({
   const canReopenStatementReview = actingPermissionIds.has(
     "treasury.reopen_statement_review",
   );
+  const canApproveStatementDifference = actingPermissionIds.has(
+    "treasury.approve_statement_difference",
+  );
+  const canCloseFinancialDay = actingPermissionIds.has(
+    "treasury.close_financial_day",
+  );
   const actingFinancialUser: Localized = actingEmployee?.name ?? {
     ar: "مستخدم النظام",
     en: "System user",
@@ -25413,6 +25439,14 @@ function TreasuryScreen({
 
   function openCloseDayDialog() {
     if (latestDayClose || dayCloseBlocked) return;
+    if (!canCloseFinancialDay) {
+      showToast(
+        lang === "ar"
+          ? "ليس لديك صلاحية إغلاق اليوم المالي. اطلب من مالك الشركة منحها لدورك."
+          : "You do not have permission to close the financial day. Ask the company owner to grant it to your role.",
+      );
+      return;
+    }
     setClosingNote("");
     setFormError("");
     setDialog("close-day");
@@ -25471,6 +25505,14 @@ function TreasuryScreen({
     reconciliation: TreasuryStatementReconciliation,
   ) {
     if (reconciliation.state !== "under_review") return;
+    if (!canApproveStatementDifference) {
+      showToast(
+        lang === "ar"
+          ? "ليس لديك صلاحية اعتماد فرق كشف الحساب."
+          : "You do not have permission to approve statement differences.",
+      );
+      return;
+    }
     if (reconciliation.closure && !reconciliation.closure.reopenedAt) {
       showToast(
         lang === "ar"
@@ -26313,7 +26355,7 @@ function TreasuryScreen({
       ...cashSession,
       state: "closed",
       closedAt: timestamp,
-      closedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      closedBy: actingFinancialUser,
       closureType: "handover",
       handedToEmployeeId: employee.id,
       handedTo: employee.name,
@@ -26428,6 +26470,14 @@ function TreasuryScreen({
 
   function submitDayClose(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!canCloseFinancialDay) {
+      setFormError(
+        lang === "ar"
+          ? "ليس لديك صلاحية إغلاق اليوم المالي."
+          : "You do not have permission to close the financial day.",
+      );
+      return;
+    }
     if (cashSession.state === "open") {
       setFormError(
         lang === "ar"
@@ -26486,7 +26536,7 @@ function TreasuryScreen({
           timeStyle: "short",
         }),
       },
-      closedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      closedBy: actingFinancialUser,
       note: closingNote.trim(),
     };
     onDayCloseSnapshotsChange([snapshot, ...dayCloseSnapshots]);
@@ -26618,7 +26668,7 @@ function TreasuryScreen({
       responsibleEmployeeId: issue.responsibleEmployeeId,
       responsible: issue.responsible,
       note: closingNote.trim(),
-      reviewedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      reviewedBy: actingFinancialUser,
       reviewedAt: timestamp,
       treasuryMovementId: movementId,
       employeeDebtId: debtId,
@@ -26988,6 +27038,14 @@ function TreasuryScreen({
   ) {
     event.preventDefault();
     const reconciliation = selectedStatementReconciliation;
+    if (!canApproveStatementDifference) {
+      setFormError(
+        lang === "ar"
+          ? "ليس لديك صلاحية اعتماد فرق كشف الحساب."
+          : "You do not have permission to approve statement differences.",
+      );
+      return;
+    }
     if (!reconciliation || reconciliation.state !== "under_review") {
       setFormError(
         lang === "ar"
@@ -27070,7 +27128,7 @@ function TreasuryScreen({
       id: reviewId,
       decision: statementDifferenceDecision,
       note: closingNote.trim(),
-      reviewedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      reviewedBy: actingFinancialUser,
       reviewedAt: timestamp,
       treasuryMovementId: movementId,
       linkedReference: statementDifferenceReference.trim() || undefined,
