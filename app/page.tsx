@@ -883,6 +883,26 @@ type TreasuryStatementReconciliation = {
   reviewHistory?: StatementDifferenceReview[];
 };
 
+type TreasuryStatementLine = {
+  id: string;
+  reconciliationId: string;
+  accountId: TreasuryAccount["id"];
+  transactionDate: string;
+  reference: string;
+  direction: "in" | "out";
+  amount: number;
+  description: string;
+  state: "unmatched" | "matched";
+  matchedMovementId?: string;
+  createdAt: Localized;
+  matchHistory: {
+    action: "matched" | "corrected";
+    movementId: string;
+    performedBy: Localized;
+    performedAt: Localized;
+  }[];
+};
+
 type TreasuryVarianceIssue = {
   id: string;
   sessionId: string;
@@ -4400,6 +4420,8 @@ const employeeTreasuryDebtPaymentsData: EmployeeTreasuryDebtPayment[] = [];
 
 const treasuryStatementReconciliationsData: TreasuryStatementReconciliation[] =
   [];
+
+const treasuryStatementLinesData: TreasuryStatementLine[] = [];
 
 const financialDayCloseSnapshotsData: FinancialDayCloseSnapshot[] = [];
 
@@ -24666,6 +24688,7 @@ function TreasuryScreen({
   employeeTreasuryDebts,
   employeeTreasuryDebtPayments,
   statementReconciliations,
+  statementLines,
   dayCloseSnapshots,
   onMovementsChange,
   onCashSessionChange,
@@ -24674,6 +24697,7 @@ function TreasuryScreen({
   onEmployeeTreasuryDebtsChange,
   onEmployeeTreasuryDebtPaymentsChange,
   onStatementReconciliationsChange,
+  onStatementLinesChange,
   onDayCloseSnapshotsChange,
   onLang,
   onTheme,
@@ -24693,6 +24717,7 @@ function TreasuryScreen({
   employeeTreasuryDebts: EmployeeTreasuryDebt[];
   employeeTreasuryDebtPayments: EmployeeTreasuryDebtPayment[];
   statementReconciliations: TreasuryStatementReconciliation[];
+  statementLines: TreasuryStatementLine[];
   dayCloseSnapshots: FinancialDayCloseSnapshot[];
   onMovementsChange: (movements: TreasuryMovement[]) => void;
   onCashSessionChange: (session: TreasuryCashSession) => void;
@@ -24705,6 +24730,7 @@ function TreasuryScreen({
   onStatementReconciliationsChange: (
     reconciliations: TreasuryStatementReconciliation[],
   ) => void;
+  onStatementLinesChange: (lines: TreasuryStatementLine[]) => void;
   onDayCloseSnapshotsChange: (snapshots: FinancialDayCloseSnapshot[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -24734,6 +24760,8 @@ function TreasuryScreen({
     | "employee-debt-payment"
     | "statement-reconciliation"
     | "statement-difference-review"
+    | "statement-line"
+    | "statement-line-match"
     | "close-session"
     | "close-day"
     | null
@@ -24777,6 +24805,19 @@ function TreasuryScreen({
     useState<StatementDifferenceReview["decision"]>("timing_difference");
   const [statementDifferenceReference, setStatementDifferenceReference] =
     useState("");
+  const [statementLineReconciliationId, setStatementLineReconciliationId] =
+    useState("");
+  const [statementLineDate, setStatementLineDate] = useState(
+    new Date().toISOString().slice(0, 10),
+  );
+  const [statementLineReference, setStatementLineReference] = useState("");
+  const [statementLineDirection, setStatementLineDirection] =
+    useState<TreasuryStatementLine["direction"]>("in");
+  const [statementLineAmount, setStatementLineAmount] = useState("");
+  const [statementLineDescription, setStatementLineDescription] = useState("");
+  const [selectedStatementLine, setSelectedStatementLine] =
+    useState<TreasuryStatementLine | null>(null);
+  const [statementLineMovementId, setStatementLineMovementId] = useState("");
   const [formError, setFormError] = useState("");
   const [toast, setToast] = useState("");
   const money = useMemo(
@@ -24997,6 +25038,39 @@ function TreasuryScreen({
   const reconciliationDifference = statementBalance
     ? Number(statementBalance) - reconciliationLedgerBalance
     : 0;
+  const activeStatementReconciliation =
+    statementReconciliations.find(
+      (reconciliation) =>
+        reconciliation.id === statementLineReconciliationId,
+    ) ?? statementReconciliations[0] ?? null;
+  const activeStatementLines = activeStatementReconciliation
+    ? statementLines.filter(
+        (line) => line.reconciliationId === activeStatementReconciliation.id,
+      )
+    : [];
+  const matchedStatementLines = activeStatementLines.filter(
+    (line) => line.state === "matched",
+  );
+  const unmatchedStatementLines = activeStatementLines.filter(
+    (line) => line.state === "unmatched",
+  );
+  const matchedStatementMovementIds = new Set(
+    statementLines
+      .map((line) => line.matchedMovementId)
+      .filter((movementId): movementId is string => Boolean(movementId)),
+  );
+  const availableStatementLineMovements = selectedStatementLine
+    ? movements
+        .filter(
+          (movement) =>
+            movement.accountId === selectedStatementLine.accountId &&
+            movement.direction === selectedStatementLine.direction &&
+            movement.amount === selectedStatementLine.amount &&
+            (!matchedStatementMovementIds.has(movement.id) ||
+              movement.id === selectedStatementLine.matchedMovementId),
+        )
+        .sort((a, b) => b.sequence - a.sequence)
+    : [];
   const normalizedSearch = search.trim().toLowerCase();
   const filteredMovements = [...accountMovements]
     .sort((a, b) => b.sequence - a.sequence)
@@ -25068,6 +25142,13 @@ function TreasuryScreen({
     setSelectedStatementReconciliation(null);
     setStatementDifferenceDecision("timing_difference");
     setStatementDifferenceReference("");
+    setStatementLineDate(new Date().toISOString().slice(0, 10));
+    setStatementLineReference("");
+    setStatementLineDirection("in");
+    setStatementLineAmount("");
+    setStatementLineDescription("");
+    setSelectedStatementLine(null);
+    setStatementLineMovementId("");
   }
 
   function openMovementDialog() {
@@ -25197,6 +25278,34 @@ function TreasuryScreen({
     setClosingNote("");
     setFormError("");
     setDialog("statement-difference-review");
+  }
+
+  function openStatementLineDialog() {
+    const reconciliation = activeStatementReconciliation;
+    if (!reconciliation) {
+      showToast(
+        lang === "ar"
+          ? "سجل كشف حساب أولًا قبل إضافة بنوده التفصيلية."
+          : "Record a statement reconciliation before adding its detailed lines.",
+      );
+      return;
+    }
+    setStatementLineReconciliationId(reconciliation.id);
+    setStatementLineDate(reconciliation.statementDate);
+    setStatementLineReference("");
+    setStatementLineDirection("in");
+    setStatementLineAmount("");
+    setStatementLineDescription("");
+    setFormError("");
+    setDialog("statement-line");
+  }
+
+  function openStatementLineMatchDialog(line: TreasuryStatementLine) {
+    if (line.state === "matched" && !line.matchedMovementId) return;
+    setSelectedStatementLine(line);
+    setStatementLineMovementId(line.matchedMovementId ?? "");
+    setFormError("");
+    setDialog("statement-line-match");
   }
 
   function submitManualMovement(event: FormEvent<HTMLFormElement>) {
@@ -26546,6 +26655,196 @@ function TreasuryScreen({
     );
   }
 
+  function submitStatementLine(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const reconciliation = statementReconciliations.find(
+      (candidate) => candidate.id === statementLineReconciliationId,
+    );
+    if (!reconciliation) {
+      setFormError(
+        lang === "ar"
+          ? "اختر كشف حساب صالحًا لإضافة البند."
+          : "Choose a valid statement before adding a line.",
+      );
+      return;
+    }
+    const account = accounts.find(
+      (candidate) => candidate.id === reconciliation.accountId,
+    );
+    if (!account || account.kind === "cash") {
+      setFormError(
+        lang === "ar"
+          ? "هذا الكشف غير مرتبط بحساب بنك أو محفظة صالح."
+          : "This statement is not linked to a valid bank or wallet account.",
+      );
+      return;
+    }
+    const amount = Number(statementLineAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب مبلغًا صحيحًا أكبر من صفر."
+          : "Enter a valid amount greater than zero.",
+      );
+      return;
+    }
+    if (!statementLineReference.trim()) {
+      setFormError(
+        lang === "ar"
+          ? "مرجع بند كشف الحساب إلزامي."
+          : "The statement line reference is required.",
+      );
+      return;
+    }
+    if (!statementLineDate || statementLineDate > new Date().toISOString().slice(0, 10)) {
+      setFormError(
+        lang === "ar"
+          ? "اكتب تاريخ حركة صحيحًا وليس في المستقبل."
+          : "Enter a valid transaction date that is not in the future.",
+      );
+      return;
+    }
+    if (
+      statementLines.some(
+        (line) =>
+          line.reconciliationId === reconciliation.id &&
+          line.reference.toLowerCase() === statementLineReference.trim().toLowerCase(),
+      )
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "تم استخدام مرجع هذا البند داخل نفس الكشف."
+          : "This line reference is already used within the same statement.",
+      );
+      return;
+    }
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const line: TreasuryStatementLine = {
+      id: `TSL-${now.getTime().toString().slice(-9)}`,
+      reconciliationId: reconciliation.id,
+      accountId: account.id,
+      transactionDate: statementLineDate,
+      reference: statementLineReference.trim(),
+      direction: statementLineDirection,
+      amount,
+      description: statementLineDescription.trim(),
+      state: "unmatched",
+      createdAt: timestamp,
+      matchHistory: [],
+    };
+    onStatementLinesChange([line, ...statementLines]);
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? "أُضيف بند الكشف. طابقه بحركة دفتر عند توفرها."
+        : "Statement line added. Match it to a ledger movement when available.",
+    );
+  }
+
+  function submitStatementLineMatch(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selectedLine = selectedStatementLine;
+    if (!selectedLine) {
+      setFormError(
+        lang === "ar"
+          ? "اختر بند كشف الحساب المطلوب مطابقته."
+          : "Choose the statement line to match.",
+      );
+      return;
+    }
+    const currentLine = statementLines.find(
+      (line) => line.id === selectedLine.id,
+    );
+    if (!currentLine) {
+      setFormError(
+        lang === "ar"
+          ? "بند كشف الحساب لم يعد موجودًا."
+          : "The statement line no longer exists.",
+      );
+      return;
+    }
+    const movement = movements.find(
+      (candidate) => candidate.id === statementLineMovementId,
+    );
+    if (!movement) {
+      setFormError(
+        lang === "ar"
+          ? "اختر حركة دفتر للمطابقة."
+          : "Choose a ledger movement to match.",
+      );
+      return;
+    }
+    if (
+      movement.accountId !== currentLine.accountId ||
+      movement.direction !== currentLine.direction ||
+      movement.amount !== currentLine.amount
+    ) {
+      setFormError(
+        lang === "ar"
+          ? "لا يمكن مطابقة إلا حركة من نفس الحساب والاتجاه والقيمة."
+          : "Only a movement with the same account, direction, and amount can be matched.",
+      );
+      return;
+    }
+    const alreadyMatchedByAnotherLine = statementLines.some(
+      (line) =>
+        line.id !== currentLine.id && line.matchedMovementId === movement.id,
+    );
+    if (alreadyMatchedByAnotherLine) {
+      setFormError(
+        lang === "ar"
+          ? "هذه الحركة مرتبطة بالفعل ببند كشف آخر."
+          : "This movement is already linked to another statement line.",
+      );
+      return;
+    }
+    const now = new Date();
+    const timestamp: Localized = {
+      ar: now.toLocaleString("ar-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+      en: now.toLocaleString("en-EG", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }),
+    };
+    const historyEntry: TreasuryStatementLine["matchHistory"][number] = {
+      action: currentLine.matchedMovementId ? "corrected" : "matched",
+      movementId: movement.id,
+      performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      performedAt: timestamp,
+    };
+    onStatementLinesChange(
+      statementLines.map((line) =>
+        line.id === currentLine.id
+          ? {
+              ...line,
+              state: "matched",
+              matchedMovementId: movement.id,
+              matchHistory: [...line.matchHistory, historyEntry],
+            }
+          : line,
+      ),
+    );
+    resetDialog();
+    showToast(
+      lang === "ar"
+        ? `تمت مطابقة بند ${currentLine.reference} بالحركة ${movement.id}`
+        : `Line ${currentLine.reference} matched to movement ${movement.id}`,
+    );
+  }
+
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
       <Sidebar
@@ -27682,6 +27981,208 @@ function TreasuryScreen({
                 })}
               </div>
 
+              <div className="statement-lines-workspace">
+                <div className="statement-lines-head">
+                  <span>
+                    <FileSpreadsheet size={20} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? "بنود كشف الحساب التفصيلية"
+                          : "Detailed statement lines"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "كل بند يُطابق مرة واحدة فقط مع حركة من نفس الحساب والاتجاه والقيمة."
+                          : "Each line can be matched once only to a movement with the same account, direction, and amount."}
+                      </small>
+                    </span>
+                  </span>
+                  {activeStatementReconciliation && (
+                    <button
+                      className="primary-button"
+                      type="button"
+                      onClick={openStatementLineDialog}
+                    >
+                      <Plus size={16} />
+                      {lang === "ar" ? "إضافة بند كشف" : "Add statement line"}
+                    </button>
+                  )}
+                </div>
+
+                {activeStatementReconciliation ? (
+                  <>
+                    <div className="statement-lines-selector">
+                      <label className="treasury-form-field">
+                        <span>
+                          {lang === "ar" ? "كشف الحساب الجاري" : "Current statement"}
+                        </span>
+                        <select
+                          value={activeStatementReconciliation.id}
+                          onChange={(event) =>
+                            setStatementLineReconciliationId(event.target.value)
+                          }
+                        >
+                          {statementReconciliations.map((reconciliation) => (
+                            <option value={reconciliation.id} key={reconciliation.id}>
+                              {reconciliation.accountName[lang]} · {reconciliation.statementReference} · {reconciliation.statementDate}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <span>
+                        <small>{lang === "ar" ? "رصيد الكشف" : "Statement balance"}</small>
+                        <strong>
+                          {money.format(activeStatementReconciliation.statementBalance)}
+                        </strong>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "فرق الإجمالي" : "Total difference"}</small>
+                        <strong
+                          className={
+                            activeStatementReconciliation.difference === 0
+                              ? "matched"
+                              : "difference"
+                          }
+                        >
+                          {activeStatementReconciliation.difference > 0 ? "+" : ""}
+                          {money.format(activeStatementReconciliation.difference)}
+                        </strong>
+                      </span>
+                    </div>
+
+                    <div className="statement-lines-metrics">
+                      <article>
+                        <small>{lang === "ar" ? "كل البنود" : "All lines"}</small>
+                        <strong>{activeStatementLines.length}</strong>
+                      </article>
+                      <article className="matched">
+                        <small>{lang === "ar" ? "تمت مطابقتها" : "Matched"}</small>
+                        <strong>{matchedStatementLines.length}</strong>
+                      </article>
+                      <article className="unmatched">
+                        <small>{lang === "ar" ? "تنتظر المطابقة" : "Awaiting match"}</small>
+                        <strong>{unmatchedStatementLines.length}</strong>
+                      </article>
+                      <article>
+                        <small>{lang === "ar" ? "قيمة غير مطابقة" : "Unmatched value"}</small>
+                        <strong>
+                          {money.format(
+                            unmatchedStatementLines.reduce(
+                              (sum, line) => sum + line.amount,
+                              0,
+                            ),
+                          )}
+                        </strong>
+                      </article>
+                    </div>
+
+                    <div className="statement-lines-list">
+                      {activeStatementLines.length ? (
+                        activeStatementLines.map((line) => {
+                          const matchedMovement = line.matchedMovementId
+                            ? movements.find(
+                                (movement) => movement.id === line.matchedMovementId,
+                              )
+                            : null;
+                          return (
+                            <article key={line.id}>
+                              <span
+                                className={`statement-line-direction ${line.direction}`}
+                              >
+                                {line.direction === "in" ? "+" : "−"}
+                              </span>
+                              <span>
+                                <strong>{line.reference}</strong>
+                                <small>
+                                  {line.transactionDate}
+                                  {line.description ? ` · ${line.description}` : ""}
+                                </small>
+                              </span>
+                              <b className={line.direction}>
+                                {line.direction === "in" ? "+" : "−"}
+                                {money.format(line.amount)}
+                              </b>
+                              <span className={`statement-line-match ${line.state}`}>
+                                {line.state === "matched" ? (
+                                  <Check size={15} />
+                                ) : (
+                                  <CircleAlert size={15} />
+                                )}
+                                <span>
+                                  <strong>
+                                    {line.state === "matched"
+                                      ? lang === "ar"
+                                        ? "مطابق"
+                                        : "Matched"
+                                      : lang === "ar"
+                                        ? "غير مطابق"
+                                        : "Unmatched"}
+                                  </strong>
+                                  <small>
+                                    {matchedMovement
+                                      ? `${matchedMovement.id} · ${matchedMovement.reference}`
+                                      : lang === "ar"
+                                        ? "لم تُربط بحركة دفتر بعد"
+                                        : "Not linked to a ledger movement yet"}
+                                  </small>
+                                </span>
+                              </span>
+                              <button
+                                className="secondary-button"
+                                type="button"
+                                onClick={() => openStatementLineMatchDialog(line)}
+                              >
+                                <Link2 size={15} />
+                                {line.state === "matched"
+                                  ? lang === "ar"
+                                    ? "تصحيح المطابقة"
+                                    : "Correct match"
+                                  : lang === "ar"
+                                    ? "مطابقة حركة"
+                                    : "Match movement"}
+                              </button>
+                            </article>
+                          );
+                        })
+                      ) : (
+                        <div className="statement-lines-empty">
+                          <FileSpreadsheet size={24} />
+                          <span>
+                            <strong>
+                              {lang === "ar"
+                                ? "لم تُضف بنود لهذا الكشف بعد"
+                                : "No detailed lines have been added for this statement"}
+                            </strong>
+                            <small>
+                              {lang === "ar"
+                                ? "ابدأ بإضافة أول بند كما هو ظاهر في كشف البنك أو المحفظة، ثم طابقه بالحركة الموجودة في الدفتر."
+                                : "Add the first line exactly as it appears in the bank or wallet statement, then match it to the ledger movement."}
+                            </small>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <div className="statement-lines-empty">
+                    <FileSpreadsheet size={24} />
+                    <span>
+                      <strong>
+                        {lang === "ar"
+                          ? "سجل كشف حساب أولًا"
+                          : "Record a statement first"}
+                      </strong>
+                      <small>
+                        {lang === "ar"
+                          ? "لا يمكن إضافة بنود أو مطابقتها بدون كشف بنك أو محفظة مسجل."
+                          : "Detailed lines cannot be added or matched without a recorded bank or wallet statement."}
+                      </small>
+                    </span>
+                  </div>
+                )}
+              </div>
+
               <div className="treasury-reconciliation-history">
                 <div className="treasury-variance-head">
                   <span>
@@ -28278,6 +28779,10 @@ function TreasuryScreen({
                   ? submitEmployeeDebtPayment
                 : dialog === "statement-difference-review"
                   ? submitStatementDifferenceReview
+                : dialog === "statement-line"
+                  ? submitStatementLine
+                : dialog === "statement-line-match"
+                  ? submitStatementLineMatch
                 : dialog === "statement-reconciliation"
                   ? submitStatementReconciliation
                 : dialog === "movement"
@@ -28319,6 +28824,14 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "قرار فرق موثق"
                         : "Documented difference decision"
+                    : dialog === "statement-line"
+                      ? lang === "ar"
+                        ? "نسخة من كشف الحساب"
+                        : "Statement source entry"
+                    : dialog === "statement-line-match"
+                      ? lang === "ar"
+                        ? "ربط واحد لواحد"
+                        : "One-to-one link"
                     : dialog === "statement-reconciliation"
                       ? lang === "ar"
                         ? "مقارنة دون تعديل الرصيد"
@@ -28364,6 +28877,14 @@ function TreasuryScreen({
                       ? lang === "ar"
                         ? "مراجعة فرق كشف الحساب"
                         : "Review statement difference"
+                    : dialog === "statement-line"
+                      ? lang === "ar"
+                        ? "إضافة بند من كشف الحساب"
+                        : "Add statement line"
+                    : dialog === "statement-line-match"
+                      ? lang === "ar"
+                        ? "مطابقة بند كشف بحركة دفتر"
+                        : "Match statement line to ledger movement"
                     : dialog === "statement-reconciliation"
                       ? lang === "ar"
                         ? "مطابقة كشف بنك أو محفظة"
@@ -28391,7 +28912,132 @@ function TreasuryScreen({
               </button>
             </div>
 
-            {dialog === "statement-difference-review" &&
+            {dialog === "statement-line" && activeStatementReconciliation ? (
+              <div className="statement-line-dialog">
+                <div className="statement-line-dialog__context">
+                  <FileSpreadsheet size={19} />
+                  <span>
+                    <small>{lang === "ar" ? "الكشف المختار" : "Selected statement"}</small>
+                    <strong>
+                      {activeStatementReconciliation.accountName[lang]} · {activeStatementReconciliation.statementReference}
+                    </strong>
+                  </span>
+                </div>
+                <div className="treasury-form-grid">
+                  <label className="treasury-form-field">
+                    <span>{lang === "ar" ? "تاريخ الحركة" : "Transaction date"}</span>
+                    <input
+                      type="date"
+                      value={statementLineDate}
+                      max={new Date().toISOString().slice(0, 10)}
+                      onChange={(event) => setStatementLineDate(event.target.value)}
+                    />
+                  </label>
+                  <label className="treasury-form-field">
+                    <span>{lang === "ar" ? "مرجع البند" : "Line reference"}</span>
+                    <input
+                      value={statementLineReference}
+                      onChange={(event) => setStatementLineReference(event.target.value)}
+                      placeholder={lang === "ar" ? "كما ظهر في كشف الحساب" : "Exactly as shown on the statement"}
+                    />
+                  </label>
+                  <label className="treasury-form-field">
+                    <span>{lang === "ar" ? "اتجاه الحركة" : "Direction"}</span>
+                    <select
+                      value={statementLineDirection}
+                      onChange={(event) =>
+                        setStatementLineDirection(
+                          event.target.value as TreasuryStatementLine["direction"],
+                        )
+                      }
+                    >
+                      <option value="in">{lang === "ar" ? "مبلغ داخل" : "Money in"}</option>
+                      <option value="out">{lang === "ar" ? "مبلغ خارج" : "Money out"}</option>
+                    </select>
+                  </label>
+                  <label className="treasury-form-field">
+                    <span>{lang === "ar" ? "القيمة" : "Amount"}</span>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={statementLineAmount}
+                      onChange={(event) => setStatementLineAmount(event.target.value)}
+                      placeholder="0"
+                    />
+                  </label>
+                </div>
+                <label className="treasury-form-field">
+                  <span>{lang === "ar" ? "وصف كشف الحساب — اختياري" : "Statement description — optional"}</span>
+                  <textarea
+                    value={statementLineDescription}
+                    onChange={(event) => setStatementLineDescription(event.target.value)}
+                    placeholder={lang === "ar" ? "اسم التحويل أو وصف البنك..." : "Transfer name or bank description..."}
+                  />
+                </label>
+                <div className="treasury-dialog__notice">
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>{lang === "ar" ? "إضافة البند لا تنشئ حركة مالية" : "Adding a line does not create a financial movement"}</strong>
+                    <small>{lang === "ar" ? "هذه نسخة مطابقة لما ظهر في الكشف، ثم تختار حركة الدفتر المطابقة لها في خطوة مستقلة." : "This is a copy of what appears on the statement; a matching ledger movement is selected in a separate step."}</small>
+                  </span>
+                </div>
+              </div>
+            ) : dialog === "statement-line-match" && selectedStatementLine ? (
+              <div className="statement-line-match-dialog">
+                <div className="statement-line-dialog__context">
+                  <Link2 size={19} />
+                  <span>
+                    <small>{lang === "ar" ? "بند كشف الحساب" : "Statement line"}</small>
+                    <strong>
+                      {selectedStatementLine.reference} · {selectedStatementLine.direction === "in" ? "+" : "−"}{money.format(selectedStatementLine.amount)}
+                    </strong>
+                  </span>
+                </div>
+                <div className="treasury-dialog__notice">
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>{lang === "ar" ? "الحركات المعروضة مطابقة في الحساب والاتجاه والقيمة" : "Displayed movements match account, direction, and amount"}</strong>
+                    <small>{lang === "ar" ? "لا يمكن ربط نفس حركة الدفتر بأكثر من بند كشف واحد." : "The same ledger movement cannot be linked to more than one statement line."}</small>
+                  </span>
+                </div>
+                {availableStatementLineMovements.length ? (
+                  <label className="treasury-form-field">
+                    <span>{lang === "ar" ? "اختر حركة الدفتر" : "Choose ledger movement"}</span>
+                    <select
+                      value={statementLineMovementId}
+                      onChange={(event) => setStatementLineMovementId(event.target.value)}
+                    >
+                      <option value="">{lang === "ar" ? "اختر حركة..." : "Choose a movement..."}</option>
+                      {availableStatementLineMovements.map((movement) => (
+                        <option value={movement.id} key={movement.id}>
+                          {movement.id} · {movement.reference} · {movement.description[lang]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <div className="statement-lines-empty compact">
+                    <CircleAlert size={22} />
+                    <span>
+                      <strong>{lang === "ar" ? "لا توجد حركة مطابقة حتى الآن" : "No matching movement is available yet"}</strong>
+                      <small>{lang === "ar" ? "ثبت الحركة المالية أولًا أو اترك بند الكشف غير مطابق إلى أن تظهر الحركة الصحيحة." : "Post the financial movement first, or leave this statement line unmatched until the correct movement exists."}</small>
+                    </span>
+                  </div>
+                )}
+                {selectedStatementLine.matchHistory.length > 0 && (
+                  <div className="statement-line-match-history">
+                    <small>{lang === "ar" ? "آخر مطابقة" : "Latest match"}</small>
+                    {(() => {
+                      const latest = selectedStatementLine.matchHistory.at(-1);
+                      return latest ? (
+                        <strong>{latest.movementId} · {latest.performedAt[lang]}</strong>
+                      ) : null;
+                    })()}
+                  </div>
+                )}
+              </div>
+            ) : dialog === "statement-difference-review" &&
             selectedStatementReconciliation ? (
               <div className="statement-difference-review-dialog">
                 <div className="statement-difference-summary">
@@ -29696,6 +30342,14 @@ function TreasuryScreen({
                     ? lang === "ar"
                       ? "اعتماد قرار فرق الكشف"
                       : "Approve statement difference decision"
+                  : dialog === "statement-line"
+                    ? lang === "ar"
+                      ? "حفظ بند الكشف"
+                      : "Save statement line"
+                  : dialog === "statement-line-match"
+                    ? lang === "ar"
+                      ? "تأكيد المطابقة"
+                      : "Confirm match"
                   : dialog === "statement-reconciliation"
                     ? lang === "ar"
                       ? "حفظ المطابقة"
@@ -43411,6 +44065,8 @@ export default function Home() {
   ] = useState<TreasuryStatementReconciliation[]>(
     treasuryStatementReconciliationsData,
   );
+  const [sharedTreasuryStatementLines, setSharedTreasuryStatementLines] =
+    useState<TreasuryStatementLine[]>(treasuryStatementLinesData);
   const [sharedFinancialDayCloses, setSharedFinancialDayCloses] = useState<
     FinancialDayCloseSnapshot[]
   >(financialDayCloseSnapshotsData);
@@ -43469,6 +44125,7 @@ export default function Home() {
           employeeTreasuryDebts?: EmployeeTreasuryDebt[];
           employeeTreasuryDebtPayments?: EmployeeTreasuryDebtPayment[];
           treasuryStatementReconciliations?: TreasuryStatementReconciliation[];
+          treasuryStatementLines?: TreasuryStatementLine[];
           financialDayCloses?: FinancialDayCloseSnapshot[];
           trusts?: TrustRecord[];
           trustPolicy?: TrustPolicy;
@@ -43720,6 +44377,14 @@ export default function Home() {
         if (Array.isArray(parsed.treasuryStatementReconciliations)) {
           setSharedTreasuryStatementReconciliations(
             parsed.treasuryStatementReconciliations,
+          );
+        }
+        if (Array.isArray(parsed.treasuryStatementLines)) {
+          setSharedTreasuryStatementLines(
+            parsed.treasuryStatementLines.map((line) => ({
+              ...line,
+              matchHistory: line.matchHistory ?? [],
+            })),
           );
         }
         if (Array.isArray(parsed.financialDayCloses)) {
@@ -44068,6 +44733,7 @@ export default function Home() {
           sharedEmployeeTreasuryDebtPayments,
         treasuryStatementReconciliations:
           sharedTreasuryStatementReconciliations,
+        treasuryStatementLines: sharedTreasuryStatementLines,
         financialDayCloses: sharedFinancialDayCloses,
         trusts: sharedTrusts,
         trustPolicy: sharedTrustPolicy,
@@ -44093,6 +44759,7 @@ export default function Home() {
     sharedEmployeeTreasuryDebts,
     sharedEmployeeTreasuryDebtPayments,
     sharedTreasuryStatementReconciliations,
+    sharedTreasuryStatementLines,
     sharedFinancialDayCloses,
     sharedTrustPolicy,
     sharedTrusts,
@@ -44494,6 +45161,7 @@ export default function Home() {
           statementReconciliations={
             sharedTreasuryStatementReconciliations
           }
+          statementLines={sharedTreasuryStatementLines}
           dayCloseSnapshots={sharedFinancialDayCloses}
           onMovementsChange={setSharedTreasuryMovements}
           onCashSessionChange={setSharedTreasuryCashSession}
@@ -44506,6 +45174,7 @@ export default function Home() {
           onStatementReconciliationsChange={
             setSharedTreasuryStatementReconciliations
           }
+          onStatementLinesChange={setSharedTreasuryStatementLines}
           onDayCloseSnapshotsChange={setSharedFinancialDayCloses}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>

@@ -90,6 +90,12 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(page, /linked_existing_movement/);
   assert.match(page, /statement_difference_review/);
   assert.match(page, /رسوم بنك أو محفظة/);
+  assert.match(page, /TreasuryStatementLine/);
+  assert.match(page, /submitStatementLine/);
+  assert.match(page, /submitStatementLineMatch/);
+  assert.match(page, /treasuryStatementLines/);
+  assert.match(page, /بنود كشف الحساب التفصيلية/);
+  assert.match(page, /لا يمكن ربط نفس حركة الدفتر بأكثر من بند كشف واحد/);
   assert.match(page, /التأكيد ينشئ إيصالًا وحركة داخل الخزنة/);
   assert.match(page, /إذا كان المبلغ يساوي المتبقي اختر/);
   assert.match(page, /submitVarianceReview/);
@@ -170,6 +176,8 @@ test("keeps the accounting decision and mobile-navigation contracts in source", 
   assert.match(css, /treasury-reconciliation-list/);
   assert.match(css, /statement-difference-review-dialog/);
   assert.match(css, /statement-difference-decision/);
+  assert.match(css, /statement-lines-workspace/);
+  assert.match(css, /statement-line-match-dialog/);
   assert.match(css, /financial-day-space/);
   assert.match(css, /treasury-breakdown/);
   assert.match(css, /treasury-reversal-badge/);
