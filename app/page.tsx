@@ -41107,6 +41107,10 @@ function AddShipmentScreen({
   const [prepared, setPrepared] = useState<PreparedShipment[]>([]);
   const [error, setError] = useState("");
   const [savedCount, setSavedCount] = useState(0);
+  const [savedSummary, setSavedSummary] = useState<{
+    readyForWarehouse: number;
+    needsCompletion: number;
+  } | null>(null);
   const [excelFile, setExcelFile] = useState("");
   const [excelChecked, setExcelChecked] = useState(false);
 
@@ -41239,6 +41243,7 @@ function AddShipmentScreen({
     setDraft((current) => ({ ...current, [key]: value }));
     setError("");
     setSavedCount(0);
+    setSavedSummary(null);
   }
 
   function chooseSender(nextKey: string) {
@@ -41287,6 +41292,7 @@ function AddShipmentScreen({
     }));
     setError("");
     setSavedCount(0);
+    setSavedSummary(null);
   }
 
   function useSavedRecipient(recipient: RecipientRecord) {
@@ -41464,6 +41470,8 @@ function AddShipmentScreen({
           ),
     );
     setError("");
+    setSavedCount(0);
+    setSavedSummary(null);
   }
 
   function addAnother() {
@@ -41614,9 +41622,16 @@ function AddShipmentScreen({
     });
 
     onSaveShipments(records);
+    const needsCompletion = records.filter(
+      (record) => record.requiredType === "incomplete",
+    ).length;
     setPrepared([]);
     resetCurrent();
     setSavedCount(records.length);
+    setSavedSummary({
+      readyForWarehouse: records.length - needsCompletion,
+      needsCompletion,
+    });
   }
 
   const requiredMark = (code: string) =>
@@ -41965,6 +41980,7 @@ function AddShipmentScreen({
                               );
                               setError("");
                               setSavedCount(0);
+                              setSavedSummary(null);
                             }}
                             placeholder="0100 000 0000"
                           />
@@ -42452,6 +42468,11 @@ function AddShipmentScreen({
                               ? "اختياري"
                               : "Optional"}
                         </small>
+                        <small>
+                          {lang === "ar"
+                            ? "تأكيد الطلب سجل اتصال مستقل، وليس حالة تشغيلية للشحنة."
+                            : "Order confirmation is a separate contact record, not a shipment status."}
+                        </small>
                       </span>
                     </div>
                     <div className="entry-confirmation-options">
@@ -42572,10 +42593,23 @@ function AddShipmentScreen({
                       </strong>
                       <small>
                         {lang === "ar"
-                          ? "ظهرت الشحنات الآن في القائمة العامة."
-                          : "The shipments now appear in the general list."}
+                          ? savedSummary?.needsCompletion
+                            ? `${savedSummary.readyForWarehouse} جاهزة للمخزن و${savedSummary.needsCompletion} تحتاج استكمالًا قبل الإسناد.`
+                            : "كل الشحنات جاهزة للمخزن، ولا توجد شحنة مسندة لمندوب."
+                          : savedSummary?.needsCompletion
+                            ? `${savedSummary.readyForWarehouse} are ready for warehouse and ${savedSummary.needsCompletion} need completion before assignment.`
+                            : "All shipments are ready for warehouse; none is assigned to a courier."}
                       </small>
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPrepared([]);
+                        resetCurrent();
+                      }}
+                    >
+                      {lang === "ar" ? "مجموعة جديدة" : "New batch"}
+                    </button>
                     <button type="button" onClick={() => onNavigate("shipments")}>
                       {lang === "ar" ? "عرض الشحنات" : "View shipments"}
                     </button>
