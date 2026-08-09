@@ -41011,6 +41011,7 @@ function AddShipmentScreen({
   settings,
   senderPolicies,
   senders,
+  shipmentRecords,
   recipients,
   governorates,
   statuses,
@@ -41030,6 +41031,7 @@ function AddShipmentScreen({
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
   senders: SenderRecord[];
+  shipmentRecords: Shipment[];
   recipients: RecipientRecord[];
   governorates: GovernorateRecord[];
   statuses: StatusPolicy[];
@@ -41360,6 +41362,37 @@ function AddShipmentScreen({
         lang === "ar"
           ? `استكمل أولًا: ${missingFields.map((field) => field.name.ar).join("، ")}`
           : `Complete first: ${missingFields.map((field) => field.name.en).join(", ")}`,
+      );
+      return null;
+    }
+    const pieceCount = Number(draft.pieces);
+    if (!Number.isInteger(pieceCount) || pieceCount < 1) {
+      setError(
+        lang === "ar"
+          ? "عدد القطع يجب أن يكون رقمًا صحيحًا يبدأ من 1."
+          : "Piece count must be a whole number starting from 1.",
+      );
+      return null;
+    }
+    const normalizedReference = draft.senderReference.trim().toLowerCase();
+    const referenceMustBeUnique =
+      policySettings.senderReferenceMode !== "optional";
+    const duplicateReference = normalizedReference
+      ? shipmentRecords.some(
+          (shipment) =>
+            shipment.sender.en === selectedSender.en &&
+            shipment.reference.trim().toLowerCase() === normalizedReference,
+        ) ||
+        prepared.some(
+          (shipment) =>
+            shipment.senderReference.trim().toLowerCase() === normalizedReference,
+        )
+      : false;
+    if (referenceMustBeUnique && duplicateReference) {
+      setError(
+        lang === "ar"
+          ? "مرجع الراسل مسجل بالفعل لهذا الراسل. راجعه قبل الحفظ."
+          : "This sender reference is already recorded for this sender. Review it before saving.",
       );
       return null;
     }
@@ -41859,39 +41892,6 @@ function AddShipmentScreen({
                   </span>
                 </div>
 
-                {fieldVisible("SENDER_REFERENCE") && (
-                  <div className="entry-reference-strip">
-                    <span>
-                      <ClipboardCheck size={18} />
-                      <span>
-                        <strong>
-                          {fieldLabel("SENDER_REFERENCE", {
-                            ar: "مرجع الراسل",
-                            en: "Sender reference",
-                          })}
-                          {requiredMark("SENDER_REFERENCE")}
-                        </strong>
-                        <small>
-                          {lang === "ar"
-                            ? "رقم الطلب عند الراسل؛ اتركه دون قيمة إذا لم يرسله وكانت السياسة تسمح."
-                            : "The sender’s own order number; leave it empty if not supplied and policy allows it."}
-                        </small>
-                      </span>
-                    </span>
-                    <input
-                      value={draft.senderReference}
-                      onChange={(event) =>
-                        updateDraft("senderReference", event.target.value)
-                      }
-                      placeholder={
-                        lang === "ar"
-                          ? "مثال: ORD-1024"
-                          : "Example: ORD-1024"
-                      }
-                    />
-                  </div>
-                )}
-
                 <div className="entry-section entry-section--recipient">
                   <div className="entry-section-title">
                     <UserRound size={18} />
@@ -42072,6 +42072,39 @@ function AddShipmentScreen({
                   )}
                 </div>
 
+                {fieldVisible("SENDER_REFERENCE") && (
+                  <div className="entry-reference-strip">
+                    <span>
+                      <ClipboardCheck size={18} />
+                      <span>
+                        <strong>
+                          {fieldLabel("SENDER_REFERENCE", {
+                            ar: "مرجع الراسل",
+                            en: "Sender reference",
+                          })}
+                          {requiredMark("SENDER_REFERENCE")}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "رقم الطلب عند الراسل؛ اتركه دون قيمة إذا لم يرسله وكانت السياسة تسمح."
+                            : "The sender’s own order number; leave it empty if not supplied and policy allows it."}
+                        </small>
+                      </span>
+                    </span>
+                    <input
+                      value={draft.senderReference}
+                      onChange={(event) =>
+                        updateDraft("senderReference", event.target.value)
+                      }
+                      placeholder={
+                        lang === "ar"
+                          ? "مثال: ORD-1024"
+                          : "Example: ORD-1024"
+                      }
+                    />
+                  </div>
+                )}
+
                 <div className="entry-section">
                   <div className="entry-section-title">
                     <MapPin size={18} />
@@ -42164,7 +42197,7 @@ function AddShipmentScreen({
                 <div className="entry-section">
                   <div className="entry-section-title">
                     <Boxes size={18} />
-                    <strong>{lang === "ar" ? "الطرد" : "Parcel"}</strong>
+                    <strong>{lang === "ar" ? "بيانات الطرد" : "Parcel details"}</strong>
                   </div>
                   <div className="entry-fields-grid entry-fields-grid--three">
                     {fieldVisible("PIECE_COUNT") && (
@@ -42179,6 +42212,7 @@ function AddShipmentScreen({
                         <input
                           type="number"
                           min="1"
+                          step="1"
                           value={draft.pieces}
                           onChange={(event) => updateDraft("pieces", event.target.value)}
                         />
@@ -42279,6 +42313,11 @@ function AddShipmentScreen({
                           />
                           <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
                         </span>
+                        <small>
+                          {lang === "ar"
+                            ? "قيمة المنتج المطلوب تحصيلها، ولا تشمل مصاريف الشحن."
+                            : "Product value to collect; shipping fees are not included."}
+                        </small>
                       </label>
                     )}
                     <div className="entry-shipping-fee">
@@ -46784,6 +46823,7 @@ export default function Home() {
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           senders={sharedSenders}
+          shipmentRecords={sharedShipments}
           recipients={sharedRecipients}
           governorates={sharedGovernorates}
           statuses={sharedStatuses}
