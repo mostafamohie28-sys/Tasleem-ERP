@@ -37,6 +37,18 @@ yarn-error.log*
 # typescript
 next-env.d.ts
 /dist/
+/dist-stale/
+/.vinext-stale/
 /.wrangler/
 /outputs/
 /work/
+*.tsbuildinfo
+.codex-dev.log
+dev.stdout.log
+dev.stderr.log
+dev.out.log
+dev.err.log
+/.dev-server.err.log
+/.dev-server.out.log
+/dev-server-error.log
+/dev-server.log

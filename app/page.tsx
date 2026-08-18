@@ -2,8 +2,10 @@
 
 import {
   type CSSProperties,
+  createContext,
   FormEvent,
   useEffect,
+  useContext,
   useMemo,
   useRef,
   useState,
@@ -13,6 +15,7 @@ import {
   Banknote,
   Barcode,
   Bell,
+  Building2,
   Boxes,
   Calculator,
   CalendarDays,
@@ -26,12 +29,17 @@ import {
   Clock3,
   Columns3,
   Copy,
+  Database,
+  Download,
   FileSpreadsheet,
+  FileUp,
   Eye,
   Filter,
   GitBranch,
   Globe2,
   HandCoins,
+  HardDrive,
+  History,
   Info,
   Landmark,
   LayoutDashboard,
@@ -44,11 +52,13 @@ import {
   MoreHorizontal,
   PackageCheck,
   PackagePlus,
+  Palette,
   Pencil,
   Plus,
   Phone,
   Printer,
   ReceiptText,
+  RefreshCw,
   RotateCcw,
   Search,
   Save,
@@ -116,12 +126,142 @@ type Scenario =
   | "delayed"
   | "unavailable"
   | "conflict";
-type TabId = "all" | "action" | "warehouse" | "courier" | "incomplete";
+type TabId =
+  | "all"
+  | "ready"
+  | "action"
+  | "warehouse"
+  | "courier"
+  | "incomplete";
 
 type Localized = {
   ar: string;
   en: string;
 };
+
+type CompanySettingsHistoryEntry = {
+  id: string;
+  at: string;
+  by: Localized;
+  summary: Localized;
+  release: number;
+};
+
+type CompanyControlSettings = {
+  identity: {
+    companyNameAr: string;
+    companyNameEn: string;
+    shortNameAr: string;
+    shortNameEn: string;
+    branchNameAr: string;
+    branchNameEn: string;
+    phone: string;
+    email: string;
+    address: string;
+    commercialRegister: string;
+    taxNumber: string;
+    logoDataUrl: string;
+    iconDataUrl: string;
+    timezone: "Africa/Cairo";
+    currency: "EGP";
+  };
+  appearance: {
+    primaryColor: string;
+    accentColor: string;
+    successColor: string;
+    arabicFont: "tajawal" | "system";
+    englishFont: "inter" | "system";
+    fontScale: "standard" | "large";
+    density: "comfortable" | "compact";
+    defaultLanguage: Lang;
+    defaultTheme: Theme | "system";
+    allowUserTheme: boolean;
+  };
+  backup: {
+    enabled: boolean;
+    schedule: "daily" | "weekly" | "manual";
+    runAt: string;
+    retention: number;
+    dataRoot: string;
+    destination: string;
+    requireExternalCopy: boolean;
+    lastRunAt: string;
+    lastRunState: "never" | "verified" | "warning";
+    lastRestoreTestAt: string;
+    lastSafetyPointAt: string;
+    runtimeConnected: boolean;
+  };
+  updates: {
+    channel: "stable";
+    maintenanceDay: string;
+    maintenanceTime: string;
+    requireSafetyPoint: boolean;
+    requireRestoreTest: boolean;
+    lastCheckedAt: string;
+  };
+  release: number;
+  updatedAt: string;
+  history: CompanySettingsHistoryEntry[];
+};
+
+const defaultCompanyControlSettings: CompanyControlSettings = {
+  identity: {
+    companyNameAr: "شركة تسليم للشحن الداخلي",
+    companyNameEn: "Tasleem Domestic Shipping",
+    shortNameAr: "تسليم",
+    shortNameEn: "TASLEEM",
+    branchNameAr: "الفرع الرئيسي",
+    branchNameEn: "Main branch",
+    phone: "0100 000 0000",
+    email: "operations@tasleem.local",
+    address: "مدينة نصر، القاهرة",
+    commercialRegister: "",
+    taxNumber: "",
+    logoDataUrl: "",
+    iconDataUrl: "",
+    timezone: "Africa/Cairo",
+    currency: "EGP",
+  },
+  appearance: {
+    primaryColor: "#2551b9",
+    accentColor: "#ff6b00",
+    successColor: "#07835a",
+    arabicFont: "tajawal",
+    englishFont: "inter",
+    fontScale: "large",
+    density: "comfortable",
+    defaultLanguage: "ar",
+    defaultTheme: "light",
+    allowUserTheme: true,
+  },
+  backup: {
+    enabled: true,
+    schedule: "daily",
+    runAt: "23:30",
+    retention: 14,
+    dataRoot: "D:\\Tasleem\\Data",
+    destination: "E:\\Tasleem-Backups",
+    requireExternalCopy: true,
+    lastRunAt: "",
+    lastRunState: "never",
+    lastRestoreTestAt: "",
+    lastSafetyPointAt: "",
+    runtimeConnected: false,
+  },
+  updates: {
+    channel: "stable",
+    maintenanceDay: "friday",
+    maintenanceTime: "02:00",
+    requireSafetyPoint: true,
+    requireRestoreTest: true,
+    lastCheckedAt: "",
+  },
+  release: 1,
+  updatedAt: "",
+  history: [],
+};
+
+const CompanyBrandContext = createContext(defaultCompanyControlSettings);
 
 type WarehouseMovement = {
   id: string;
@@ -137,6 +277,29 @@ type WarehouseMovement = {
   performedBy: Localized;
   note: string;
   timestamp: Localized;
+  handoverReceipt?: ReturnHandoverReceipt;
+};
+
+type WarehouseStocktake = {
+  id: string;
+  locationId: string;
+  performedBy: Localized;
+  timestamp: Localized;
+  expectedShipmentIds: string[];
+  foundShipmentIds: string[];
+  missingShipmentIds: string[];
+  unexpectedShipmentIds: string[];
+};
+
+type ReturnHandoverReceipt = {
+  id: string;
+  shipmentId: string;
+  sender: Localized;
+  receiverName: string;
+  pieces: number;
+  performedBy: Localized;
+  timestamp: Localized;
+  note: string;
 };
 
 type TrustEvent = {
@@ -351,6 +514,19 @@ type CourierCommissionSnapshot = {
 type Shipment = {
   id: string;
   serviceTypeId?: string;
+  /** Immutable operational meaning captured when the shipment is registered. */
+  serviceTypeSnapshot?: ShipmentServiceType;
+  /** Full price row frozen at intake so later list edits never rewrite this shipment. */
+  shippingPricingSnapshot?: {
+    priceListId: string;
+    priceListName: Localized;
+    priceListCode: string;
+    priceListVersion: number;
+    serviceTypeId: string;
+    areaId: string;
+    statusPrices: Record<string, number | null>;
+    capturedAt: Localized;
+  };
   recipientProfileId?: string;
   reference: string;
   recipient: Localized;
@@ -369,8 +545,14 @@ type Shipment = {
     | "recipient"
     | "sender";
   courier: Localized | null;
+  /** Courier who handed a return back to the company workflow, after custody ended. */
+  returnFromCourier?: Localized | null;
   assignedAt?: Localized;
   amount: number;
+  /** Positive business amount; its direction is stored separately and never encoded with a negative value. */
+  recipientCashFlow?: "collect" | "refund" | "none";
+  /** Amount the courier is instructed to hand back to the recipient for a return-pickup service. */
+  recipientRefundAmount?: number;
   deliveryDate: Localized;
   required: Localized;
   requiredType: "none" | "attention" | "incomplete";
@@ -407,6 +589,14 @@ type Shipment = {
     senderReturnSettled?: boolean;
     senderOtherFees?: number;
     senderOtherFeesLabel?: Localized;
+    pricingSnapshot?: {
+      priceListId: string;
+      priceListName: Localized;
+      priceListCode: string;
+      priceListVersion: number;
+      areaId: string;
+      statusPrice: number;
+    };
     courierCommissionSnapshot?: CourierCommissionSnapshot;
     financialApproval?: {
       state: "pending" | "approved" | "rejected";
@@ -528,16 +718,50 @@ function statusEventFinanciallyApproved(
 }
 
 function shipmentTotalToCollect(shipment: Shipment) {
+  const flow =
+    shipment.recipientCashFlow ??
+    (shipment.serviceTypeId === "service-return-pickup" ? "refund" : "collect");
+  const refund =
+    flow === "refund"
+      ? shipment.recipientRefundAmount ?? shipment.amount
+      : 0;
   return (
-    shipment.amount +
-    shipmentRecipientShippingCharge(shipment) +
-    (shipment.customFinancialSnapshot?.recipientAdditions ?? 0)
+    Math.max(
+      0,
+      (flow === "collect" ? shipment.amount : 0) +
+        shipmentRecipientShippingCharge(shipment) +
+        (shipment.customFinancialSnapshot?.recipientAdditions ?? 0) -
+        refund,
+    )
+  );
+}
+
+function shipmentAmountPaidToRecipient(shipment: Shipment) {
+  const flow =
+    shipment.recipientCashFlow ??
+    (shipment.serviceTypeId === "service-return-pickup" ? "refund" : "collect");
+  if (flow !== "refund") return 0;
+  const refund = shipment.recipientRefundAmount ?? shipment.amount;
+  return Math.max(
+    0,
+    refund -
+      shipmentAccountingRecipientShippingCharge(shipment) -
+      (shipment.customFinancialSnapshot?.recipientAdditions ?? 0),
   );
 }
 
 function shipmentSenderBaseDue(shipment: Shipment) {
+  const flow =
+    shipment.recipientCashFlow ??
+    (shipment.serviceTypeId === "service-return-pickup" ? "refund" : "collect");
+  const orderEffect =
+    flow === "refund"
+      ? -(shipment.recipientRefundAmount ?? shipment.amount)
+      : flow === "collect"
+        ? shipment.amount
+        : 0;
   return (
-    shipment.amount +
+    orderEffect +
     shipmentAccountingRecipientShippingCharge(shipment) -
     shipmentCompanyShippingFee(shipment) -
     (shipment.customFinancialSnapshot?.senderDeductions ?? 0)
@@ -565,8 +789,13 @@ type CourierDebt = {
 type CourierSettlement = {
   id: string;
   courier: Localized;
+  /** The real treasury source that received this settlement. */
+  treasuryAccountId?: TreasuryAccount["id"];
+  receivedBy?: Localized;
   shipmentEventIds: string[];
   collectedAmount: number;
+  recipientDisbursement?: number;
+  cashDirection?: "in" | "out";
   commissionEarned: number;
   commissionPaidNow: number;
   commissionDeferred?: number;
@@ -604,6 +833,7 @@ type CourierFixedEntitlement = {
     code: string;
     version: number;
     compensationType: CourierCompensationType;
+    settlementCycle: CourierSettlementCycle;
   };
   period: Localized;
   amount: number;
@@ -618,6 +848,9 @@ type CourierPayout = {
   amount: number;
   mode: "full" | "partial";
   reason: string;
+  receivedBy: string;
+  payoutMethod: "cash" | "bank" | "wallet";
+  proofReference?: string;
   dueBefore: number;
   dueAfter: number;
   allocations: {
@@ -670,6 +903,7 @@ type SenderSettlementReceipt = {
   returnedShipmentCount: number;
   returnedPieces: number;
   paymentSource: string;
+  paymentProofReference?: string;
   receiverName: string;
   moneyExecuted: boolean;
   returnsExecuted: boolean;
@@ -699,6 +933,7 @@ type TreasuryAccount = {
   kind: "cash" | "bank" | "wallet";
   openingBalance: number;
   state: "active" | "stopped";
+  lowBalanceAlertAt?: number;
 };
 
 type TreasuryMovement = {
@@ -707,7 +942,8 @@ type TreasuryMovement = {
   direction: "in" | "out";
   category:
     | "courier_collection"
-    | "courier_payment"
+      | "courier_payment"
+    | "courier_advance"
     | "sender_payment"
     | "company_deposit"
     | "operating_expense"
@@ -736,18 +972,21 @@ type TreasuryMovement = {
     type:
       | "courier_settlement"
       | "courier_payout"
+      | "courier_advance"
       | "sender_receipt"
       | "manual_voucher"
       | "treasury_transfer"
       | "cash_variance_review"
       | "employee_debt_payment"
       | "statement_difference_review"
+      | "treasury_correction"
       | "reversal";
     id: string;
   };
   breakdown?: {
     kind:
       | "shipment_collection"
+      | "recipient_disbursement"
       | "courier_debt_payment"
       | "cash_difference";
     amount: number;
@@ -798,6 +1037,9 @@ type FinancialDayCloseSnapshot = {
   sessionIds?: string[];
   varianceSessionCount?: number;
   unresolvedStatementCount?: number;
+  unpostedCourierSettlementCount?: number;
+  unpostedSenderReceiptCount?: number;
+  unmatchedStatementLineCount?: number;
   closedAt: Localized;
   closedBy: Localized;
   note: string;
@@ -1907,7 +2149,7 @@ type StatusPolicy = {
   name: Localized;
   code: string;
   color: string;
-  state: "published" | "draft";
+  state: "published" | "draft" | "paused" | "archived";
   executors: Localized;
   visibility: Localized[];
   assignmentEffect: Localized;
@@ -1915,18 +2157,31 @@ type StatusPolicy = {
   financialEffect: Localized;
   appearsInAssignment: boolean;
   appearsInPricing: boolean;
+  /** The one pricing status used as the company shipping fee at shipment intake. */
+  useForInitialShippingPrice?: boolean;
   appearsInCourierRates: boolean;
   requiredFields: Localized[];
   customInputFields?: {
     id: string;
     label: Localized;
-    type: "text" | "number" | "date" | "select" | "barcode";
+    type: "text" | "number" | "date" | "select" | "barcode" | "evidence";
     required: boolean;
     options: Localized[];
   }[];
   serviceTypeIds?: string[];
+  /** Empty means this status may be selected from any previous status. */
+  allowedPreviousStatusIds?: string[];
   operationalCategory?: "success" | "follow_up" | "failure" | "return" | "neutral";
   shippingPayerDecision?: "hidden" | "registered" | "confirm" | "allow_override";
+  /** Where the parcel is physically considered after a courier records this status. */
+  courierExitDestination?:
+    | "recipient"
+    | "warehouse"
+    | "company_receipt_pending"
+    | "follow_up"
+    | "return_due";
+  /** How a status is allowed to collect money. This controls the courier form. */
+  collectionPolicy?: "none" | "fixed_expected" | "up_to_expected" | "manual_with_reason";
   operationalActions?: (
     | "end_assignment"
     | "keep_assignment"
@@ -1938,6 +2193,17 @@ type StatusPolicy = {
   requiresApproval?: boolean;
   senderVisible?: boolean;
   recipientVisible?: boolean;
+  /** Manual statuses are selected by permitted people; system statuses are emitted by a real workflow event. */
+  recordingMode?: "manual" | "system";
+  systemTrigger?:
+    | "shipment_created"
+    | "warehouse_received"
+    | "assignment_created"
+    | "confirmation_required"
+    | "";
+  executorRoleIds?: string[];
+  courierCanRecord?: boolean;
+  internalViewerRoleIds?: string[];
   usage: number;
   version: number;
 };
@@ -1953,6 +2219,8 @@ type ShipmentServiceType = {
   allowsPartial: boolean;
   requiresConfirmation: boolean;
   hasCollection: boolean;
+  /** Real cash direction at the recipient; the entered amount always stays positive. */
+  recipientCashFlow: "collect" | "refund" | "none";
   hasShippingFee: boolean;
   hasPriceDifference: boolean;
   createsReturnParcel: boolean;
@@ -1979,6 +2247,7 @@ const shipmentServiceTypesData: ShipmentServiceType[] = [
     allowsPartial: true,
     requiresConfirmation: false,
     hasCollection: true,
+    recipientCashFlow: "collect",
     hasShippingFee: true,
     hasPriceDifference: true,
     createsReturnParcel: false,
@@ -2010,6 +2279,7 @@ const shipmentServiceTypesData: ShipmentServiceType[] = [
     allowsPartial: false,
     requiresConfirmation: true,
     hasCollection: true,
+    recipientCashFlow: "collect",
     hasShippingFee: true,
     hasPriceDifference: true,
     createsReturnParcel: true,
@@ -2043,6 +2313,7 @@ const shipmentServiceTypesData: ShipmentServiceType[] = [
     allowsPartial: true,
     requiresConfirmation: false,
     hasCollection: false,
+    recipientCashFlow: "refund",
     hasShippingFee: true,
     hasPriceDifference: false,
     createsReturnParcel: true,
@@ -2071,6 +2342,7 @@ const shipmentServiceTypesData: ShipmentServiceType[] = [
     allowsPartial: false,
     requiresConfirmation: true,
     hasCollection: true,
+    recipientCashFlow: "collect",
     hasShippingFee: true,
     hasPriceDifference: false,
     createsReturnParcel: false,
@@ -2087,6 +2359,13 @@ function normalizeShipmentServiceType(
 ): ShipmentServiceType {
   return {
     ...service,
+    recipientCashFlow:
+      service.recipientCashFlow ??
+      (service.movement === "inbound" && !service.hasCollection
+        ? "refund"
+        : service.hasCollection
+          ? "collect"
+          : "none"),
     requiredFieldCodes: service.requiredFieldCodes ?? [],
     allowedStatusIds: service.allowedStatusIds ?? [],
     senderIds: service.senderIds ?? [],
@@ -2102,9 +2381,44 @@ function normalizeStatusPolicy(status: StatusPolicy): StatusPolicy {
   const isPartial = status.code === "PARTIAL";
   const isDeferred = status.code === "DEFERRED";
   const isCancelled = status.code === "CANCELLED";
+  const systemTriggerByCode: Record<string, NonNullable<StatusPolicy["systemTrigger"]>> = {
+    WAREHOUSE_RECEIVED: "warehouse_received",
+    READY_FOR_ASSIGNMENT: "warehouse_received",
+    AWAITING_CONFIRMATION: "confirmation_required",
+    OUT_FOR_DELIVERY: "assignment_created",
+  };
+  const legacyExecutorRoleIds = status.executors.en.includes("Customer service")
+    ? ["role-customer-service", "role-operations-manager", "role-owner"]
+    : status.executors.en.includes("Operations")
+      ? ["role-operations-manager", "role-owner"]
+      : ["role-owner"];
+  const recordingMode = status.recordingMode ?? (systemTriggerByCode[status.code] ? "system" : "manual");
+  const courierExitDestination =
+    status.courierExitDestination ??
+    (isDelivered
+      ? "recipient"
+      : isCancelled || isPartial
+        ? "return_due"
+        : isDeferred
+          ? "follow_up"
+          : "warehouse");
+  const derivedAssignmentEffect: Localized =
+    courierExitDestination === "follow_up"
+      ? { ar: "إنهاء التكليف وإرسالها للمتابعة", en: "End assignment and send to follow-up" }
+      : courierExitDestination === "return_due" || courierExitDestination === "company_receipt_pending"
+        ? { ar: "إنهاء التكليف وإدخال مسار المرتجع", en: "End assignment and start return route" }
+        : { ar: "إنهاء التكليف", en: "End assignment" };
   return {
     ...status,
+    // Kept for stored-data compatibility, but always derived from the single
+    // physical destination so two controls can never contradict each other.
+    assignmentEffect: derivedAssignmentEffect,
     serviceTypeIds: status.serviceTypeIds ?? [],
+    allowedPreviousStatusIds: status.allowedPreviousStatusIds ?? [],
+    // Existing companies keep their current delivery-price behavior on upgrade;
+    // afterwards the owner can choose this freely from the status editor.
+    useForInitialShippingPrice:
+      status.useForInitialShippingPrice ?? isDelivered,
     customInputFields: (status.customInputFields ?? []).map((field) => ({
       ...field,
       options: field.options ?? [],
@@ -2125,6 +2439,12 @@ function normalizeStatusPolicy(status: StatusPolicy): StatusPolicy {
       (financial === "Money only" || financial === "Money and return"
         ? "allow_override"
         : "hidden"),
+    collectionPolicy:
+      status.collectionPolicy ??
+      (financial === "Money only" || financial === "Money and return"
+        ? "fixed_expected"
+        : "none"),
+    courierExitDestination,
     operationalActions:
       status.operationalActions ??
       (isDelivered
@@ -2141,12 +2461,72 @@ function normalizeStatusPolicy(status: StatusPolicy): StatusPolicy {
       status.senderVisible ??
       status.visibility.some((item) => item.en === "Sender"),
     recipientVisible: status.recipientVisible ?? false,
+    recordingMode,
+    systemTrigger: status.systemTrigger ?? systemTriggerByCode[status.code] ?? "",
+    executorRoleIds: status.executorRoleIds ?? legacyExecutorRoleIds,
+    courierCanRecord:
+      status.courierCanRecord ??
+      (status.executors.en.includes("Courier") ||
+        status.executors.ar.includes("المندوب")),
+    internalViewerRoleIds: status.internalViewerRoleIds ?? legacyExecutorRoleIds,
   };
+}
+
+function statusExecutorSummary(status: StatusPolicy, roles: AccessRole[], lang: Lang) {
+  const normalized = normalizeStatusPolicy(status);
+  if (normalized.recordingMode === "system") {
+    return lang === "ar" ? "النظام تلقائيًا" : "System automatically";
+  }
+  const labels = roles
+    .filter((role) => (normalized.executorRoleIds ?? []).includes(role.id))
+    .map((role) => role.name[lang]);
+  if (normalized.courierCanRecord) labels.push(lang === "ar" ? "المندوب" : "Courier");
+  return labels.join("، ") || (lang === "ar" ? "لم يُحدد مسجل" : "No recorder selected");
+}
+
+function statusTriggerLabel(status: StatusPolicy, lang: Lang) {
+  const trigger = normalizeStatusPolicy(status).systemTrigger;
+  const labels: Record<NonNullable<StatusPolicy["systemTrigger"]>, Localized> = {
+    "": { ar: "لم يُحدد الحدث", en: "No event selected" },
+    shipment_created: { ar: "عند تسجيل الشحنة", en: "When shipment is created" },
+    warehouse_received: { ar: "عند استلام المخزن", en: "When warehouse receives it" },
+    assignment_created: { ar: "عند إسنادها وتسليمها للمندوب", en: "When assigned and handed to courier" },
+    confirmation_required: { ar: "عند احتياج التأكيد", en: "When confirmation is required" },
+  };
+  return labels[trigger ?? ""][lang];
+}
+
+function statusPolicyIssues(
+  status: StatusPolicy,
+  policies: StatusPolicy[],
+): Localized[] {
+  const normalized = normalizeStatusPolicy(status);
+  const issues: Localized[] = [];
+  const duplicateCode = policies.some(
+    (candidate) =>
+      candidate.id !== status.id &&
+      candidate.code.trim().toUpperCase() === status.code.trim().toUpperCase(),
+  );
+  if (!status.name.ar.trim() || !status.name.en.trim()) issues.push({ ar: "اسم الحالة بالعربية والإنجليزية مطلوب.", en: "Arabic and English status names are required." });
+  if (!/^[A-Z][A-Z0-9_]{2,39}$/.test(status.code.trim())) issues.push({ ar: "الكود يبدأ بحرف ويستخدم حروفًا إنجليزية كبيرة وأرقامًا وشرطة سفلية فقط.", en: "Code must start with a letter and use uppercase letters, numbers, and underscores only." });
+  if (duplicateCode) issues.push({ ar: "الكود مستخدم في حالة أخرى.", en: "This code is already used by another status." });
+  if (normalized.recordingMode === "system" && !normalized.systemTrigger) issues.push({ ar: "حدد الحدث الحقيقي الذي ينشئ الحالة تلقائيًا.", en: "Select the real event that creates this status automatically." });
+  if (normalized.recordingMode === "manual" && !(normalized.executorRoleIds ?? []).length && !normalized.courierCanRecord) issues.push({ ar: "حدد دورًا واحدًا على الأقل أو اسمح للمندوب بتسجيل الحالة.", en: "Select at least one role or allow the courier to record the status." });
+  if (normalized.appearsInPricing && normalized.financialEffect.en === "No financial effect") issues.push({ ar: "لا يمكن إظهار حالة بلا أثر مالي في قائمة الأسعار.", en: "A status with no financial effect cannot appear in price lists." });
+  if (normalized.useForInitialShippingPrice && !normalized.appearsInPricing) issues.push({ ar: "سعر التسجيل الأساسي يتطلب ظهور الحالة في قائمة الأسعار.", en: "The intake base price requires the status to appear in price lists." });
+  if (normalized.collectionPolicy !== "none" && !["Money only", "Money and return"].includes(normalized.financialEffect.en)) issues.push({ ar: "سياسة التحصيل تتطلب أثرًا ماليًا يحتوي مبلغًا.", en: "Collection policy requires a financial effect containing money." });
+  if (normalized.pieceEffect.en === "Enter delivered; derive return" && !normalized.requiredFields.some((field) => field.en === "Delivered pieces")) issues.push({ ar: "التسليم الجزئي يتطلب حقل عدد القطع المسلمة.", en: "Partial delivery requires the delivered-pieces field." });
+  if ((normalized.operationalActions ?? []).includes("create_return") && normalized.pieceEffect.en === "All pieces delivered") issues.push({ ar: "لا يمكن إنشاء مرتجع مع اعتبار كل القطع مسلمة.", en: "A return cannot be created while all pieces are marked delivered." });
+  return issues;
 }
 
 function statusUsesShippingPayer(status: StatusPolicy | null) {
   if (!status) return false;
-  return normalizeStatusPolicy(status).shippingPayerDecision !== "hidden";
+  const normalized = normalizeStatusPolicy(status);
+  return (
+    normalized.financialEffect.en !== "No financial effect" &&
+    normalized.shippingPayerDecision !== "hidden"
+  );
 }
 
 function statusAllowedForService(
@@ -2154,13 +2534,35 @@ function statusAllowedForService(
   service: ShipmentServiceType | undefined,
 ) {
   if (!service) return !(status.serviceTypeIds ?? []).length;
-  const statusAllows =
+  // Statuses are the single source of truth for this relationship.  The
+  // legacy service list is retained only so stored prototypes can migrate
+  // safely; it must never create a second, conflicting permission gate.
+  return (
     !(status.serviceTypeIds ?? []).length ||
-    (status.serviceTypeIds ?? []).includes(service.id);
-  const serviceAllows =
-    !service.allowedStatusIds.length ||
-    service.allowedStatusIds.includes(status.id);
-  return statusAllows && serviceAllows;
+    (status.serviceTypeIds ?? []).includes(service.id)
+  );
+}
+
+function statusTransitionAllowed(
+  status: StatusPolicy,
+  previousStatusId?: string,
+) {
+  const allowedPrevious = status.allowedPreviousStatusIds ?? [];
+  return !allowedPrevious.length || Boolean(previousStatusId && allowedPrevious.includes(previousStatusId));
+}
+
+function statusDestinationLabel(status: StatusPolicy, lang: Lang) {
+  const normalized = normalizeStatusPolicy(status);
+  if (normalized.recordingMode === "system") return statusTriggerLabel(normalized, lang);
+  const destination = normalized.courierExitDestination;
+  const labels: Record<NonNullable<StatusPolicy["courierExitDestination"]>, Localized> = {
+    recipient: { ar: "مع المستلم", en: "With recipient" },
+    warehouse: { ar: "دخلت المخزن", en: "Entered warehouse" },
+    company_receipt_pending: { ar: "بانتظار استلام الشركة", en: "Awaiting company receipt" },
+    follow_up: { ar: "المخزن وقائمة المتابعة", en: "Warehouse and follow-up" },
+    return_due: { ar: "مرتجع بانتظار استلام الشركة", en: "Return awaiting company receipt" },
+  };
+  return labels[destination ?? "warehouse"][lang];
 }
 
 function shipmentServiceFor(
@@ -2168,6 +2570,7 @@ function shipmentServiceFor(
   services: ShipmentServiceType[],
 ) {
   return (
+    shipment.serviceTypeSnapshot ??
     services.find((service) => service.id === shipment.serviceTypeId) ??
     services.find((service) => service.id === "service-standard")
   );
@@ -2190,7 +2593,7 @@ function shipmentServiceOperationalSummary(
   lang: Lang,
 ) {
   const facts = [
-    service.hasCollection
+    service.recipientCashFlow === "collect"
       ? lang === "ar"
         ? "تحصيل مالي"
         : "Money collection"
@@ -2219,6 +2622,94 @@ function shipmentServiceOperationalSummary(
 }
 
 const statusPolicies: StatusPolicy[] = [
+  {
+    id: "status-warehouse-received",
+    name: { ar: "دخلت المخزن", en: "Entered warehouse" },
+    code: "WAREHOUSE_RECEIVED",
+    color: "#315fba",
+    state: "published",
+    executors: { ar: "النظام والعمليات", en: "System & operations" },
+    visibility: [{ ar: "العمليات", en: "Operations" }],
+    assignmentEffect: { ar: "إبقاء الحيازة في المخزن", en: "Keep warehouse custody" },
+    pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+    financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInAssignment: true,
+    appearsInPricing: false,
+    appearsInCourierRates: false,
+    requiredFields: [],
+    operationalCategory: "neutral",
+    shippingPayerDecision: "hidden",
+    operationalActions: [],
+    usage: 184,
+    version: 1,
+  },
+  {
+    id: "status-ready-assignment",
+    name: { ar: "جاهزة للإسناد", en: "Ready for assignment" },
+    code: "READY_FOR_ASSIGNMENT",
+    color: "#2455c3",
+    state: "published",
+    executors: { ar: "النظام والعمليات", en: "System & operations" },
+    visibility: [{ ar: "العمليات", en: "Operations" }],
+    assignmentEffect: { ar: "تسمح بالإسناد", en: "Allow assignment" },
+    pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+    financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInAssignment: true,
+    appearsInPricing: false,
+    appearsInCourierRates: false,
+    requiredFields: [],
+    operationalCategory: "neutral",
+    shippingPayerDecision: "hidden",
+    operationalActions: [],
+    usage: 96,
+    version: 1,
+  },
+  {
+    id: "status-awaiting-confirmation",
+    name: { ar: "بانتظار التأكيد", en: "Awaiting confirmation" },
+    code: "AWAITING_CONFIRMATION",
+    color: "#476aa8",
+    state: "published",
+    executors: { ar: "النظام وخدمة العملاء", en: "System & customer service" },
+    visibility: [{ ar: "العمليات", en: "Operations" }],
+    assignmentEffect: { ar: "إيقاف الإسناد حسب السياسة", en: "Block assignment per policy" },
+    pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+    financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInAssignment: false,
+    appearsInPricing: false,
+    appearsInCourierRates: false,
+    requiredFields: [],
+    operationalCategory: "follow_up",
+    shippingPayerDecision: "hidden",
+    operationalActions: ["follow_up_queue"],
+    usage: 51,
+    version: 1,
+  },
+  {
+    id: "status-out-for-delivery",
+    name: { ar: "قيد التوصيل", en: "Out for delivery" },
+    code: "OUT_FOR_DELIVERY",
+    color: "#e95f00",
+    state: "published",
+    executors: { ar: "النظام والعمليات", en: "System & operations" },
+    visibility: [
+      { ar: "العمليات", en: "Operations" },
+      { ar: "الراسل", en: "Sender" },
+      { ar: "المندوب", en: "Courier" },
+    ],
+    assignmentEffect: { ar: "إبقاء التكليف", en: "Keep assignment" },
+    pieceEffect: { ar: "لا يستخدم عدد القطع", en: "Ignore piece count" },
+    financialEffect: { ar: "بلا أثر مالي", en: "No financial effect" },
+    appearsInAssignment: false,
+    appearsInPricing: false,
+    appearsInCourierRates: false,
+    requiredFields: [],
+    operationalCategory: "neutral",
+    shippingPayerDecision: "hidden",
+    operationalActions: ["keep_assignment"],
+    usage: 123,
+    version: 1,
+  },
   {
     id: "status-delivered",
     name: { ar: "تم التسليم", en: "Delivered" },
@@ -2430,7 +2921,7 @@ const statusPolicies: StatusPolicy[] = [
     requiredFields: [{ ar: "ملاحظة", en: "Note" }],
     serviceTypeIds: ["service-return-pickup"],
     operationalCategory: "return",
-    shippingPayerDecision: "hidden",
+    shippingPayerDecision: "allow_override",
     operationalActions: ["end_assignment", "create_return", "return_to_sender"],
     senderVisible: true,
     recipientVisible: false,
@@ -2968,7 +3459,29 @@ type PriceListRecord = {
   senders: Localized[];
   version: number;
   prices: PriceMatrix;
+  /** Current matrices by shipment type. `prices` remains the legacy standard-delivery matrix. */
+  servicePrices?: Record<string, PriceMatrix>;
+  /** Areas intentionally excluded from this list; retained prices can be reused if reopened. */
+  unservedAreaIds?: string[];
+  history?: {
+    version: number;
+    changedAt: Localized;
+    changedBy: Localized;
+    summary: Localized;
+  }[];
 };
+
+function priceMatrixForService(
+  priceList: PriceListRecord,
+  serviceTypeId: string,
+): PriceMatrix {
+  // `prices` is the canonical matrix for the standard-delivery service.
+  // Older saved prototypes could retain a stale duplicate under
+  // servicePrices["service-standard"], making the price-list screen and the
+  // sender policy show different company fees for the same area.
+  if (serviceTypeId === "service-standard") return priceList.prices;
+  return priceList.servicePrices?.[serviceTypeId] ?? priceList.prices;
+}
 
 const availableSenders: Localized[] = [
   { ar: "متجر لمسة", en: "Lamsa Store" },
@@ -3252,8 +3765,18 @@ function senderSettlementLines(
         return [];
       }
 
-      const configuredPrice = priceList?.prices[areaId]?.[statusEvent.statusPolicyId];
-      if (!priceList || !areaId || typeof configuredPrice !== "number") {
+      const configuredPrice =
+        statusEvent.pricingSnapshot?.statusPrice ??
+        shipment.shippingPricingSnapshot?.statusPrices[
+          statusEvent.statusPolicyId
+        ] ??
+        (priceList
+          ? priceMatrixForService(
+              priceList,
+              shipment.serviceTypeId ?? "service-standard",
+            )[areaId]?.[statusEvent.statusPolicyId]
+          : undefined);
+      if (typeof configuredPrice !== "number") {
         return [];
       }
       const shippingCharge = configuredPrice;
@@ -3418,7 +3941,13 @@ const priceListCopy = {
   },
 } as const;
 
-type CourierCompensationType = "commission" | "salary" | "mixed";
+// `mixed` remains only to safely read older data. New courier agreements expose
+// the two real operating choices only: commission or fixed salary.
+type CourierCompensationType =
+  | "commission"
+  | "salary"
+  | "salary_commission"
+  | "mixed";
 type CourierSettlementCycle = "instant" | "daily" | "weekly" | "monthly";
 
 type CourierRatePlan = {
@@ -4085,10 +4614,12 @@ function normalizeCourierRatePlan(plan: CourierRatePlan): CourierRatePlan {
   const isLegacyMixedPlan =
     plan.compensationType === "mixed" || plan.code === "COURIER-MIXED";
   const compensationType = isLegacyMixedPlan ? "salary" : plan.compensationType;
+  const usesFixedSalary =
+    compensationType === "salary" || compensationType === "salary_commission";
   const settlementCycle =
     isLegacyMixedPlan
       ? "weekly"
-      : compensationType === "salary"
+      : usesFixedSalary
       ? plan.settlementCycle === "weekly"
         ? "weekly"
         : "monthly"
@@ -4110,6 +4641,20 @@ function normalizeCourierRatePlan(plan: CourierRatePlan): CourierRatePlan {
         : Math.max(0, isLegacyMixedPlan ? 1800 : (plan.fixedSalary ?? 0)),
     effectiveFrom: plan.effectiveFrom ?? "2026-08-01",
   };
+}
+
+function courierPlanUsesCommission(plan: CourierRatePlan) {
+  return (
+    plan.compensationType === "commission" ||
+    plan.compensationType === "salary_commission"
+  );
+}
+
+function courierPlanUsesFixedSalary(plan: CourierRatePlan) {
+  return (
+    plan.compensationType === "salary" ||
+    plan.compensationType === "salary_commission"
+  );
 }
 
 function cloneCourierRateMatrix(rates: PriceMatrix): PriceMatrix {
@@ -4318,6 +4863,7 @@ const courierFixedEntitlementsData: CourierFixedEntitlement[] = [
       code: "COURIER-SALARY",
       version: 2,
       compensationType: "salary",
+      settlementCycle: "monthly",
     },
     period: { ar: "راتب يوليو 2026", en: "July 2026 salary" },
     amount: 6500,
@@ -4415,6 +4961,7 @@ const treasuryAccountsData: TreasuryAccount[] = [
     kind: "cash",
     openingBalance: 20000,
     state: "active",
+    lowBalanceAlertAt: 5000,
   },
   {
     id: "bank",
@@ -4422,6 +4969,7 @@ const treasuryAccountsData: TreasuryAccount[] = [
     kind: "bank",
     openingBalance: 50000,
     state: "active",
+    lowBalanceAlertAt: 10000,
   },
   {
     id: "wallet",
@@ -4429,6 +4977,7 @@ const treasuryAccountsData: TreasuryAccount[] = [
     kind: "wallet",
     openingBalance: 8000,
     state: "active",
+    lowBalanceAlertAt: 1500,
   },
 ];
 
@@ -4754,6 +5303,10 @@ type SenderShipmentPolicy = {
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
   recipientAreaRates?: Record<string, RecipientAreaRate>;
+  recipientServiceAreaRates?: Record<
+    string,
+    Record<string, RecipientAreaRate>
+  >;
   state?: "draft" | "published";
   version?: number;
   updatedAt?: Localized;
@@ -4774,6 +5327,10 @@ type SenderPolicyHistoryEntry = {
   fields: ShipmentFieldPolicy[];
   settings: ShipmentDataSettings;
   recipientAreaRates?: Record<string, RecipientAreaRate>;
+  recipientServiceAreaRates?: Record<
+    string,
+    Record<string, RecipientAreaRate>
+  >;
   overrideKeys?: (keyof ShipmentDataSettings)[];
   fieldOverrideCodes?: string[];
   servicePolicyMode?: "inherit" | "custom";
@@ -5196,10 +5753,13 @@ const senderShipmentPoliciesDemoData: SenderShipmentPolicy[] = [
 function normalizeShipmentDataSettings(
   settings?: Partial<ShipmentDataSettings>,
 ): ShipmentDataSettings {
-  return {
+  const normalized = {
     ...shipmentDataSettingsDefault,
     ...settings,
   };
+  normalized.allowAssignmentWithoutConfirmation =
+    normalized.confirmationMode !== "required_before_assignment";
+  return normalized;
 }
 
 function findSenderShipmentPolicy(
@@ -5300,23 +5860,34 @@ function calculateRecipientShippingCharge(
   return Math.max(0, companyFee);
 }
 
+function initialShippingPriceStatus(statuses: StatusPolicy[]) {
+  const eligibleStatuses = statuses.filter(
+    (status) => status.state === "published" && status.appearsInPricing,
+  );
+  // The explicitly selected pricing cell is the only configured source.
+  // The delivered fallback only protects older saved companies that predate
+  // this control and have not selected a source yet.
+  return (
+    eligibleStatuses.find(
+      (status) => status.useForInitialShippingPrice === true,
+    ) ??
+    eligibleStatuses.find((status) => status.id === "status-delivered") ??
+    null
+  );
+}
+
 function companyDeliveryPriceForArea(
   priceList: PriceListRecord | null,
   statuses: StatusPolicy[],
   areaId: string,
+  serviceTypeId = "service-standard",
 ) {
-  const deliveredStatus =
-    statuses.find(
-      (status) =>
-        status.state === "published" &&
-        status.appearsInPricing &&
-        status.code.toUpperCase() === "DELIVERED",
-    ) ??
-    statuses.find(
-      (status) => status.state === "published" && status.appearsInPricing,
-    );
-  if (!priceList || !deliveredStatus) return null;
-  const price = priceList.prices[areaId]?.[deliveredStatus.id];
+  const baseShippingStatus = initialShippingPriceStatus(statuses);
+  if (!priceList || !baseShippingStatus) return null;
+  if (priceList.unservedAreaIds?.includes(areaId)) return null;
+  const price = priceMatrixForService(priceList, serviceTypeId)[areaId]?.[
+    baseShippingStatus.id
+  ];
   return typeof price === "number" ? price : null;
 }
 
@@ -5326,10 +5897,13 @@ function recipientAreaShippingCharge(
   sender: Localized,
   areaId: string,
   senderPolicies: SenderShipmentPolicy[],
+  serviceTypeId = "service-standard",
 ) {
   if (payer === "sender") return 0;
   const policy = findEffectiveSenderShipmentPolicy(sender, senderPolicies);
-  const rate = policy?.recipientAreaRates?.[areaId];
+  const rate =
+    policy?.recipientServiceAreaRates?.[serviceTypeId]?.[areaId] ??
+    policy?.recipientAreaRates?.[areaId];
   return Math.max(
     0,
     rate?.source === "custom" ? rate.amount : companyFee,
@@ -5496,19 +6070,27 @@ function Brand({
   compact?: boolean;
   lang: Lang;
 }) {
+  const company = useContext(CompanyBrandContext);
   return (
     <div className={`brand ${compact ? "brand--compact" : ""}`}>
-      <span className="brand__mark" aria-hidden="true">
-        <span className="brand__speed brand__speed--one" />
-        <span className="brand__speed brand__speed--two" />
-        <span className="brand__box">
-          <span className="brand__lid" />
-          <Check size={compact ? 15 : 18} strokeWidth={3} />
+      {company.identity.iconDataUrl ? (
+        <span className="brand__uploaded-mark" aria-hidden="true">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={company.identity.iconDataUrl} alt="" />
         </span>
-      </span>
+      ) : (
+        <span className="brand__mark" aria-hidden="true">
+          <span className="brand__speed brand__speed--one" />
+          <span className="brand__speed brand__speed--two" />
+          <span className="brand__box">
+            <span className="brand__lid" />
+            <Check size={compact ? 15 : 18} strokeWidth={3} />
+          </span>
+        </span>
+      )}
       <span className="brand__words">
-        <strong>{lang === "ar" ? "تسليم" : "TASLEEM"}</strong>
-        <small>{lang === "ar" ? "للشحن الداخلي" : "DOMESTIC SHIPPING"}</small>
+        <strong>{lang === "ar" ? company.identity.shortNameAr : company.identity.shortNameEn}</strong>
+        <small>{lang === "ar" ? company.identity.companyNameAr : company.identity.companyNameEn}</small>
       </span>
     </div>
   );
@@ -5527,6 +6109,7 @@ function LanguageThemeControls({
   onTheme: () => void;
   subtle?: boolean;
 }) {
+  const company = useContext(CompanyBrandContext);
   return (
     <div className={`utility-controls ${subtle ? "utility-controls--subtle" : ""}`}>
       <button
@@ -5542,6 +6125,8 @@ function LanguageThemeControls({
         className="square-button"
         type="button"
         onClick={onTheme}
+        disabled={!company.appearance.allowUserTheme}
+        title={!company.appearance.allowUserTheme ? (lang === "ar" ? "تغيير المظهر مقفول بسياسة الشركة" : "Theme switching is disabled by company policy") : undefined}
         aria-label={theme === "light" ? "تفعيل الوضع الداكن" : "تفعيل الوضع الفاتح"}
       >
         {theme === "light" ? <Moon size={18} /> : <Sun size={18} />}
@@ -5564,6 +6149,8 @@ function LoginScreen({
   onEnter: () => void;
 }) {
   const t = copy[lang];
+  const company = useContext(CompanyBrandContext);
+  const [recoveryMessage, setRecoveryMessage] = useState("");
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -5593,7 +6180,7 @@ function LoginScreen({
         <div className="login-visual__content">
           <div className="login-hero-logo">
             <img
-              src="/tasleem-brand-board.png"
+              src={company.identity.logoDataUrl || "/tasleem-brand-board.png"}
               alt={lang === "ar" ? "شعار شركة تسليم للشحن الداخلي" : "Tasleem Domestic Shipping logo"}
             />
           </div>
@@ -5643,7 +6230,7 @@ function LoginScreen({
         <div className="login-mobile-company">
           <div className="login-mobile-company__logo">
             <img
-              src="/tasleem-brand-board.png"
+              src={company.identity.logoDataUrl || "/tasleem-brand-board.png"}
               alt={lang === "ar" ? "شعار شركة تسليم للشحن الداخلي" : "Tasleem Domestic Shipping logo"}
             />
           </div>
@@ -5702,10 +6289,27 @@ function LoginScreen({
                 <span />
                 {t.remember}
               </label>
-              <button className="text-button" type="button">
+              <button
+                className="text-button"
+                type="button"
+                onClick={() =>
+                  setRecoveryMessage(
+                    lang === "ar"
+                      ? "تواصل مع مدير النظام لإعادة تعيين كلمة المرور؛ الاستعادة الذاتية غير مفعلة في النموذج التجريبي."
+                      : "Contact the system administrator to reset the password; self-service recovery is not enabled in this prototype.",
+                  )
+                }
+              >
                 {t.forgot}
               </button>
             </div>
+
+            {recoveryMessage && (
+              <p className="login-recovery-message" role="status">
+                <CircleHelp size={15} />
+                {recoveryMessage}
+              </p>
+            )}
 
             <button className="primary-button primary-button--wide" type="submit">
               <span>{t.enter}</span>
@@ -5949,16 +6553,6 @@ function Sidebar({
           label: lang === "ar" ? "قوائم الأسعار" : "Price lists",
           icon: HandCoins,
           screen: "priceLists" as const,
-        },
-        {
-          label: lang === "ar" ? "عمولات المناديب" : "Courier commissions",
-          icon: Truck,
-          screen: "courierRates" as const,
-        },
-        {
-          label: lang === "ar" ? "سياسات الرسل" : "Sender policies",
-          icon: ClipboardCheck,
-          screen: "shipmentPolicies" as const,
         },
         { label: t.settings, icon: Settings2, screen: "settings" as const },
         { label: lang === "ar" ? "مركز المساعدة" : "Help center", icon: CircleHelp, screen: "help" as const },
@@ -6232,7 +6826,14 @@ function ShipmentDrawer({
                 <strong>{shipment.recipient[lang]}</strong>
                 <span dir="ltr">{shipment.phone}</span>
               </div>
-              <button className="square-button square-button--soft" type="button">
+              <button
+                className="square-button square-button--soft"
+                type="button"
+                aria-label={lang === "ar" ? `اتصال بـ ${shipment.recipient.ar}` : `Call ${shipment.recipient.en}`}
+                onClick={() => {
+                  window.location.href = `tel:${shipment.phone.replace(/\s+/g, "")}`;
+                }}
+              >
                 <Phone size={17} />
               </button>
             </div>
@@ -6458,19 +7059,57 @@ function FilterDrawer({
   onClose,
   statusFilter,
   custodyFilter,
+  governorateFilter,
+  areaFilter,
+  senderFilter,
+  courierFilter,
+  shipmentRecords,
   onStatus,
   onCustody,
+  onGovernorate,
+  onArea,
+  onSender,
+  onCourier,
   onClear,
 }: {
   lang: Lang;
   onClose: () => void;
   statusFilter: string;
   custodyFilter: string;
+  governorateFilter: string;
+  areaFilter: string;
+  senderFilter: string;
+  courierFilter: string;
+  shipmentRecords: Shipment[];
   onStatus: (value: string) => void;
   onCustody: (value: string) => void;
+  onGovernorate: (value: string) => void;
+  onArea: (value: string) => void;
+  onSender: (value: string) => void;
+  onCourier: (value: string) => void;
   onClear: () => void;
 }) {
   const t = copy[lang];
+  const governorates = Array.from(
+    new Map(shipmentRecords.map((shipment) => [shipment.governorate.en, shipment.governorate])).values(),
+  );
+  const areas = Array.from(
+    new Map(
+      shipmentRecords
+        .filter((shipment) => !governorateFilter || shipment.governorate.en === governorateFilter)
+        .map((shipment) => [shipment.area.en, shipment.area]),
+    ).values(),
+  );
+  const senders = Array.from(
+    new Map(shipmentRecords.map((shipment) => [shipment.sender.en, shipment.sender])).values(),
+  );
+  const couriers = Array.from(
+    new Map(
+      shipmentRecords
+        .filter((shipment) => shipment.courier)
+        .map((shipment) => [shipment.courier?.en ?? "", shipment.courier]),
+    ).values(),
+  );
   return (
     <>
       <button className="drawer-backdrop" type="button" onClick={onClose} />
@@ -6636,8 +7275,6 @@ function ShipmentServicesScreen({
     : undefined;
   const simulationSenderAllowed = Boolean(
     selectedSimulationSender &&
-      (!draft?.senderIds.length ||
-        draft.senderIds.includes(selectedSimulationSender.id)) &&
       (selectedSimulationPolicy?.servicePolicyMode !== "custom" ||
         (selectedSimulationPolicy.allowedServiceTypeIds ?? []).includes(
           draft?.id ?? "",
@@ -6664,6 +7301,31 @@ function ShipmentServicesScreen({
               en: "The operational service identifier is required.",
             }
           : null,
+        services.some(
+          (service) =>
+            service.id !== draft.id &&
+            service.code.trim().toUpperCase() === draft.code.trim().toUpperCase(),
+        )
+          ? {
+              tone: "block" as const,
+              ar: "المعرف التشغيلي مستخدم في نوع شحنة آخر.",
+              en: "The operational identifier is already used by another shipment type.",
+            }
+          : null,
+        !/^[A-Z][A-Z0-9_]{2,39}$/.test(draft.code.trim())
+          ? {
+              tone: "block" as const,
+              ar: "المعرف يبدأ بحرف ويستخدم حروفًا إنجليزية كبيرة وأرقامًا وشرطة سفلية فقط.",
+              en: "The identifier must start with a letter and use uppercase letters, numbers, and underscores only.",
+            }
+          : null,
+        draft.movement !== "money_only" && draft.defaultPieces < 1
+          ? {
+              tone: "block" as const,
+              ar: "أي خدمة بها طرد يجب أن تبدأ بقطعة واحدة على الأقل.",
+              en: "A parcel service must start with at least one piece.",
+            }
+          : null,
         draft.state === "published" && draftStatuses.length === 0
           ? {
               tone: "block" as const,
@@ -6681,16 +7343,6 @@ function ShipmentServicesScreen({
               tone: "block" as const,
               ar: "الخدمة تطلب حقلًا مخفيًا أو غير موجود في سياسة البيانات.",
               en: "The service requires a hidden or missing shipment field.",
-            }
-          : null,
-        draft.senderIds.length > 0 &&
-        (draft.defaultForSenderIds ?? []).some(
-          (senderId) => !draft.senderIds.includes(senderId),
-        )
-          ? {
-              tone: "block" as const,
-              ar: "يوجد راسل عُيّنت له الخدمة افتراضيًا لكنه خارج نطاقها.",
-              en: "A sender uses this service as default while being outside its scope.",
             }
           : null,
         draft.isCompanyDefault && draft.state !== "published"
@@ -6725,12 +7377,6 @@ function ShipmentServicesScreen({
     if (!draftStatuses.some((status) => status.id === simulationStatusId)) {
       setSimulationStatusId(draftStatuses[0]?.id ?? "");
     }
-    if (
-      draft?.senderIds.length &&
-      !draft.senderIds.includes(simulationSenderId)
-    ) {
-      setSimulationSenderId(draft.senderIds[0] ?? "");
-    }
   }, [draft, draftStatuses, simulationSenderId, simulationStatusId]);
 
   function updateDraft<K extends keyof ShipmentServiceType>(
@@ -6755,6 +7401,7 @@ function ShipmentServicesScreen({
       allowsPartial: false,
       requiresConfirmation: false,
       hasCollection: true,
+      recipientCashFlow: "collect",
       hasShippingFee: true,
       hasPriceDifference: false,
       createsReturnParcel: false,
@@ -6765,7 +7412,6 @@ function ShipmentServicesScreen({
       defaultForSenderIds: [],
       version: 1,
     };
-    onServicesChange((current) => [service, ...current]);
     setSelectedId(service.id);
     setDraft(service);
   }
@@ -6781,8 +7427,9 @@ function ShipmentServicesScreen({
       window.setTimeout(() => setToast(""), 3200);
       return;
     }
-    onServicesChange((current) =>
-      current.map((service) =>
+    onServicesChange((current) => {
+      const exists = current.some((service) => service.id === draft.id);
+      const next = current.map((service) =>
         service.id === draft.id
           ? { ...draft, version: service.version + 1 }
           : {
@@ -6790,13 +7437,10 @@ function ShipmentServicesScreen({
               isCompanyDefault: draft.isCompanyDefault
                 ? false
                 : service.isCompanyDefault,
-              defaultForSenderIds: (service.defaultForSenderIds ?? []).filter(
-                (senderId) =>
-                  !(draft.defaultForSenderIds ?? []).includes(senderId),
-              ),
             },
-      ),
-    );
+      );
+      return exists ? next : [{ ...draft, version: 1 }, ...next];
+    });
     setToast(
       lang === "ar"
         ? "تم حفظ نوع الشحنة وإصدار نسخة جديدة."
@@ -6806,11 +7450,7 @@ function ShipmentServicesScreen({
   }
 
   function toggleList(
-    key:
-      | "requiredFieldCodes"
-      | "allowedStatusIds"
-      | "senderIds"
-      | "defaultForSenderIds",
+    key: "requiredFieldCodes",
     value: string,
   ) {
     if (!draft) return;
@@ -6849,11 +7489,7 @@ function ShipmentServicesScreen({
             <span className="workspace-icon"><Boxes size={20} /></span>
             <span><strong>{t.workspace}</strong><small>{t.branch}</small></span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -6892,7 +7528,7 @@ function ShipmentServicesScreen({
             <article><Boxes size={19} /><span><small>{lang === "ar" ? "كل الخدمات" : "All services"}</small><strong>{services.length}</strong></span></article>
             <article><PackageCheck size={19} /><span><small>{lang === "ar" ? "منشورة" : "Published"}</small><strong>{services.filter((item) => item.state === "published").length}</strong></span></article>
             <article><ArrowLeftRight size={19} /><span><small>{lang === "ar" ? "تُنشئ مرتجعًا" : "Create returns"}</small><strong>{services.filter((item) => item.createsReturnParcel).length}</strong></span></article>
-            <article><HandCoins size={19} /><span><small>{lang === "ar" ? "بها تحصيل" : "With collection"}</small><strong>{services.filter((item) => item.hasCollection).length}</strong></span></article>
+            <article><HandCoins size={19} /><span><small>{lang === "ar" ? "بها تحصيل" : "With collection"}</small><strong>{services.filter((item) => item.recipientCashFlow === "collect").length}</strong></span></article>
           </section>
 
           <div className="service-builder-layout">
@@ -6968,6 +7604,31 @@ function ShipmentServicesScreen({
                     </span>
                   </label>
                   <label className="select-field">
+                    <span>{lang === "ar" ? "حركة المال مع المستلم" : "Recipient cash direction"}</span>
+                    <span className="select-wrap">
+                      <select
+                        value={draft.recipientCashFlow}
+                        onChange={(event) => {
+                          const cashFlow = event.target.value as ShipmentServiceType["recipientCashFlow"];
+                          setDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  recipientCashFlow: cashFlow,
+                                  hasCollection: cashFlow === "collect",
+                                }
+                              : current,
+                          );
+                        }}
+                      >
+                        <option value="collect">{lang === "ar" ? "المندوب يحصل من المستلم" : "Courier collects from recipient"}</option>
+                        <option value="refund">{lang === "ar" ? "المندوب يدفع للمستلم" : "Courier pays the recipient"}</option>
+                        <option value="none">{lang === "ar" ? "لا توجد حركة نقدية مع المستلم" : "No recipient cash movement"}</option>
+                      </select>
+                      <ChevronDown size={16} />
+                    </span>
+                  </label>
+                  <label className="select-field">
                     <span>{lang === "ar" ? "حالة الاستخدام" : "Usage state"}</span>
                     <span className="select-wrap">
                       <select value={draft.state} onChange={(event) => updateDraft("state", event.target.value as ShipmentServiceType["state"])}>
@@ -6994,8 +7655,6 @@ function ShipmentServicesScreen({
                 <div className="service-rule-grid">
                   {([
                     ["allowsPartial", "تسمح بالتسليم الجزئي", "Allow partial"],
-                    ["requiresConfirmation", "تحتاج تأكيد المستلم", "Require confirmation"],
-                    ["hasCollection", "لها تحصيل مالي", "Has collection"],
                     ["hasShippingFee", "لها مصاريف شحن", "Has shipping fee"],
                     ["hasPriceDifference", "تسمح بفرق شحن للراسل", "Allow sender price difference"],
                     ["createsReturnParcel", "تُنشئ مسار مرتجع", "Create return route"],
@@ -7039,50 +7698,33 @@ function ShipmentServicesScreen({
                     </div>
                   </section>
                   <section>
-                    <div><strong>{lang === "ar" ? "الحالات المسموحة لهذه الخدمة" : "Allowed statuses"}</strong><small>{draft.allowedStatusIds.length}</small></div>
+                    <div><strong>{lang === "ar" ? "الحالات المرتبطة بالخدمة" : "Statuses linked to this service"}</strong><small>{draftStatuses.length}</small></div>
                     <div className="service-check-list">
-                      {statuses.map((status) => (
-                        <label key={status.id}>
-                          <input type="checkbox" checked={draft.allowedStatusIds.includes(status.id)} onChange={() => toggleList("allowedStatusIds", status.id)} />
-                          <span><Check size={12} /></span>{status.name[lang]}
-                        </label>
+                      {draftStatuses.map((status) => (
+                        <span className="service-readonly-link" key={status.id}>
+                          <Check size={12} />{status.name[lang]}
+                        </span>
                       ))}
+                      {!draftStatuses.length && <small>{lang === "ar" ? "اربط حالة منشورة بهذا النوع من صفحة حالات الشحنات والإجراءات." : "Link a published status from Statuses & actions."}</small>}
                     </div>
                   </section>
                 </div>
 
                 <section className="service-sender-scope">
                   <div>
-                    <strong>{lang === "ar" ? "نطاق الرسل" : "Sender scope"}</strong>
+                    <strong>{lang === "ar" ? "الرسل المرتبطون — للقراءة فقط" : "Linked senders — read only"}</strong>
                     <small>
-                      {draft.senderIds.length
-                        ? lang === "ar"
-                          ? `مخصصة لـ ${draft.senderIds.length} راسل`
-                          : `Limited to ${draft.senderIds.length} senders`
-                        : lang === "ar"
-                          ? "متاحة لكل الرسل — ويمكن تخصيصها دون التأثير على الباقي"
-                          : "Available to all senders — it can be limited without affecting others"}
+                      {lang === "ar" ? "الإتاحة والنوع الافتراضي يتم تعديلهما من ملف كل راسل فقط." : "Availability and default type are edited only from each sender file."}
                     </small>
                   </div>
                   <div className="service-check-list service-check-list--senders">
-                    {senders.filter((sender) => sender.state === "active").map((sender) => (
-                      <label key={sender.id}>
-                        <input type="checkbox" checked={draft.senderIds.includes(sender.id)} onChange={() => toggleList("senderIds", sender.id)} />
-                        <span><Check size={12} /></span>{sender.name[lang]}
-                      </label>
-                    ))}
-                  </div>
-                  <div className="service-default-senders">
-                    <strong>{lang === "ar" ? "افتراضية لرسل محددين" : "Default for selected senders"}</strong>
-                    <small>{lang === "ar" ? "لا تمنع باقي الخدمات؛ تحدد فقط الاختيار الأول عند التسجيل." : "Does not block other services; it only controls the initial selection."}</small>
-                    <div className="service-check-list service-check-list--senders">
-                      {senders.filter((sender) => sender.state === "active").map((sender) => (
-                        <label key={sender.id}>
-                          <input type="checkbox" checked={(draft.defaultForSenderIds ?? []).includes(sender.id)} onChange={() => toggleList("defaultForSenderIds", sender.id)} />
-                          <span><Check size={12} /></span>{sender.name[lang]}
-                        </label>
-                      ))}
-                    </div>
+                    {senders.filter((sender) => sender.state === "active").filter((sender) => {
+                      const policy = findEffectiveSenderShipmentPolicy(sender.name, senderPolicies);
+                      return policy?.servicePolicyMode !== "custom" || (policy.allowedServiceTypeIds ?? []).includes(draft.id);
+                    }).map((sender) => {
+                      const policy = findEffectiveSenderShipmentPolicy(sender.name, senderPolicies);
+                      return <span className="service-readonly-link" key={sender.id}><Check size={12} />{sender.name[lang]}{policy?.defaultServiceTypeId === draft.id ? <b>{lang === "ar" ? "افتراضي" : "Default"}</b> : null}</span>;
+                    })}
                   </div>
                 </section>
 
@@ -7256,6 +7898,8 @@ function StatusPolicyDrawer({
   isNew,
   lang,
   services,
+  policies,
+  roles,
   onClose,
   onSave,
 }: {
@@ -7263,17 +7907,23 @@ function StatusPolicyDrawer({
   isNew: boolean;
   lang: Lang;
   services: ShipmentServiceType[];
+  policies: StatusPolicy[];
+  roles: AccessRole[];
   onClose: () => void;
   onSave: (policy: StatusPolicy) => void;
 }) {
   const s = statusCopy[lang];
+  // The parcel destination is configured above and is the single operational
+  // result.  Only extra actions that add a separate real-world obligation stay
+  // selectable here.
+  const actionableStatusActions = ["create_return"];
   const [draft, setDraft] = useState(normalizeStatusPolicy(policy));
-  const visibilityOptions: Localized[] = [
-    { ar: "العمليات", en: "Operations" },
-    { ar: "الراسل", en: "Sender" },
-    { ar: "المندوب", en: "Courier" },
-    { ar: "خدمة العملاء", en: "Customer service" },
-  ];
+  const [submitError, setSubmitError] = useState("");
+  const readinessIssues = statusPolicyIssues(draft, policies);
+  const allowsAnyPreviousStatus = !(draft.allowedPreviousStatusIds ?? []).length;
+  const supportsCollection =
+    draft.financialEffect.en === "Money only" ||
+    draft.financialEffect.en === "Money and return";
   const fieldOptions: Localized[] = [
     { ar: statusCopy.ar.reason, en: statusCopy.en.reason },
     { ar: statusCopy.ar.note, en: statusCopy.en.note },
@@ -7295,7 +7945,7 @@ function StatusPolicyDrawer({
   }
 
   function toggleStringList(
-    field: "serviceTypeIds" | "operationalActions",
+    field: "serviceTypeIds" | "operationalActions" | "allowedPreviousStatusIds" | "executorRoleIds" | "internalViewerRoleIds",
     value: string,
   ) {
     setDraft((current) => {
@@ -7311,6 +7961,14 @@ function StatusPolicyDrawer({
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (draft.state === "published" && readinessIssues.length) {
+      setSubmitError(
+        lang === "ar"
+          ? "لا يمكن نشر الحالة قبل معالجة نقاط الجاهزية أدناه. يمكنك حفظها كمسودة."
+          : "This status cannot be published until the readiness issues below are resolved. You may save it as a draft.",
+      );
+      return;
+    }
     onSave(draft);
   }
 
@@ -7346,6 +8004,19 @@ function StatusPolicyDrawer({
           </div>
 
           <div className="policy-editor__body">
+            <section className={`status-readiness-card ${readinessIssues.length ? "has-issues" : "is-ready"}`}>
+              <div>
+                {readinessIssues.length ? <CircleAlert size={20} /> : <ShieldCheck size={20} />}
+                <span>
+                  <strong>{readinessIssues.length ? (lang === "ar" ? `تحتاج مراجعة (${readinessIssues.length})` : `Needs review (${readinessIssues.length})`) : (lang === "ar" ? "جاهزة للنشر" : "Ready to publish")}</strong>
+                  <small>{normalizeStatusPolicy(draft).recordingMode === "system" ? statusTriggerLabel(draft, lang) : statusExecutorSummary(draft, roles, lang)} · {statusDestinationLabel(draft, lang)} · {draft.financialEffect[lang]}</small>
+                </span>
+              </div>
+              {readinessIssues.length > 0 && <ul>{readinessIssues.map((issue) => <li key={issue.en}>{issue[lang]}</li>)}</ul>}
+              {allowsAnyPreviousStatus && normalizeStatusPolicy(draft).recordingMode === "manual" && <p className="status-readiness-warning"><CircleAlert size={15} /><span>{lang === "ar" ? "لم تحدد حالات سابقة؛ لذلك يمكن تسجيلها من أي حالة حالية. هذا مسموح، لكن راجعه قبل النشر." : "No previous statuses are selected, so this can be recorded from any current status. This is allowed, but review it before publishing."}</span></p>}
+              <p><strong>{lang === "ar" ? "النتيجة الواقعية:" : "Real outcome:"}</strong> {lang === "ar" ? `عند تسجيل «${draft.name.ar}» بواسطة ${statusExecutorSummary(draft, roles, "ar")} تصبح الشحنة: ${statusDestinationLabel(draft, "ar")}، وسياسة القطع: ${draft.pieceEffect.ar}، والأثر المالي: ${draft.financialEffect.ar}.` : `When “${draft.name.en}” is recorded by ${statusExecutorSummary(draft, roles, "en")}, the shipment becomes: ${statusDestinationLabel(draft, "en")}; pieces: ${draft.pieceEffect.en}; finance: ${draft.financialEffect.en}.`}</p>
+            </section>
+            {submitError && <div className="settings-alert settings-alert--danger"><CircleAlert size={18} /><span>{submitError}</span></div>}
             <section className="policy-form-section">
               <div className="policy-form-section__title">
                 <span><Pencil size={16} /></span>
@@ -7426,9 +8097,12 @@ function StatusPolicyDrawer({
                     >
                       <option value="published">{s.publishedBadge}</option>
                       <option value="draft">{s.draftBadge}</option>
+                      <option value="paused">{lang === "ar" ? "موقوفة" : "Paused"}</option>
+                      <option value="archived">{lang === "ar" ? "مؤرشفة — للتاريخ فقط" : "Archived — history only"}</option>
                     </select>
                     <ChevronDown size={16} />
                   </span>
+                  {draft.usage > 0 && <small>{lang === "ar" ? `استُخدمت في ${draft.usage} شحنة. الإيقاف يمنع استخدامها جديدًا، والأرشفة تحفظ السجل القديم ولا تحذفه.` : `Used by ${draft.usage} shipment(s). Pausing prevents new use; archiving preserves old history without deleting it.`}</small>}
                 </label>
               </div>
             </section>
@@ -7468,69 +8142,61 @@ function StatusPolicyDrawer({
               </div>
             </section>
 
-            <section className="policy-form-section">
+            <section className="policy-form-section status-builder-section">
               <div className="policy-form-section__title">
-                <span><Eye size={16} /></span>
+                <span><GitBranch size={16} /></span>
                 <div>
-                  <strong>{s.permissions}</strong>
-                  <small>{s.visibleTo}</small>
+                  <strong>{lang === "ar" ? "الحالات التي تسبق هذه الحالة" : "Allowed previous statuses"}</strong>
+                  <small>{lang === "ar" ? "اتركها دون تحديد لتكون الحالة متاحة من أي حالة. التحديد يمنع الاختيارات غير الواقعية." : "Leave empty to allow this status from any status. Selecting entries prevents invalid transitions."}</small>
                 </div>
               </div>
-              <label className="select-field">
-                <span>{s.executor}</span>
-                <span className="select-wrap">
-                  <select
-                    value={draft.executors.en}
-                    onChange={(event) => {
-                      const map: Record<string, Localized> = {
-                        "Operations only": { ar: "العمليات فقط", en: "Operations only" },
-                        "Courier & operations": {
-                          ar: "المندوب والعمليات",
-                          en: "Courier & operations",
-                        },
-                        "Customer service & operations": {
-                          ar: "خدمة العملاء والعمليات",
-                          en: "Customer service & operations",
-                        },
-                        "Courier, customer service & operations": {
-                          ar: "المندوب وخدمة العملاء والعمليات",
-                          en: "Courier, customer service & operations",
-                        },
-                      };
-                      setDraft((current) => ({
-                        ...current,
-                        executors: map[event.target.value],
-                      }));
-                    }}
-                  >
-                    <option value="Operations only">{s.operationsOnly}</option>
-                    <option value="Courier & operations">{s.courierOperations}</option>
-                    <option value="Customer service & operations">
-                      {s.serviceOperations}
-                    </option>
-                    <option value="Courier, customer service & operations">
-                      {s.courierServiceOperations}
-                    </option>
-                  </select>
-                  <ChevronDown size={16} />
-                </span>
-              </label>
-              <div className="policy-choice-grid">
-                {visibilityOptions.map((item) => {
-                  const checked = draft.visibility.some((value) => value.en === item.en);
+              <div className="policy-choice-grid policy-choice-grid--services">
+                {policies.filter((item) => item.id !== draft.id).map((item) => {
+                  const checked = (draft.allowedPreviousStatusIds ?? []).includes(item.id);
                   return (
-                    <label className="policy-check" key={item.en}>
+                    <label className="policy-check" key={item.id}>
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => toggleLocalized("visibility", item)}
+                        onChange={() => toggleStringList("allowedPreviousStatusIds", item.id)}
                       />
                       <span><Check size={13} /></span>
-                      {item[lang]}
+                      <b>{item.name[lang]}</b>
+                      <small>{item.code}</small>
                     </label>
                   );
                 })}
               </div>
+            </section>
+
+            <section className="policy-form-section">
+              <div className="policy-form-section__title">
+                <span><Eye size={16} /></span>
+                <div>
+                  <strong>{lang === "ar" ? "مصدر الحالة وصلاحية تسجيلها" : "Status source and recording permissions"}</strong>
+                  <small>{lang === "ar" ? "اربطها بحدث حقيقي أو بالأدوار المسموح لها." : "Bind it to a real event or to permitted roles."}</small>
+                </div>
+              </div>
+              <label className="select-field">
+                <span>{lang === "ar" ? "كيف تُسجل الحالة؟" : "How is the status recorded?"}</span>
+                <span className="select-wrap">
+                  <select
+                    value={draft.recordingMode ?? "manual"}
+                    onChange={(event) => setDraft((current) => ({ ...current, recordingMode: event.target.value as NonNullable<StatusPolicy["recordingMode"]> }))}
+                  >
+                    <option value="manual">{lang === "ar" ? "يدويًا بواسطة مستخدم أو مندوب" : "Manually by a user or courier"}</option>
+                    <option value="system">{lang === "ar" ? "تلقائيًا بسبب حدث في النظام" : "Automatically from a system event"}</option>
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
+              {draft.recordingMode === "system" ? (
+                <label className="select-field"><span>{lang === "ar" ? "الحدث الذي ينشئ الحالة" : "Event creating the status"}</span><span className="select-wrap"><select value={draft.systemTrigger ?? ""} onChange={(event) => setDraft((current) => ({ ...current, systemTrigger: event.target.value as NonNullable<StatusPolicy["systemTrigger"]> }))}><option value="">{lang === "ar" ? "اختر الحدث" : "Select event"}</option><option value="shipment_created">{lang === "ar" ? "تسجيل الشحنة" : "Shipment created"}</option><option value="warehouse_received">{lang === "ar" ? "استلام المخزن" : "Warehouse received"}</option><option value="assignment_created">{lang === "ar" ? "الإسناد وتسليمها للمندوب" : "Assignment and courier handover"}</option><option value="confirmation_required">{lang === "ar" ? "احتياج تأكيد الطلب" : "Confirmation required"}</option></select><ChevronDown size={16} /></span></label>
+              ) : (
+                <><strong className="policy-subheading">{lang === "ar" ? "الأدوار التي تستطيع تسجيل الحالة" : "Roles allowed to record the status"}</strong><div className="policy-choice-grid">{roles.filter((role) => role.state === "active" && role.permissionIds.includes("shipments.status")).map((role) => { const checked = (draft.executorRoleIds ?? []).includes(role.id); return <label className="policy-check" key={role.id}><input type="checkbox" checked={checked} onChange={() => toggleStringList("executorRoleIds", role.id)} /><span><Check size={13} /></span>{role.name[lang]}</label>; })}<label className="policy-check"><input type="checkbox" checked={draft.courierCanRecord ?? false} onChange={() => setDraft((current) => ({ ...current, courierCanRecord: !(current.courierCanRecord ?? false) }))} /><span><Check size={13} /></span>{lang === "ar" ? "المندوب من صفحة شحناته" : "Courier from assigned shipments"}</label></div></>
+              )}
+              <strong className="policy-subheading">{lang === "ar" ? "الأدوار التي ترى الحالة داخليًا" : "Roles that can see the status internally"}</strong>
+              <div className="policy-choice-grid">{roles.filter((role) => role.state === "active").map((role) => { const checked = (draft.internalViewerRoleIds ?? []).includes(role.id); return <label className="policy-check" key={role.id}><input type="checkbox" checked={checked} onChange={() => toggleStringList("internalViewerRoleIds", role.id)} /><span><Check size={13} /></span>{role.name[lang]}</label>; })}</div>
             </section>
 
             <section className="policy-form-section status-builder-section">
@@ -7568,15 +8234,35 @@ function StatusPolicyDrawer({
                   <ChevronDown size={16} />
                 </span>
               </label>
+              <label className="select-field">
+                <span>{lang === "ar" ? "مكان الشحنة بعد تسجيل المندوب للحالة" : "Parcel location after courier status"}</span>
+                <span className="select-wrap">
+                  <select
+                    value={normalizeStatusPolicy(draft).courierExitDestination ?? "warehouse"}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        courierExitDestination: event.target.value as NonNullable<StatusPolicy["courierExitDestination"]>,
+                      }))
+                    }
+                  >
+                    <option value="recipient">{lang === "ar" ? "مع المستلم" : "With recipient"}</option>
+                    <option value="warehouse">{lang === "ar" ? "دخلت المخزن" : "Entered warehouse"}</option>
+                    <option value="company_receipt_pending">{lang === "ar" ? "بانتظار استلام الشركة من المندوب" : "Awaiting company receipt from courier"}</option>
+                    <option value="follow_up">{lang === "ar" ? "المخزن + قائمة متابعة" : "Warehouse + follow-up"}</option>
+                    <option value="return_due">{lang === "ar" ? "مرتجع بانتظار استلام الشركة" : "Return awaiting company receipt"}</option>
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
               <div className="status-action-grid">
                 {([
                   ["end_assignment", "إنهاء حيازة المندوب", "End courier custody"],
-                  ["keep_assignment", "إبقاء الشحنة مع المندوب", "Keep with courier"],
                   ["follow_up_queue", "إرسال إلى قائمة المتابعة", "Send to follow-up"],
                   ["deliver_to_recipient", "نقل الحيازة للمستلم", "Move custody to recipient"],
                   ["create_return", "إنشاء مرتجع مطلوب", "Create required return"],
                   ["return_to_sender", "توجيه المرتجع للراسل", "Route return to sender"],
-                ] as const).map(([value, ar, en]) => {
+                ] as const).filter(([value]) => actionableStatusActions.includes(value)).map(([value, ar, en]) => {
                   const checked = (draft.operationalActions ?? []).includes(value);
                   return (
                     <button
@@ -7592,7 +8278,11 @@ function StatusPolicyDrawer({
                 })}
               </div>
               <button
-                className="policy-switch-row"
+                className={
+                  supportsCollection
+                    ? "policy-switch-row"
+                    : "policy-switch-row financial-only-control"
+                }
                 type="button"
                 role="switch"
                 aria-checked={draft.requiresApproval ?? false}
@@ -7620,7 +8310,7 @@ function StatusPolicyDrawer({
                 </div>
               </div>
               <div className="policy-form-grid">
-                <label className="select-field">
+                <label className="select-field status-legacy-assignment">
                   <span>{s.assignment}</span>
                   <span className="select-wrap">
                     <select
@@ -7628,7 +8318,6 @@ function StatusPolicyDrawer({
                       onChange={(event) => {
                         const map: Record<string, Localized> = {
                           "End assignment": { ar: "إنهاء التكليف", en: "End assignment" },
-                          "Keep assignment": { ar: "إبقاء التكليف", en: "Keep assignment" },
                           "End + follow-up queue": {
                             ar: "إنهاء + قائمة متابعة",
                             en: "End + follow-up queue",
@@ -7642,7 +8331,6 @@ function StatusPolicyDrawer({
                       }}
                     >
                       <option value="End assignment">{s.endAssignment}</option>
-                      <option value="Keep assignment">{s.keepAssignment}</option>
                       <option value="End + follow-up queue">{s.followUp}</option>
                       <option value="Return route">{s.returnRoute}</option>
                     </select>
@@ -7714,12 +8402,12 @@ function StatusPolicyDrawer({
               </button>
             </section>
 
-            <section className="policy-form-section">
+            <section className="policy-form-section courier-agreement-method-section">
               <div className="policy-form-section__title">
                 <span><HandCoins size={16} /></span>
                 <div>
                   <strong>{s.financialSection}</strong>
-                  <small>{s.financialEffect}</small>
+                  <small>{lang === "ar" ? "حدد فقط ما يحدث فعليًا عند تسجيل الحالة" : "Define only what actually happens when this status is recorded"}</small>
                 </div>
               </div>
               <label className="select-field">
@@ -7743,6 +8431,14 @@ function StatusPolicyDrawer({
                       setDraft((current) => ({
                         ...current,
                         financialEffect: map[event.target.value],
+                        ...(event.target.value === "No financial effect"
+                          ? {
+                              collectionPolicy: "none" as const,
+                              shippingPayerDecision: "hidden" as const,
+                              appearsInPricing: false,
+                              appearsInCourierRates: false,
+                            }
+                          : {}),
                       }));
                     }}
                   >
@@ -7754,7 +8450,39 @@ function StatusPolicyDrawer({
                   <ChevronDown size={16} />
                 </span>
               </label>
-              <label className="select-field">
+              <label
+                className={
+                  supportsCollection
+                    ? "select-field"
+                    : "select-field financial-only-control"
+                }
+              >
+                <span>{lang === "ar" ? "قاعدة إدخال المبلغ المحصل" : "Collected amount rule"}</span>
+                <span className="select-wrap">
+                  <select
+                    value={normalizeStatusPolicy(draft).collectionPolicy ?? "none"}
+                    onChange={(event) =>
+                      setDraft((current) => ({
+                        ...current,
+                        collectionPolicy: event.target.value as NonNullable<StatusPolicy["collectionPolicy"]>,
+                      }))
+                    }
+                  >
+                    <option value="none">{lang === "ar" ? "لا يوجد تحصيل" : "No collection"}</option>
+                    <option value="fixed_expected">{lang === "ar" ? "المبلغ المتوقع كاملًا تلقائيًا" : "Expected amount, fixed"}</option>
+                    <option value="up_to_expected">{lang === "ar" ? "حتى المبلغ المتوقع" : "Up to expected amount"}</option>
+                    <option value="manual_with_reason">{lang === "ar" ? "مبلغ يدوي مع سبب عند الاختلاف" : "Manual amount with variance reason"}</option>
+                  </select>
+                  <ChevronDown size={16} />
+                </span>
+              </label>
+              <label
+                className={
+                  draft.financialEffect.en === "No financial effect"
+                    ? "select-field financial-only-control"
+                    : "select-field"
+                }
+              >
                 <span>
                   {lang === "ar"
                     ? "قرار متحمل مصاريف الشحن عند تسجيل الحالة"
@@ -7763,6 +8491,7 @@ function StatusPolicyDrawer({
                 <span className="select-wrap">
                   <select
                     value={draft.shippingPayerDecision ?? "hidden"}
+                    disabled={draft.financialEffect.en === "No financial effect"}
                     onChange={(event) =>
                       setDraft((current) => ({
                         ...current,
@@ -7797,6 +8526,29 @@ function StatusPolicyDrawer({
                 <i className={draft.appearsInPricing ? "switch switch--on" : "switch"}>
                   <b />
                 </i>
+              </button>
+              <button
+                className={
+                  draft.appearsInPricing
+                    ? "policy-switch-row"
+                    : "policy-switch-row financial-only-control"
+                }
+                type="button"
+                role="switch"
+                aria-checked={draft.useForInitialShippingPrice ?? false}
+                onClick={() =>
+                  setDraft((current) => ({
+                    ...current,
+                    useForInitialShippingPrice:
+                      !(current.useForInitialShippingPrice ?? false),
+                  }))
+                }
+              >
+                <span>
+                  <strong>{lang === "ar" ? "سعر الشحن الأساسي عند التسجيل" : "Base shipping price at intake"}</strong>
+                  <small>{lang === "ar" ? "يُستخدم سعر هذه الحالة لحساب مصاريف الشركة عند تسجيل الشحنة. اختر حالة واحدة فقط." : "This status supplies the company shipping fee at intake. Choose one status only."}</small>
+                </span>
+                <i className={draft.useForInitialShippingPrice ? "switch switch--on" : "switch"}><b /></i>
               </button>
               <button
                 className="policy-switch-row"
@@ -7934,6 +8686,7 @@ function StatusPolicyDrawer({
                             <option value="number">{lang === "ar" ? "رقم" : "Number"}</option>
                             <option value="date">{lang === "ar" ? "تاريخ وموعد" : "Date & time"}</option>
                             <option value="barcode">{lang === "ar" ? "باركود" : "Barcode"}</option>
+                            <option value="evidence">{lang === "ar" ? "دليل تنفيذ" : "Proof of execution"}</option>
                             <option value="select">{lang === "ar" ? "اختيار من قائمة" : "Dropdown"}</option>
                           </select>
                           <ChevronDown size={15} />
@@ -8060,6 +8813,7 @@ function StatusesScreen({
   theme,
   policies,
   services,
+  roles,
   onLang,
   onTheme,
   onPoliciesChange,
@@ -8070,6 +8824,7 @@ function StatusesScreen({
   theme: Theme;
   policies: StatusPolicy[];
   services: ShipmentServiceType[];
+  roles: AccessRole[];
   onLang: () => void;
   onTheme: () => void;
   onPoliciesChange: (
@@ -8130,6 +8885,11 @@ function StatusesScreen({
       requiresApproval: false,
       senderVisible: false,
       recipientVisible: false,
+      recordingMode: "manual",
+      systemTrigger: "",
+      executorRoleIds: ["role-operations-manager", "role-owner"],
+      courierCanRecord: false,
+      internalViewerRoleIds: ["role-operations-manager", "role-owner"],
       usage: 0,
       version: 1,
     });
@@ -8138,13 +8898,18 @@ function StatusesScreen({
   function savePolicy(policy: StatusPolicy) {
     const normalizedPolicy = normalizeStatusPolicy(policy);
     onPoliciesChange((current) =>
-      current.some((item) => item.id === normalizedPolicy.id)
+      (current.some((item) => item.id === normalizedPolicy.id)
         ? current.map((item) =>
             item.id === normalizedPolicy.id
               ? { ...normalizedPolicy, version: item.version + 1 }
               : item,
           )
-        : [normalizedPolicy, ...current],
+        : [normalizedPolicy, ...current]).map((item) =>
+          normalizedPolicy.useForInitialShippingPrice &&
+          item.id !== normalizedPolicy.id
+            ? { ...item, useForInitialShippingPrice: false }
+            : item,
+        ),
     );
     setEditing(null);
     setToast(isNew ? s.created : s.saved);
@@ -8186,11 +8951,7 @@ function StatusesScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -8284,6 +9045,8 @@ function StatusesScreen({
                   <option value="all">{s.allStates}</option>
                   <option value="published">{s.published}</option>
                   <option value="draft">{s.drafts}</option>
+                  <option value="paused">{lang === "ar" ? "الموقوفة" : "Paused"}</option>
+                  <option value="archived">{lang === "ar" ? "المؤرشفة" : "Archived"}</option>
                 </select>
                 <ChevronDown size={15} />
               </label>
@@ -8325,17 +9088,25 @@ function StatusesScreen({
                         className={
                           policy.state === "published"
                             ? "policy-state policy-state--published"
-                            : "policy-state policy-state--draft"
+                            : policy.state === "paused"
+                              ? "policy-state policy-state--paused"
+                              : policy.state === "archived"
+                                ? "policy-state policy-state--archived"
+                                : "policy-state policy-state--draft"
                         }
                       >
                         {policy.state === "published"
                           ? s.publishedBadge
-                          : s.draftBadge}
+                          : policy.state === "paused"
+                            ? (lang === "ar" ? "موقوفة" : "Paused")
+                            : policy.state === "archived"
+                              ? (lang === "ar" ? "مؤرشفة" : "Archived")
+                              : s.draftBadge}
                       </em>
                     </div>
                     <div className="status-policy-copy">
-                      <strong>{policy.assignmentEffect[lang]}</strong>
-                      <small>{policy.executors[lang]}</small>
+                      <strong>{statusDestinationLabel(policy, lang)}</strong>
+                      <small>{statusExecutorSummary(policy, roles, lang)}</small>
                       <small>{policy.pieceEffect[lang]}</small>
                       <small className="status-service-scope">
                         <Boxes size={12} />
@@ -8374,11 +9145,7 @@ function StatusesScreen({
                           : s.noCourierRates}
                       </span>
                     </div>
-                    <div className="visibility-chips">
-                      {policy.visibility.map((item) => (
-                        <span key={item.en}>{item[lang]}</span>
-                      ))}
-                    </div>
+                    <div className="visibility-chips">{roles.filter((role) => (normalizeStatusPolicy(policy).internalViewerRoleIds ?? []).includes(role.id)).map((role) => <span key={role.id}>{role.name[lang]}</span>)}{normalizeStatusPolicy(policy).senderVisible && <span>{lang === "ar" ? "الراسل خارجيًا" : "Sender externally"}</span>}{normalizeStatusPolicy(policy).recipientVisible && <span>{lang === "ar" ? "المستلم خارجيًا" : "Recipient externally"}</span>}</div>
                     <div className="status-usage">
                       <strong>{policy.usage.toLocaleString(lang === "ar" ? "ar-EG" : "en-US")}</strong>
                       <small>{s.version} {policy.version}</small>
@@ -8416,6 +9183,8 @@ function StatusesScreen({
           isNew={isNew}
           lang={lang}
           services={services}
+          policies={policies}
+          roles={roles}
           onClose={() => {
             setEditing(null);
             setIsNew(false);
@@ -8679,6 +9448,7 @@ function AreasScreen({
   governorates,
   priceLists,
   policies,
+  shipmentRecords,
   onLang,
   onTheme,
   onGovernoratesChange,
@@ -8690,6 +9460,7 @@ function AreasScreen({
   governorates: GovernorateRecord[];
   priceLists: PriceListRecord[];
   policies: StatusPolicy[];
+  shipmentRecords: Shipment[];
   onLang: () => void;
   onTheme: () => void;
   onGovernoratesChange: (
@@ -8918,11 +9689,7 @@ function AreasScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -9194,7 +9961,7 @@ function AreasScreen({
                             </i>
                           </div>
                           <div className="geo-shipment-count">
-                            <strong>{area.shipments.toLocaleString(lang === "ar" ? "ar-EG" : "en-US")}</strong>
+                            <strong>{shipmentRecords.filter((shipment) => shipment.area.en === area.name.en || shipment.area.ar === area.name.ar).length.toLocaleString(lang === "ar" ? "ar-EG" : "en-US")}</strong>
                             <small>{g.shipments}</small>
                           </div>
                           <button
@@ -9254,7 +10021,9 @@ function SenderEditor({
   companySettings,
   senderPolicy,
   availablePolicies,
+  shipmentRecords,
   initialTab,
+  onOpenAccount,
   onClose,
   onSave,
 }: {
@@ -9269,7 +10038,9 @@ function SenderEditor({
   companySettings: ShipmentDataSettings;
   senderPolicy: SenderShipmentPolicy | null;
   availablePolicies: SenderShipmentPolicy[];
+  shipmentRecords: Shipment[];
   initialTab: "profile" | "policy";
+  onOpenAccount: () => void;
   onClose: () => void;
   onSave: (
     sender: SenderRecord,
@@ -9278,8 +10049,18 @@ function SenderEditor({
 }) {
   const [draft, setDraft] = useState(() => normalizeSenderRecord(sender));
   const [activeTab, setActiveTab] = useState<"profile" | "policy">(initialTab);
+  const [newSenderStep, setNewSenderStep] = useState<"identity" | "details">("identity");
+  const hasSavedCustomization = Boolean(
+    senderPolicy &&
+      ((senderPolicy.overrideKeys?.length ?? 0) > 0 ||
+        (senderPolicy.fieldOverrideCodes?.length ?? 0) > 0 ||
+        senderPolicy.servicePolicyMode === "custom" ||
+        Object.values(senderPolicy.recipientAreaRates ?? {}).some(
+          (rate) => rate.source === "custom",
+        )),
+  );
   const [policyMode, setPolicyMode] = useState<"company" | "custom">(
-    senderPolicy ? "custom" : "company",
+    hasSavedCustomization ? "custom" : "company",
   );
   const [policyState, setPolicyState] = useState<"draft" | "published">(
     senderPolicy?.state ?? "published",
@@ -9322,55 +10103,106 @@ function SenderEditor({
   const [overrideKeys, setOverrideKeys] = useState<
     (keyof ShipmentDataSettings)[]
   >(
-    senderPolicy
-      ? senderPolicy.overrideKeys ?? allSenderSettingKeys
-      : [],
+    senderPolicy?.overrideKeys ?? [],
   );
   const [fieldOverrideCodes, setFieldOverrideCodes] = useState<string[]>(
-    senderPolicy
-      ? senderPolicy.fieldOverrideCodes ??
-          senderPolicy.fields.map((field) => field.code)
-      : [],
+    senderPolicy?.fieldOverrideCodes ?? [],
   );
   const [policySearch, setPolicySearch] = useState("");
   const [recipientRateSearch, setRecipientRateSearch] = useState("");
+  const [policySection, setPolicySection] = useState<
+    "operation" | "financial" | "entry" | "delivery"
+  >("operation");
   const [shippingPolicyPreviewFee, setShippingPolicyPreviewFee] = useState(70);
   const [shippingPolicyPreviewManual, setShippingPolicyPreviewManual] =
     useState(100);
-  const [recipientAreaRates, setRecipientAreaRates] = useState<
-    Record<string, RecipientAreaRate>
+  const [recipientRateServiceId, setRecipientRateServiceId] = useState(
+    senderPolicy?.defaultServiceTypeId ?? companyDefaultServiceId,
+  );
+  const [recipientServiceAreaRates, setRecipientServiceAreaRates] = useState<
+    Record<string, Record<string, RecipientAreaRate>>
   >(() =>
     Object.fromEntries(
-      governorates.flatMap((governorate) =>
-        governorate.areas.map((area) => {
-          const saved = senderPolicy?.recipientAreaRates?.[area.id];
-          const companyPrice =
-            companyDeliveryPriceForArea(
-              appliedPriceList,
-              statuses,
-              area.id,
-            ) ?? 0;
-          return [
-            area.id,
-            saved?.source === "custom"
-              ? saved
-              : { source: "company" as const, amount: companyPrice },
-          ];
-        }),
-      ),
+      serviceTypes
+        .filter((service) => service.state === "published")
+        .map((service) => [
+          service.id,
+          Object.fromEntries(
+            governorates.flatMap((governorate) =>
+              governorate.areas.map((area) => {
+                const saved =
+                  senderPolicy?.recipientServiceAreaRates?.[service.id]?.[
+                    area.id
+                  ] ?? senderPolicy?.recipientAreaRates?.[area.id];
+                const companyPrice =
+                  companyDeliveryPriceForArea(
+                    appliedPriceList,
+                    statuses,
+                    area.id,
+                    service.id,
+                  ) ?? 0;
+                return [
+                  area.id,
+                  saved?.source === "custom"
+                    ? saved
+                    : { source: "company" as const, amount: companyPrice },
+                ];
+              }),
+            ),
+          ),
+        ]),
     ),
   );
+  const recipientAreaRates =
+    recipientServiceAreaRates[recipientRateServiceId] ?? {};
+  function setRecipientAreaRates(
+    updater:
+      | Record<string, RecipientAreaRate>
+      | ((current: Record<string, RecipientAreaRate>) => Record<string, RecipientAreaRate>),
+  ) {
+    setRecipientServiceAreaRates((current) => {
+      const currentRates = current[recipientRateServiceId] ?? {};
+      const nextRates =
+        typeof updater === "function" ? updater(currentRates) : updater;
+      return { ...current, [recipientRateServiceId]: nextRates };
+    });
+  }
   const [editingPolicyField, setEditingPolicyField] =
     useState<ShipmentFieldPolicy | null>(null);
   const [isNewPolicyField, setIsNewPolicyField] = useState(false);
+  const senderShipments = shipmentRecords.filter(
+    (shipment) =>
+      shipment.sender.en === sender.name.en ||
+      shipment.sender.ar === sender.name.ar,
+  );
+  const senderOpenShipments = senderShipments.filter(
+    (shipment) =>
+      shipment.statusHistory?.at(-1)?.senderSettlementStatus !== "settled",
+  );
+  const senderCollectionTotal = senderShipments.reduce(
+    (sum, shipment) => sum + shipmentTotalToCollect(shipment),
+    0,
+  );
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
-      policyMode === "custom" &&
-      servicePolicyMode === "custom" &&
-      !allowedServiceTypeIds.length
+      !draft.name.ar.trim() ||
+      !draft.name.en.trim() ||
+      !draft.code.trim() ||
+      !draft.contactName.trim() ||
+      !draft.phone.trim()
     ) {
+      setActiveTab("profile");
+      setNewSenderStep("identity");
+      window.alert(
+        lang === "ar"
+          ? "أكمل اسم الراسل بالعربية والإنجليزية والكود ومسؤول التواصل ورقم الهاتف الأساسي."
+          : "Complete the Arabic and English names, sender code, contact person and primary phone.",
+      );
+      return;
+    }
+    if (policyMode === "custom" && servicePolicyMode === "custom" && !allowedServiceTypeIds.length) {
       window.alert(
         lang === "ar"
           ? "اختر نوع شحنة واحدًا على الأقل لهذا الراسل."
@@ -9378,14 +10210,47 @@ function SenderEditor({
       );
       return;
     }
+    if (
+      policyMode === "custom" &&
+      servicePolicyMode === "custom" &&
+      !allowedServiceTypeIds.includes(defaultServiceTypeId)
+    ) {
+      window.alert(
+        lang === "ar"
+          ? "النوع الافتراضي يجب أن يكون ضمن أنواع الشحنات المتاحة للراسل."
+          : "The default type must be one of the sender's available shipment types.",
+      );
+      return;
+    }
+    const requiredServiceCodes = serviceTypes
+      .filter(
+        (service) =>
+          service.state === "published" &&
+          (servicePolicyMode !== "custom" || allowedServiceTypeIds.includes(service.id)),
+      )
+      .flatMap((service) => service.requiredFieldCodes);
+    const hiddenRequiredField = policyFields.find(
+      (field) =>
+        field.mode === "hidden" && requiredServiceCodes.includes(field.code),
+    );
+    if (policyMode === "custom" && hiddenRequiredField) {
+      window.alert(
+        lang === "ar"
+          ? `لا يمكن إخفاء «${hiddenRequiredField.name.ar}» لأنه مطلوب لنوع شحنة متاح لهذا الراسل.`
+          : `“${hiddenRequiredField.name.en}” cannot be hidden because an available shipment type requires it.`,
+      );
+      return;
+    }
     onSave(
       draft,
-      policyMode === "custom"
-        ? {
+      policyMode === "company" ? null : {
             sender: draft.name,
             fields: policyFields.map(normalizeShipmentField),
             settings: normalizeShipmentDataSettings(policySettings),
-            recipientAreaRates,
+            recipientAreaRates:
+              recipientServiceAreaRates["service-standard"] ??
+              recipientAreaRates,
+            recipientServiceAreaRates,
             state: policyState,
             version: senderPolicy?.version ?? 0,
             updatedAt: senderPolicy?.updatedAt,
@@ -9394,16 +10259,9 @@ function SenderEditor({
             overrideKeys,
             fieldOverrideCodes,
             servicePolicyMode,
-            allowedServiceTypeIds:
-              servicePolicyMode === "custom"
-                ? allowedServiceTypeIds
-                : undefined,
-            defaultServiceTypeId:
-              servicePolicyMode === "custom"
-                ? defaultServiceTypeId
-                : undefined,
+            allowedServiceTypeIds,
+            defaultServiceTypeId,
           }
-        : null,
     );
   }
 
@@ -9439,14 +10297,52 @@ function SenderEditor({
     setPolicyMode(mode);
   }
 
+  function resetPolicyToDefaults() {
+    if (
+      !window.confirm(
+        lang === "ar"
+          ? "سيتم استبدال الإعدادات الحالية بافتراضيات الراسل الجديد. هل تريد المتابعة؟"
+          : "Current settings will be replaced with the new-sender defaults. Continue?",
+      )
+    ) {
+      return;
+    }
+    setPolicyFields(
+      companyFields.map((field) => ({
+        ...normalizeShipmentField(field),
+        name: { ...field.name },
+        description: { ...field.description },
+        placements: [...(field.placements ?? [])],
+      })),
+    );
+    setPolicySettings(normalizeShipmentDataSettings(companySettings));
+    setOverrideKeys(allSenderSettingKeys);
+    setFieldOverrideCodes(companyFields.map((field) => field.code));
+    setServicePolicyMode("custom");
+    setAllowedServiceTypeIds(companyServiceIds);
+    setDefaultServiceTypeId(companyDefaultServiceId);
+    setPolicyState("published");
+    setPolicyMode("custom");
+  }
+
   function updateSenderPolicySetting<K extends keyof ShipmentDataSettings>(
     key: K,
     value: ShipmentDataSettings[K],
   ) {
-    setPolicySettings((current) => ({ ...current, [key]: value }));
-    setOverrideKeys((current) =>
-      current.includes(key) ? current : [...current, key],
-    );
+    setPolicySettings((current) => {
+      const next = { ...current, [key]: value };
+      if (key === "confirmationMode") {
+        next.allowAssignmentWithoutConfirmation =
+          value !== "required_before_assignment";
+      }
+      return next;
+    });
+    setOverrideKeys((current) => {
+      const keys = key === "confirmationMode"
+        ? [key, "allowAssignmentWithoutConfirmation" as keyof ShipmentDataSettings]
+        : [key];
+      return [...new Set([...current, ...keys])];
+    });
   }
 
   function toggleAllowedSenderService(serviceId: string) {
@@ -9565,6 +10461,7 @@ function SenderEditor({
                 appliedPriceList,
                 statuses,
                 area.id,
+                recipientRateServiceId,
               ) ?? 0;
             return [
               area.id,
@@ -9582,7 +10479,7 @@ function SenderEditor({
     setFieldOverrideCodes(
       source.fieldOverrideCodes ?? source.fields.map((field) => field.code),
     );
-    setServicePolicyMode(source.servicePolicyMode ?? "inherit");
+    setServicePolicyMode("custom");
     setAllowedServiceTypeIds(
       source.allowedServiceTypeIds?.length
         ? source.allowedServiceTypeIds
@@ -9591,7 +10488,7 @@ function SenderEditor({
     setDefaultServiceTypeId(
       source.defaultServiceTypeId ?? companyDefaultServiceId,
     );
-    setPolicyState("draft");
+    setPolicyState("published");
     setPolicyMode("custom");
   }
 
@@ -9605,7 +10502,7 @@ function SenderEditor({
       })),
     );
     setPolicySettings(normalizeShipmentDataSettings(entry.settings));
-    setServicePolicyMode(entry.servicePolicyMode ?? "inherit");
+    setServicePolicyMode("custom");
     setAllowedServiceTypeIds(
       entry.allowedServiceTypeIds?.length
         ? entry.allowedServiceTypeIds
@@ -9624,6 +10521,7 @@ function SenderEditor({
                 appliedPriceList,
                 statuses,
                 area.id,
+                recipientRateServiceId,
               ) ?? 0;
             return [
               area.id,
@@ -9639,42 +10537,29 @@ function SenderEditor({
     setFieldOverrideCodes(
       entry.fieldOverrideCodes ?? entry.fields.map((field) => field.code),
     );
-    setPolicyState("draft");
+    setPolicyState("published");
     setPolicyMode("custom");
   }
 
   function settingSourceButton(key: keyof ShipmentDataSettings) {
-    const overridden = overrideKeys.includes(key);
-    return (
-      <button
-        className={
-          overridden
-            ? "policy-setting-source policy-setting-source--custom"
-            : "policy-setting-source"
-        }
-        type="button"
-        onClick={() => toggleSenderSettingSource(key)}
-      >
-        {overridden
-          ? lang === "ar"
-            ? "مخصص"
-            : "Custom"
-          : lang === "ar"
-            ? "من الشركة"
-            : "Company"}
-      </button>
-    );
+    void key;
+    return null;
   }
 
   const recipientPricingRows = governorates.flatMap((governorate) =>
     governorate.areas
-      .filter((area) => area.state === "active")
+      .filter(
+        (area) =>
+          area.state === "active" &&
+          !appliedPriceList?.unservedAreaIds?.includes(area.id),
+      )
       .map((area) => {
         const companyPrice =
           companyDeliveryPriceForArea(
             appliedPriceList,
             statuses,
             area.id,
+            recipientRateServiceId,
           ) ?? 0;
         const savedRate = recipientAreaRates[area.id];
         const source = savedRate?.source ?? "company";
@@ -9745,8 +10630,8 @@ function SenderEditor({
         aria-label={lang === "ar" ? "إغلاق" : "Close"}
         onClick={onClose}
       />
-      <aside className="policy-editor sender-editor" aria-label={lang === "ar" ? "بيانات الراسل" : "Sender details"}>
-        <form onSubmit={handleSubmit}>
+      <aside className={`policy-editor sender-editor ${isNew ? "sender-editor--new" : ""}`} aria-label={lang === "ar" ? "بيانات الراسل" : "Sender details"}>
+        <form onSubmit={handleSubmit} noValidate>
           <div className="drawer__header policy-editor__header">
             <div>
               <span className="price-editor-badge">
@@ -9781,20 +10666,36 @@ function SenderEditor({
           <div className="policy-editor__body">
             <div className="sender-editor-tabs">
               <button
-                className={activeTab === "profile" ? "active" : ""}
+                className={activeTab === "profile" && (!isNew || newSenderStep === "identity") ? "active" : ""}
                 type="button"
-                onClick={() => setActiveTab("profile")}
+                onClick={() => {
+                  setActiveTab("profile");
+                  setNewSenderStep("identity");
+                }}
               >
                 <UsersRound size={16} />
-                {lang === "ar" ? "بيانات الراسل" : "Sender profile"}
+                {isNew ? (lang === "ar" ? "1. بيانات الراسل" : "1. Sender details") : (lang === "ar" ? "بيانات الراسل" : "Sender profile")}
               </button>
+              {isNew && (
+                <button
+                  className={activeTab === "profile" && newSenderStep === "details" ? "active" : ""}
+                  type="button"
+                  onClick={() => {
+                    setActiveTab("profile");
+                    setNewSenderStep("details");
+                  }}
+                >
+                  <MapPin size={16} />
+                  {lang === "ar" ? "2. العناوين والتفاصيل" : "2. Addresses & details"}
+                </button>
+              )}
               <button
                 className={activeTab === "policy" ? "active" : ""}
                 type="button"
                 onClick={() => setActiveTab("policy")}
               >
                 <SlidersHorizontal size={16} />
-                {lang === "ar" ? "سياسة الشحن" : "Shipment policy"}
+                {isNew ? (lang === "ar" ? "3. سياسة الشحن" : "3. Shipment policy") : (lang === "ar" ? "سياسة الشحن" : "Shipment policy")}
                 <em>
                   {policyMode === "custom"
                     ? lang === "ar"
@@ -9808,8 +10709,8 @@ function SenderEditor({
             </div>
 
             {activeTab === "profile" ? (
-              <div className="sender-editor-tab-panel">
-            <section className="policy-form-section">
+              <div className={`sender-editor-tab-panel ${isNew ? `sender-new-profile sender-new-profile--${newSenderStep}` : ""}`}>
+            <section className="policy-form-section sender-profile-basic">
               <div className="policy-form-section__title">
                 <span><UsersRound size={16} /></span>
                 <div>
@@ -10028,8 +10929,29 @@ function SenderEditor({
               </div>
             </section>
 
-            <section className="policy-form-section">
-              <div className="policy-form-section__title">
+            {!isNew && (
+              <section className="policy-form-section sender-account-summary">
+                <div className="policy-form-section__title">
+                  <span><ReceiptText size={16} /></span>
+                  <div>
+                    <strong>{lang === "ar" ? "ملخص حساب الراسل" : "Sender account summary"}</strong>
+                    <small>{lang === "ar" ? "ملخص للقراءة فقط؛ التجهيز والتسوية يظلان في صفحة الحساب." : "Read-only summary; preparation and settlement remain in the account page."}</small>
+                  </div>
+                </div>
+                <div className="sender-profile-summary-grid">
+                  <article><small>{lang === "ar" ? "إجمالي الشحنات" : "Total shipments"}</small><strong>{senderShipments.length}</strong></article>
+                  <article><small>{lang === "ar" ? "غير مسواة" : "Unsettled"}</small><strong>{senderOpenShipments.length}</strong></article>
+                  <article><small>{lang === "ar" ? "إجمالي التحصيل المسجل" : "Recorded collection"}</small><strong>{senderCollectionTotal.toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} {lang === "ar" ? "ج.م" : "EGP"}</strong></article>
+                </div>
+                <button className="secondary-button" type="button" onClick={onOpenAccount}>
+                  <ReceiptText size={16} />
+                  {lang === "ar" ? "فتح حساب الراسل" : "Open sender account"}
+                </button>
+              </section>
+            )}
+
+            <details className="policy-form-section sender-profile-optional" open={!isNew}>
+              <summary className="policy-form-section__title">
                 <span><ShieldCheck size={16} /></span>
                 <div>
                   <strong>{lang === "ar" ? "البيانات القانونية" : "Legal information"}</strong>
@@ -10039,7 +10961,8 @@ function SenderEditor({
                       : "Stored by sender type and never shown to recipients."}
                   </small>
                 </div>
-              </div>
+                <ChevronDown size={16} />
+              </summary>
               <div className="policy-form-grid">
                 <label className="field">
                   <span>{lang === "ar" ? "رقم السجل التجاري" : "Commercial registration"}</span>
@@ -10087,9 +11010,9 @@ function SenderEditor({
                   </span>
                 </label>
               </div>
-            </section>
+            </details>
 
-            <section className="policy-form-section">
+            <section className="policy-form-section sender-profile-addresses">
               <div className="policy-form-section__title">
                 <span><MapPin size={16} /></span>
                 <div>
@@ -10134,7 +11057,7 @@ function SenderEditor({
               </div>
             </section>
 
-            <section className="policy-form-section">
+            <section className="policy-form-section sender-profile-price">
               <div className="policy-form-section__title">
                 <span><HandCoins size={16} /></span>
                 <div>
@@ -10182,7 +11105,7 @@ function SenderEditor({
               </div>
             </section>
 
-            <label className="field sender-notes-field">
+            <label className="field sender-notes-field sender-profile-notes">
               <span>{lang === "ar" ? "ملاحظات داخلية" : "Internal notes"}</span>
               <span className="field__control">
                 <textarea
@@ -10199,96 +11122,265 @@ function SenderEditor({
               </div>
             ) : (
               <div className="sender-editor-tab-panel sender-policy-editor-panel">
-                <section className="sender-policy-source">
+                <section className="sender-policy-source sender-policy-source--simple">
                   <div>
                     <span className="workflow-policy-icon workflow-policy-icon--blue">
                       <SlidersHorizontal size={18} />
                     </span>
                     <span>
                       <strong>
-                        {lang === "ar" ? "مصدر سياسة الراسل" : "Sender policy source"}
+                        {lang === "ar" ? "سياسة مستقلة لهذا الراسل" : "Independent sender policy"}
                       </strong>
                       <small>
                         {lang === "ar"
-                          ? "يمكنه استخدام سياسة الشركة أو نسخة مستقلة تخصه وحده."
-                          : "Use the company policy or an independent policy for this sender only."}
+                          ? "كل حفظ يخص هذا الراسل وحده ولا يغيّر أي راسل آخر."
+                          : "Every save belongs to this sender only and never changes another sender."}
                       </small>
                     </span>
                   </div>
-                  <div className="sender-policy-source__choices">
+                  <details className="sender-policy-source__tools sender-policy-source__tools--simple">
+                    <summary>
+                      <MoreHorizontal size={18} />
+                      {lang === "ar" ? "إجراءات السياسة" : "Policy actions"}
+                    </summary>
+                    <div>
+                    <label className="select-field sender-policy-copy">
+                      <span className="select-wrap">
+                        <select
+                          defaultValue=""
+                          onChange={(event) => {
+                            copyPolicyFromSender(event.target.value);
+                            event.currentTarget.value = "";
+                          }}
+                        >
+                          <option value="">
+                            {lang === "ar" ? "نسخ إعدادات من راسل..." : "Copy settings from sender..."}
+                          </option>
+                          {availablePolicies
+                            .filter(
+                              (policy) =>
+                                policy.sender.en !== sender.name.en &&
+                                (policy.state ?? "published") === "published",
+                            )
+                            .map((policy) => (
+                              <option key={policy.sender.en} value={policy.sender.en}>
+                                {policy.sender[lang]}
+                              </option>
+                            ))}
+                        </select>
+                        <ChevronDown size={15} />
+                      </span>
+                    </label>
                     <button
-                      className={policyMode === "company" ? "active" : ""}
+                      className="secondary-button"
                       type="button"
-                      onClick={() => choosePolicyMode("company")}
+                      onClick={resetPolicyToDefaults}
                     >
-                      <ShieldCheck size={16} />
-                      {lang === "ar" ? "سياسة الشركة" : "Company policy"}
+                      <RotateCcw size={16} />
+                      {lang === "ar" ? "استعادة إعدادات البداية" : "Restore starting defaults"}
                     </button>
+                    </div>
+                  </details>
+                </section>
+
+                <section className="sender-policy-natural-summary" aria-label={lang === "ar" ? "ملخص السياسة الحالية" : "Current policy summary"}>
+                  <ShieldCheck size={18} />
+                  <span>
+                    <strong>{lang === "ar" ? "السياسة الحالية باختصار" : "Current policy at a glance"}</strong>
+                    <small>
+                      {lang === "ar"
+                        ? `${policySettings.confirmationMode === "required_before_assignment" ? "التأكيد مطلوب قبل الإسناد" : policySettings.confirmationMode === "optional" ? "التأكيد اختياري" : "التأكيد غير مستخدم"} · الشحن افتراضيًا على ${policySettings.defaultShippingPayer === "recipient" ? "المستلم" : "الراسل"} · ${policySettings.incompleteRoute === "warehouse_and_queue" ? "الناقص يدخل المخزن ويظهر في الاستكمال" : "الناقص ينتظر الاستكمال قبل المخزن"} · ${policySettings.partialDeliveryEnabled ? "التسليم الجزئي مسموح" : "التسليم الجزئي غير مسموح"}`
+                        : `${policySettings.confirmationMode === "required_before_assignment" ? "Confirmation required before assignment" : policySettings.confirmationMode === "optional" ? "Confirmation optional" : "Confirmation off"} · Default payer: ${policySettings.defaultShippingPayer === "recipient" ? "recipient" : "sender"} · ${policySettings.incompleteRoute === "warehouse_and_queue" ? "Incomplete shipments enter warehouse and completion" : "Incomplete shipments wait before warehouse"} · Partial delivery ${policySettings.partialDeliveryEnabled ? "allowed" : "not allowed"}`}
+                    </small>
+                  </span>
+                </section>
+
+                <nav className="sender-policy-section-nav" aria-label={lang === "ar" ? "أقسام سياسة الراسل" : "Sender policy sections"}>
+                  {([
+                    ["operation", lang === "ar" ? "التشغيل" : "Operation"],
+                    ["financial", lang === "ar" ? "الشحن والحساب" : "Shipping & account"],
+                    ["entry", lang === "ar" ? "التسجيل والحقول" : "Entry & fields"],
+                    ["delivery", lang === "ar" ? "التسليم" : "Delivery"],
+                  ] as const).map(([id, label]) => (
                     <button
-                      className={policyMode === "custom" ? "active" : ""}
+                      className={policySection === id ? "active" : ""}
                       type="button"
-                      onClick={() => choosePolicyMode("custom")}
+                      key={id}
+                      onClick={() => setPolicySection(id)}
                     >
-                      <SlidersHorizontal size={16} />
-                      {lang === "ar" ? "سياسة مخصصة" : "Custom policy"}
+                      {label}
                     </button>
-                  </div>
-                  {policyMode === "custom" && (
-                    <div className="sender-policy-source__tools">
+                  ))}
+                </nav>
+
+                <section className="sender-policy-quick-panel">
+                  {policySection === "operation" && (
+                    <div className="sender-policy-quick-grid">
                       <label className="select-field">
-                        <span>
-                          {lang === "ar" ? "حالة السياسة" : "Policy state"}
-                        </span>
+                        <span>{lang === "ar" ? "تأكيد الطلب" : "Order confirmation"}</span>
                         <span className="select-wrap">
                           <select
-                            value={policyState}
-                            onChange={(event) =>
-                              setPolicyState(
-                                event.target.value as "draft" | "published",
-                              )
-                            }
+                            value={policySettings.confirmationMode}
+                            onChange={(event) => updateSenderPolicySetting("confirmationMode", event.target.value as ShipmentDataSettings["confirmationMode"])}
                           >
-                            <option value="published">
-                              {lang === "ar" ? "منشورة ومطبقة" : "Published and active"}
-                            </option>
-                            <option value="draft">
-                              {lang === "ar" ? "مسودة غير مطبقة" : "Draft, not applied"}
-                            </option>
+                            <option value="off">{lang === "ar" ? "غير مستخدم" : "Off"}</option>
+                            <option value="optional">{lang === "ar" ? "اختياري" : "Optional"}</option>
+                            <option value="required_before_assignment">{lang === "ar" ? "إلزامي قبل الإسناد" : "Required before assignment"}</option>
                           </select>
                           <ChevronDown size={15} />
                         </span>
                       </label>
                       <label className="select-field">
-                        <span>
-                          {lang === "ar"
-                            ? "نسخ إعدادات من راسل"
-                            : "Copy settings from sender"}
-                        </span>
+                        <span>{lang === "ar" ? "الشحنة ناقصة البيانات" : "Incomplete shipment"}</span>
                         <span className="select-wrap">
                           <select
-                            defaultValue=""
-                            onChange={(event) => {
-                              copyPolicyFromSender(event.target.value);
-                              event.currentTarget.value = "";
-                            }}
+                            value={policySettings.incompleteRoute}
+                            onChange={(event) => updateSenderPolicySetting("incompleteRoute", event.target.value as ShipmentDataSettings["incompleteRoute"])}
                           >
-                            <option value="">
-                              {lang === "ar" ? "اختر راسلًا..." : "Choose a sender..."}
-                            </option>
-                            {availablePolicies
-                              .filter(
-                                (policy) =>
-                                  policy.sender.en !== sender.name.en &&
-                                  (policy.state ?? "published") === "published",
+                            <option value="warehouse_and_queue">{lang === "ar" ? "تدخل المخزن وتظهر في الاستكمال" : "Warehouse + completion queue"}</option>
+                            <option value="complete_before_warehouse">{lang === "ar" ? "تتوقف حتى استكمال البيانات" : "Wait until data is complete"}</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <article className="sender-policy-quick-summary">
+                        <Boxes size={18} />
+                        <span><small>{lang === "ar" ? "أنواع الشحنات المتاحة" : "Available shipment types"}</small><strong>{allowedServiceTypeIds.length} {lang === "ar" ? "نوع" : "type(s)"}</strong></span>
+                      </article>
+                    </div>
+                  )}
+
+                  {policySection === "financial" && (
+                    <div className="sender-policy-quick-grid">
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "متحمل مصاريف الشحن الافتراضي" : "Default shipping payer"}</span>
+                        <span className="select-wrap">
+                          <select
+                            value={policySettings.defaultShippingPayer}
+                            onChange={(event) => updateSenderPolicySetting("defaultShippingPayer", event.target.value as ShipmentDataSettings["defaultShippingPayer"])}
+                          >
+                            <option value="recipient">{lang === "ar" ? "المستلم" : "Recipient"}</option>
+                            <option value="sender">{lang === "ar" ? "الراسل" : "Sender"}</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "عرض مصاريف الشحن للمستلم" : "Recipient shipping display"}</span>
+                        <span className="select-wrap">
+                          <select
+                            value={policySettings.recipientPriceDisplay}
+                            onChange={(event) => updateSenderPolicySetting("recipientPriceDisplay", event.target.value as ShipmentDataSettings["recipientPriceDisplay"])}
+                          >
+                            <option value="separate_shipping">{lang === "ar" ? "قيمة الطلب والشحن منفصلان" : "Order and shipping separately"}</option>
+                            <option value="total_only">{lang === "ar" ? "الإجمالي فقط" : "Total only"}</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <button
+                        className={policySettings.shippingPayerOverride ? "policy-inline-toggle active" : "policy-inline-toggle"}
+                        type="button"
+                        onClick={() => updateSenderPolicySetting("shippingPayerOverride", !policySettings.shippingPayerOverride)}
+                      >
+                        <span><strong>{lang === "ar" ? "السماح بتغيير المتحمل عند التسجيل" : "Allow payer change during entry"}</strong><small>{lang === "ar" ? "محاسب التشغيل يظل صاحب القرار المالي النهائي." : "The operations accountant keeps the final financial decision."}</small></span>
+                        <i className={policySettings.shippingPayerOverride ? "switch switch--on" : "switch"}><b /></i>
+                      </button>
+                      <article className="sender-policy-quick-summary">
+                        <ReceiptText size={18} />
+                        <span><small>{lang === "ar" ? "أسعار مستلم مخصصة" : "Custom recipient rates"}</small><strong>{customRecipientRateCount} {lang === "ar" ? "منطقة" : "area(s)"}</strong></span>
+                      </article>
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "تنبيه التحصيل المرتفع" : "High collection warning"}</span>
+                        <span className="policy-number-control">
+                          <input
+                            type="number"
+                            min="0"
+                            value={policySettings.collectionWarningLimit}
+                            onChange={(event) =>
+                              updateSenderPolicySetting(
+                                "collectionWarningLimit",
+                                Math.max(0, Number(event.target.value) || 0),
                               )
-                              .map((policy) => (
-                                <option
-                                  key={policy.sender.en}
-                                  value={policy.sender.en}
-                                >
-                                  {policy.sender[lang]}
-                                </option>
-                              ))}
+                            }
+                          />
+                          <span>{lang === "ar" ? "ج.م" : "EGP"}</span>
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
+                  {policySection === "entry" && (
+                    <div className="sender-policy-quick-grid">
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "كشف التكرار" : "Duplicate detection"}</span>
+                        <span className="select-wrap">
+                          <select value={policySettings.duplicateCheckMode} onChange={(event) => updateSenderPolicySetting("duplicateCheckMode", event.target.value as ShipmentDataSettings["duplicateCheckMode"])}>
+                            <option value="block">{lang === "ar" ? "منع الحفظ" : "Block"}</option>
+                            <option value="warn">{lang === "ar" ? "تنبيه فقط" : "Warn"}</option>
+                            <option value="off">{lang === "ar" ? "غير مستخدم" : "Off"}</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "مرجع الراسل" : "Sender reference"}</span>
+                        <span className="select-wrap">
+                          <select value={policySettings.senderReferenceMode} onChange={(event) => updateSenderPolicySetting("senderReferenceMode", event.target.value as ShipmentDataSettings["senderReferenceMode"])}>
+                            <option value="required_unique">{lang === "ar" ? "مطلوب وفريد" : "Required & unique"}</option>
+                            <option value="optional_unique">{lang === "ar" ? "اختياري وفريد" : "Optional & unique"}</option>
+                            <option value="optional">{lang === "ar" ? "اختياري" : "Optional"}</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <button className={policySettings.phoneLookupEnabled ? "policy-inline-toggle active" : "policy-inline-toggle"} type="button" onClick={() => updateSenderPolicySetting("phoneLookupEnabled", !policySettings.phoneLookupEnabled)}>
+                        <span><strong>{lang === "ar" ? "استدعاء المستلم برقم الهاتف" : "Recipient lookup by phone"}</strong><small>{lang === "ar" ? "يجلب بيانات المستلم وعناوينه المسجلة." : "Loads saved recipient details and addresses."}</small></span>
+                        <i className={policySettings.phoneLookupEnabled ? "switch switch--on" : "switch"}><b /></i>
+                      </button>
+                      <article className="sender-policy-quick-summary">
+                        <ClipboardCheck size={18} />
+                        <span><small>{lang === "ar" ? "حقول الشحنة المستخدمة" : "Active shipment fields"}</small><strong>{policyFields.filter((field) => field.mode !== "hidden").length}</strong></span>
+                      </article>
+                    </div>
+                  )}
+
+                  {policySection === "delivery" && (
+                    <div className="sender-policy-quick-grid">
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "فتح ومعاينة الطرد" : "Package inspection"}</span>
+                        <span className="select-wrap">
+                          <select value={policySettings.packageInspection} onChange={(event) => updateSenderPolicySetting("packageInspection", event.target.value as ShipmentDataSettings["packageInspection"])}>
+                            <option value="not_allowed">{lang === "ar" ? "غير مسموح" : "Not allowed"}</option>
+                            <option value="allowed">{lang === "ar" ? "مسموح" : "Allowed"}</option>
+                            <option value="sender_approval">{lang === "ar" ? "بموافقة الراسل" : "Sender approval"}</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "إثبات التسليم" : "Proof of delivery"}</span>
+                        <span className="select-wrap">
+                          <select value={policySettings.deliveryProof} onChange={(event) => updateSenderPolicySetting("deliveryProof", event.target.value as ShipmentDataSettings["deliveryProof"])}>
+                            <option value="recipient_name">{lang === "ar" ? "اسم المستلم" : "Recipient name"}</option>
+                            <option value="signature">{lang === "ar" ? "توقيع" : "Signature"}</option>
+                            <option value="photo">{lang === "ar" ? "صورة" : "Photo"}</option>
+                            <option value="otp">OTP</option>
+                          </select>
+                          <ChevronDown size={15} />
+                        </span>
+                      </label>
+                      <button className={policySettings.partialDeliveryEnabled ? "policy-inline-toggle active" : "policy-inline-toggle"} type="button" onClick={() => updateSenderPolicySetting("partialDeliveryEnabled", !policySettings.partialDeliveryEnabled)}>
+                        <span><strong>{lang === "ar" ? "السماح بالتسليم الجزئي" : "Allow partial delivery"}</strong><small>{lang === "ar" ? "تظهر حالاته فقط إذا كانت مفعلة من صفحة الحالات." : "Its statuses appear only when enabled in Statuses."}</small></span>
+                        <i className={policySettings.partialDeliveryEnabled ? "switch switch--on" : "switch"}><b /></i>
+                      </button>
+                      <label className="select-field">
+                        <span>{lang === "ar" ? "تفاصيل البوليصة" : "Waybill detail level"}</span>
+                        <span className="select-wrap">
+                          <select value={policySettings.labelDetailMode} onChange={(event) => updateSenderPolicySetting("labelDetailMode", event.target.value as ShipmentDataSettings["labelDetailMode"])}>
+                            <option value="full">{lang === "ar" ? "كاملة" : "Full"}</option>
+                            <option value="masked">{lang === "ar" ? "بيانات حساسة محجوبة" : "Masked"}</option>
+                            <option value="minimal">{lang === "ar" ? "الحد الأدنى" : "Minimal"}</option>
                           </select>
                           <ChevronDown size={15} />
                         </span>
@@ -10297,54 +11389,8 @@ function SenderEditor({
                   )}
                 </section>
 
-                {policyMode === "company" ? (
-                  <section className="sender-policy-inherited">
-                    <ShieldCheck size={24} />
-                    <div>
-                      <strong>
-                        {lang === "ar"
-                          ? "هذا الراسل يستخدم سياسة الشركة"
-                          : "This sender uses the company policy"}
-                      </strong>
-                      <p>
-                        {lang === "ar"
-                          ? "الإعدادات التالية تُقرأ من أساس الشركة تلقائيًا. اختر «سياسة مخصصة» لنسخها وتعديلها لهذا الراسل فقط."
-                          : "The following settings are inherited automatically. Choose Custom policy to copy and edit them for this sender only."}
-                      </p>
-                      <div>
-                        <span>
-                          {companyFields.filter((field) => field.mode === "required_on_create").length}{" "}
-                          {lang === "ar" ? "مطلوب عند التسجيل" : "required on entry"}
-                        </span>
-                        <span>
-                          {companyFields.filter((field) => field.mode === "required_before_assignment").length}{" "}
-                          {lang === "ar" ? "مطلوب قبل الإسناد" : "required before assignment"}
-                        </span>
-                        <span>
-                          {companySettings.confirmationMode === "required_before_assignment"
-                            ? lang === "ar"
-                              ? "التأكيد إلزامي"
-                              : "Confirmation required"
-                            : companySettings.confirmationMode === "optional"
-                              ? lang === "ar"
-                                ? "التأكيد اختياري"
-                                : "Confirmation optional"
-                              : lang === "ar"
-                                ? "التأكيد غير مستخدم"
-                                : "Confirmation off"}
-                        </span>
-                        <span>
-                          {companyServiceIds.length}{" "}
-                          {lang === "ar"
-                            ? "نوع شحنة من سياسة الشركة"
-                            : "shipment types from company policy"}
-                        </span>
-                      </div>
-                    </div>
-                  </section>
-                ) : (
-                  <>
-                    <section className="policy-form-section sender-service-policy">
+                <div className={`sender-policy-advanced-content is-open sender-policy-details--${policySection}`}>
+                    <section id="sender-policy-operation" className="policy-form-section sender-service-policy">
                       <div className="policy-form-section__title">
                         <span><Boxes size={16} /></span>
                         <div>
@@ -10462,19 +11508,19 @@ function SenderEditor({
                       )}
                     </section>
 
-                    <section className="policy-form-section">
+                    <section id="sender-policy-financial" className="policy-form-section">
                       <div className="policy-form-section__title">
                         <span><ClipboardCheck size={16} /></span>
                         <div>
                           <strong>
                             {lang === "ar"
-                              ? "سياسات الدخول والتشغيل"
-                              : "Entry and operating policies"}
+                              ? "أسعار الشحن للمستلم"
+                              : "Recipient shipping prices"}
                           </strong>
                           <small>
                             {lang === "ar"
-                              ? "كل اختيار هنا يخص هذا الراسل فقط."
-                              : "Every choice here applies only to this sender."}
+                              ? "راجع أسعار المستلم حسب المنطقة؛ الفرق عن سعر الشركة يدخل تلقائيًا في حساب الراسل."
+                              : "Review recipient rates by area; any difference from the company rate flows automatically into the sender account."}
                           </small>
                         </div>
                       </div>
@@ -10579,6 +11625,26 @@ function SenderEditor({
                                 </strong>
                               </span>
                             </span>
+                          </div>
+
+                          <div className="sender-recipient-service-tabs">
+                            {serviceTypes
+                              .filter(
+                                (service) =>
+                                  service.state === "published" &&
+                                  (servicePolicyMode !== "custom" ||
+                                    allowedServiceTypeIds.includes(service.id)),
+                              )
+                              .map((service) => (
+                                <button
+                                  type="button"
+                                  key={service.id}
+                                  className={recipientRateServiceId === service.id ? "active" : ""}
+                                  onClick={() => setRecipientRateServiceId(service.id)}
+                                >
+                                  {service.name[lang]}
+                                </button>
+                              ))}
                           </div>
 
                           <div className="sender-recipient-area-pricing__summary">
@@ -11109,7 +12175,7 @@ function SenderEditor({
                       </div>
                     </section>
 
-                    <section className="policy-form-section sender-advanced-policy">
+                    <section id="sender-policy-entry" className="policy-form-section sender-advanced-policy">
                       <div className="policy-form-section__title">
                         <span><SlidersHorizontal size={16} /></span>
                         <div>
@@ -11298,7 +12364,7 @@ function SenderEditor({
                           </label>
                         </article>
 
-                        <article>
+                        <article id="sender-policy-delivery">
                           <div className="policy-setting-label">
                             <strong>{lang === "ar" ? "فتح ومعاينة الطرد" : "Package inspection"}</strong>
                             {settingSourceButton("packageInspection")}
@@ -11621,8 +12687,7 @@ function SenderEditor({
                         </div>
                       </section>
                     )}
-                  </>
-                )}
+              </div>
               </div>
             )}
           </div>
@@ -11758,12 +12823,16 @@ function SendersScreen({
 
   function linkedPriceList(sender: SenderRecord) {
     return (
-      priceLists.find((priceList) =>
-        priceList.senders.some(
-          (name) => name.en === sender.name.en || name.ar === sender.name.ar,
-        ),
+      priceLists.find(
+        (priceList) =>
+          priceList.state === "active" &&
+          priceList.senders.some(
+            (name) => name.en === sender.name.en || name.ar === sender.name.ar,
+          ),
       ) ??
-      priceLists.find((priceList) => priceList.isDefault) ??
+      priceLists.find(
+        (priceList) => priceList.state === "active" && priceList.isDefault,
+      ) ??
       null
     );
   }
@@ -11862,6 +12931,21 @@ function SendersScreen({
                 ),
               )
             : undefined,
+          recipientServiceAreaRates: previousPolicy.recipientServiceAreaRates
+            ? Object.fromEntries(
+                Object.entries(previousPolicy.recipientServiceAreaRates).map(
+                  ([serviceId, rates]) => [
+                    serviceId,
+                    Object.fromEntries(
+                      Object.entries(rates).map(([areaId, rate]) => [
+                        areaId,
+                        { ...rate },
+                      ]),
+                    ),
+                  ],
+                ),
+              )
+            : undefined,
           overrideKeys: previousPolicy.overrideKeys,
           fieldOverrideCodes: previousPolicy.fieldOverrideCodes,
           servicePolicyMode: previousPolicy.servicePolicyMode,
@@ -11921,11 +13005,7 @@ function SendersScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -11968,16 +13048,8 @@ function SendersScreen({
               >
                 <Settings2 size={17} />
                 {lang === "ar"
-                  ? "تعديل سياسة الشركة"
-                  : "Edit company policy"}
-              </button>
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => onNavigate("shipmentPolicies")}
-              >
-                <SlidersHorizontal size={17} />
-                {lang === "ar" ? "سياسات الرسل" : "Sender policies"}
+                  ? "إعدادات الراسل الجديد"
+                  : "New-sender defaults"}
               </button>
               <button className="primary-button" type="button" onClick={openNew}>
                 <Plus size={17} />
@@ -12161,7 +13233,15 @@ function SendersScreen({
             findSenderShipmentPolicy(editing.name, senderPolicies) ?? null
           }
           availablePolicies={senderPolicies}
+          shipmentRecords={shipmentRecords}
           initialTab={editorInitialTab}
+          onOpenAccount={() => {
+            window.sessionStorage.setItem(
+              "tasleem-sender-account-selected",
+              editing.name.en,
+            );
+            onNavigate("senderAccountPrep");
+          }}
           onClose={() => {
             setEditing(null);
             setIsNew(false);
@@ -12185,6 +13265,7 @@ function CourierEditor({
   lang,
   plans,
   selectedPlanId,
+  onOpenAgreement,
   onClose,
   onSave,
 }: {
@@ -12193,15 +13274,16 @@ function CourierEditor({
   lang: Lang;
   plans: CourierRatePlan[];
   selectedPlanId: string;
+  onOpenAgreement?: () => void;
   onClose: () => void;
   onSave: (courier: CourierRecord, planId: string) => void;
 }) {
   const [draft, setDraft] = useState(courier);
-  const [planId, setPlanId] = useState(selectedPlanId);
+  const selectedPlan = plans.find((plan) => plan.id === selectedPlanId) ?? null;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    onSave(draft, planId);
+    onSave(draft, selectedPlanId);
   }
 
   return (
@@ -12378,6 +13460,21 @@ function CourierEditor({
                   </span>
                 </label>
               </div>
+              {!isNew && onOpenAgreement && (
+                <div className="sender-linked-workspace">
+                  <span>
+                    <HandCoins size={18} />
+                    <span>
+                      <strong>{lang === "ar" ? "اتفاق الأجر وجدول العمولة" : "Pay agreement and commission table"}</strong>
+                      <small>{lang === "ar" ? "يفتح الاتفاق الخاص بهذا المندوب فقط، بما فيه طريقة الأجر والمناطق والأسعار الناقصة." : "Opens only this courier's agreement, including pay method, coverage and missing rates."}</small>
+                    </span>
+                  </span>
+                  <button className="secondary-button" type="button" onClick={onOpenAgreement}>
+                    <Pencil size={15} />
+                    {lang === "ar" ? "فتح اتفاق المندوب" : "Open courier agreement"}
+                  </button>
+                </div>
+              )}
             </section>
 
             <section className="policy-form-section">
@@ -12439,29 +13536,22 @@ function CourierEditor({
                     />
                   </span>
                 </label>
-                <label className="select-field">
-                  <span>{lang === "ar" ? "قائمة عمولة المندوب" : "Commission plan"}</span>
-                  <span className="select-wrap">
-                    <select
-                      value={planId}
-                      onChange={(event) => setPlanId(event.target.value)}
-                    >
-                      <option value="">
-                        {lang === "ar"
-                          ? "الخطة الافتراضية للشركة"
-                          : "Company default plan"}
-                      </option>
-                      {plans
-                        .filter((plan) => plan.state === "active")
-                        .map((plan) => (
-                          <option key={plan.id} value={plan.id}>
-                            {plan.name[lang]}
-                          </option>
-                        ))}
-                    </select>
-                    <ChevronDown size={16} />
-                  </span>
-                </label>
+                <div className="courier-own-agreement-note">
+                  <span>{lang === "ar" ? "اتفاق أجر المندوب" : "Courier pay agreement"}</span>
+                  <strong>
+                    {isNew
+                      ? lang === "ar"
+                        ? "سيُنشأ اتفاق مستقل تلقائيًا"
+                        : "An independent agreement will be created automatically"
+                      : selectedPlan?.name[lang] ??
+                        (lang === "ar" ? "اتفاق مستقل" : "Independent agreement")}
+                  </strong>
+                  <small>
+                    {lang === "ar"
+                      ? "للقراءة فقط هنا؛ تعديل الأجر والمناطق والأسعار يتم من زر فتح اتفاق المندوب."
+                      : "Read-only here; use Open courier agreement to edit pay, areas, and rates."}
+                  </small>
+                </div>
               </div>
             </section>
 
@@ -12503,6 +13593,8 @@ function CouriersScreen({
   plans,
   shipmentRecords,
   debts,
+  statuses,
+  governorates,
   onRecordsChange,
   onPlansChange,
   onLang,
@@ -12516,6 +13608,8 @@ function CouriersScreen({
   plans: CourierRatePlan[];
   shipmentRecords: Shipment[];
   debts: CourierDebt[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
   onRecordsChange: (
     updater: (current: CourierRecord[]) => CourierRecord[],
   ) => void;
@@ -12537,6 +13631,7 @@ function CouriersScreen({
   const [editing, setEditing] = useState<CourierRecord | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [toast, setToast] = useState("");
+  const [agreementCourier, setAgreementCourier] = useState<CourierRecord | null>(null);
 
   const filteredRecords = records.filter((courier) => {
     const normalized = search.trim().toLowerCase();
@@ -12585,42 +13680,47 @@ function CouriersScreen({
     });
   }
 
-  function saveCourier(next: CourierRecord, planId: string) {
+  function saveCourier(next: CourierRecord, _planId: string) {
     const previous = records.find((record) => record.id === next.id);
-    onRecordsChange((current) =>
-      current.some((record) => record.id === next.id)
-        ? current.map((record) => (record.id === next.id ? next : record))
-        : [...current, next],
-    );
-    onPlansChange((current) =>
-      current.map((plan) => {
-        const cleaned = plan.couriers.filter(
-          (name) =>
-            !previous ||
-            (name.en !== previous.name.en && name.ar !== previous.name.ar),
-        );
-        if (plan.id !== planId) {
-          return { ...plan, couriers: cleaned };
-        }
-        return {
-          ...plan,
-          couriers: [
-            ...cleaned.filter(
-              (name) =>
-                name.en !== next.name.en && name.ar !== next.name.ar,
-            ),
-            next.name,
-          ],
-        };
-      }),
-    );
+    const nextRecords = records.some((record) => record.id === next.id)
+        ? records.map((record) => (record.id === next.id ? next : record))
+        : [...records, next];
+    onRecordsChange(() => nextRecords);
+    onPlansChange((current) => {
+      const renamedAgreement = current.map((plan) =>
+        previous &&
+        plan.couriers.some(
+          (name) => name.en === previous.name.en || name.ar === previous.name.ar,
+        )
+          ? { ...plan, couriers: [next.name] }
+          : plan,
+      );
+      return normalizeCourierPlans(renamedAgreement, nextRecords);
+    });
     setEditing(null);
     setIsNew(false);
     setToast(
       lang === "ar"
-        ? "تم حفظ المندوب وربطه بقائمة عمولته"
-        : "Courier saved and linked to the commission plan",
+        ? "تم حفظ المندوب واتفاق أجره المستقل"
+        : "Courier and independent pay agreement saved",
     );
+    window.setTimeout(() => setToast(""), 2600);
+  }
+
+  function saveCourierAgreement(next: CourierRatePlan) {
+    onPlansChange((current) =>
+      current.map((plan) =>
+        plan.id === next.id
+          ? {
+              ...next,
+              version: Math.max(plan.version + 1, next.version + 1),
+              rates: cloneCourierRateMatrix(next.rates),
+            }
+          : plan,
+      ),
+    );
+    setAgreementCourier(null);
+    setToast(lang === "ar" ? "تم حفظ اتفاق المندوب" : "Courier agreement saved");
     window.setTimeout(() => setToast(""), 2600);
   }
 
@@ -12654,11 +13754,7 @@ function CouriersScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -12694,14 +13790,6 @@ function CouriersScreen({
               </p>
             </div>
             <div className="page-heading-actions">
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => onNavigate("courierRates")}
-              >
-                <HandCoins size={17} />
-                {lang === "ar" ? "عمولات المناديب" : "Courier commissions"}
-              </button>
               <button className="primary-button" type="button" onClick={openNew}>
                 <Plus size={17} />
                 {lang === "ar" ? "إضافة مندوب" : "Add courier"}
@@ -12870,6 +13958,24 @@ function CouriersScreen({
             setIsNew(false);
           }}
           onSave={saveCourier}
+          onOpenAgreement={() => {
+            setEditing(null);
+            setAgreementCourier(editing);
+          }}
+        />
+      )}
+      {agreementCourier && linkedPlan(agreementCourier) && (
+        <CourierAgreementEditorV2
+          key={`${agreementCourier.id}-${linkedPlan(agreementCourier)?.version ?? 0}`}
+          plan={linkedPlan(agreementCourier)!}
+          courier={agreementCourier}
+          plans={plans}
+          couriers={records}
+          statuses={statuses}
+          governorates={governorates}
+          lang={lang}
+          onClose={() => setAgreementCourier(null)}
+          onSave={saveCourierAgreement}
         />
       )}
       {toast && (
@@ -13067,6 +14173,7 @@ function PriceListEditor({
                       <input
                         type="checkbox"
                         checked={checked}
+                        disabled={draft.state !== "active"}
                         onChange={() => toggleSender(sender)}
                       />
                       <span><Check size={13} /></span>
@@ -13075,6 +14182,13 @@ function PriceListEditor({
                   );
                 })}
               </div>
+              {draft.state !== "active" && (
+                <small className="policy-inline-warning">
+                  {lang === "ar"
+                    ? "فعّل القائمة وأكمل أسعارها أولًا قبل ربط أي راسل."
+                    : "Activate and complete the list before assigning senders."}
+                </small>
+              )}
             </section>
 
             <section className="geo-safety-card pricing-snapshot-card">
@@ -13113,6 +14227,7 @@ function PriceListsScreen({
   statuses,
   governorates,
   senders,
+  serviceTypes,
   onLang,
   onTheme,
   onPriceListsChange,
@@ -13125,6 +14240,7 @@ function PriceListsScreen({
   statuses: StatusPolicy[];
   governorates: GovernorateRecord[];
   senders: SenderRecord[];
+  serviceTypes: ShipmentServiceType[];
   onLang: () => void;
   onTheme: () => void;
   onPriceListsChange: (
@@ -13144,6 +14260,17 @@ function PriceListsScreen({
   const [editing, setEditing] = useState<PriceListRecord | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [dirtyLists, setDirtyLists] = useState<string[]>([]);
+  const activeServiceTypes = serviceTypes.filter(
+    (service) => service.state === "published",
+  );
+  const [selectedServiceId, setSelectedServiceId] = useState(
+    activeServiceTypes[0]?.id ?? "service-standard",
+  );
+  const [draftServicePrices, setDraftServicePrices] = useState<Record<
+    string,
+    PriceMatrix
+  > | null>(null);
+  const [draftUnservedAreaIds, setDraftUnservedAreaIds] = useState<string[]>([]);
   const [toast, setToast] = useState("");
 
   const pricingStatuses = statuses.filter(
@@ -13154,6 +14281,33 @@ function PriceListsScreen({
   );
   const selected =
     priceLists.find((priceList) => priceList.id === selectedId) ?? priceLists[0];
+  const workingPrices =
+    draftServicePrices?.[selectedServiceId] ??
+    (selected ? priceMatrixForService(selected, selectedServiceId) : {});
+  const workingUnservedAreaIds = draftServicePrices
+    ? draftUnservedAreaIds
+    : selected?.unservedAreaIds ?? [];
+
+  useEffect(() => {
+    if (!selected) return;
+    setDraftServicePrices(
+      Object.fromEntries(
+        activeServiceTypes.map((service) => {
+          const matrix = priceMatrixForService(selected, service.id);
+          return [
+            service.id,
+            Object.fromEntries(
+              Object.entries(matrix).map(([areaId, values]) => [
+                areaId,
+                { ...values },
+              ]),
+            ),
+          ];
+        }),
+      ),
+    );
+    setDraftUnservedAreaIds([...(selected.unservedAreaIds ?? [])]);
+  }, [selected?.id, serviceTypes]);
 
   const filteredLists = useMemo(() => {
     const normalized = listSearch.trim().toLowerCase();
@@ -13186,13 +14340,29 @@ function PriceListsScreen({
   }, [areaSearch, governorateFilter]);
 
   function priceListCompletion(priceList: PriceListRecord) {
-    const total = areasWithGovernorates.length * pricingStatuses.length;
-    const filled = areasWithGovernorates.reduce(
-      (count, { area }) =>
-        count +
-        pricingStatuses.filter(
-          (status) => priceList.prices[area.id]?.[status.id] != null,
-        ).length,
+    const servedAreas = areasWithGovernorates.filter(
+      ({ area, governorate }) =>
+        governorate.state === "active" &&
+        area.state === "active" &&
+        !(priceList.unservedAreaIds ?? []).includes(area.id),
+    );
+    const total =
+      servedAreas.length * pricingStatuses.length * activeServiceTypes.length;
+    const filled = activeServiceTypes.reduce(
+      (serviceCount, service) => {
+        const matrix = priceMatrixForService(priceList, service.id);
+        return (
+          serviceCount +
+          servedAreas.reduce(
+            (areaCount, { area }) =>
+              areaCount +
+              pricingStatuses.filter(
+                (status) => matrix[area.id]?.[status.id] != null,
+              ).length,
+            0,
+          )
+        );
+      },
       0,
     );
     return {
@@ -13205,25 +14375,71 @@ function PriceListsScreen({
   function setPrice(areaId: string, statusId: string, rawValue: string) {
     if (!selected) return;
     const value = rawValue === "" ? null : Math.max(0, Number(rawValue));
-    onPriceListsChange((current) =>
-      current.map((priceList) =>
-        priceList.id === selected.id
-          ? {
-              ...priceList,
-              prices: {
-                ...priceList.prices,
-                [areaId]: {
-                  ...(priceList.prices[areaId] ?? {}),
-                  [statusId]: Number.isNaN(value) ? null : value,
-                },
-              },
-            }
-          : priceList,
-      ),
+    setDraftServicePrices((current) => {
+      const base = current ?? {};
+      const serviceMatrix =
+        base[selectedServiceId] ??
+        priceMatrixForService(selected, selectedServiceId);
+      return {
+        ...base,
+        [selectedServiceId]: {
+          ...serviceMatrix,
+          [areaId]: {
+            ...(serviceMatrix[areaId] ?? {}),
+            [statusId]: Number.isNaN(value) ? null : value,
+          },
+        },
+      };
+    });
+    setDirtyLists((current) =>
+      current.includes(selected.id) ? current : [...current, selected.id],
+    );
+  }
+
+  function toggleAreaService(areaId: string) {
+    if (!selected) return;
+    setDraftUnservedAreaIds((current) =>
+      current.includes(areaId)
+        ? current.filter((id) => id !== areaId)
+        : [...current, areaId],
     );
     setDirtyLists((current) =>
       current.includes(selected.id) ? current : [...current, selected.id],
     );
+  }
+
+  function discardPriceDraft() {
+    if (!selected) return;
+    setDraftServicePrices(
+      Object.fromEntries(
+        activeServiceTypes.map((service) => [
+          service.id,
+          Object.fromEntries(
+            Object.entries(priceMatrixForService(selected, service.id)).map(
+              ([areaId, values]) => [areaId, { ...values }],
+            ),
+          ),
+        ]),
+      ),
+    );
+    setDraftUnservedAreaIds([...(selected.unservedAreaIds ?? [])]);
+    setDirtyLists((current) => current.filter((id) => id !== selected.id));
+  }
+
+  function choosePriceList(id: string) {
+    if (
+      selected &&
+      id !== selected.id &&
+      dirtyLists.includes(selected.id) &&
+      !window.confirm(
+        lang === "ar"
+          ? "لديك تعديلات أسعار غير محفوظة. هل تريد تركها وإلغاؤها؟"
+          : "You have unsaved price changes. Leave and discard them?",
+      )
+    ) {
+      return;
+    }
+    setSelectedId(id);
   }
 
   function savePrices() {
@@ -13231,7 +14447,29 @@ function PriceListsScreen({
     onPriceListsChange((current) =>
       current.map((priceList) =>
         priceList.id === selected.id
-          ? { ...priceList, version: priceList.version + 1 }
+          ? {
+              ...priceList,
+              prices:
+                draftServicePrices?.["service-standard"] ?? priceList.prices,
+              servicePrices: {
+                ...(priceList.servicePrices ?? {}),
+                ...(draftServicePrices ?? {}),
+              },
+              unservedAreaIds: draftUnservedAreaIds,
+              version: priceList.version + 1,
+              history: [
+                {
+                  version: priceList.version + 1,
+                  changedAt: {
+                    ar: new Date().toLocaleString("ar-EG"),
+                    en: new Date().toLocaleString("en-EG"),
+                  },
+                  changedBy: { ar: "مدير النظام", en: "System admin" },
+                  summary: { ar: "تحديث أسعار القائمة", en: "Price-list rates updated" },
+                },
+                ...(priceList.history ?? []),
+              ],
+            }
           : priceList,
       ),
     );
@@ -13257,18 +14495,57 @@ function PriceListsScreen({
       senders: [],
       version: 1,
       prices,
+      servicePrices: Object.fromEntries(
+        activeServiceTypes.map((service) => [
+          service.id,
+          Object.fromEntries(
+            areasWithGovernorates.map(({ area }) => [
+              area.id,
+              Object.fromEntries(
+                pricingStatuses.map((status) => [status.id, null]),
+              ),
+            ]),
+          ),
+        ]),
+      ),
     });
   }
 
   function saveList(next: PriceListRecord) {
+    const preparedNext =
+      next.state === "draft" ? { ...next, senders: [] } : next;
+    const completion = priceListCompletion(preparedNext);
+    if (preparedNext.state === "active" && completion.filled < completion.total) {
+      setToast(
+        lang === "ar"
+          ? `لا يمكن تفعيل القائمة: استكمل ${completion.total - completion.filled} سعرًا للمناطق المخدومة.`
+          : `Cannot activate: complete ${completion.total - completion.filled} served-area price(s).`,
+      );
+      window.setTimeout(() => setToast(""), 3400);
+      return;
+    }
+    if (
+      !preparedNext.isDefault &&
+      !priceLists.some(
+        (priceList) => priceList.id !== preparedNext.id && priceList.isDefault,
+      )
+    ) {
+      setToast(
+        lang === "ar"
+          ? "يجب أن تظل هناك قائمة افتراضية واحدة على الأقل."
+          : "At least one default price list must remain.",
+      );
+      window.setTimeout(() => setToast(""), 3000);
+      return;
+    }
     onPriceListsChange((current) => {
-      const selectedSenderNames = new Set(next.senders.map((sender) => sender.en));
-      const exists = current.some((priceList) => priceList.id === next.id);
+      const selectedSenderNames = new Set(preparedNext.senders.map((sender) => sender.en));
+      const exists = current.some((priceList) => priceList.id === preparedNext.id);
       const prepared = current.map((priceList) => ({
         ...priceList,
-        isDefault: next.isDefault ? false : priceList.isDefault,
+        isDefault: preparedNext.isDefault ? false : priceList.isDefault,
         senders:
-          priceList.id === next.id
+          priceList.id === preparedNext.id
             ? priceList.senders
             : priceList.senders.filter(
                 (sender) => !selectedSenderNames.has(sender.en),
@@ -13276,14 +14553,26 @@ function PriceListsScreen({
       }));
       if (exists) {
         return prepared.map((priceList) =>
-          priceList.id === next.id
-            ? { ...next, version: priceList.version + 1 }
+          priceList.id === preparedNext.id
+            ? {
+                ...preparedNext,
+                version: priceList.version + 1,
+                history: [
+                  {
+                    version: priceList.version + 1,
+                    changedAt: { ar: new Date().toLocaleString("ar-EG"), en: new Date().toLocaleString("en-EG") },
+                    changedBy: { ar: "مدير النظام", en: "System admin" },
+                    summary: { ar: "تحديث إعدادات القائمة", en: "Price-list settings updated" },
+                  },
+                  ...(priceList.history ?? []),
+                ],
+              }
             : priceList,
         );
       }
-      return [next, ...prepared];
+      return [preparedNext, ...prepared];
     });
-    setSelectedId(next.id);
+    setSelectedId(preparedNext.id);
     setEditing(null);
     setToast(isNew ? p.createdList : p.savedList);
     setIsNew(false);
@@ -13332,11 +14621,7 @@ function PriceListsScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -13446,7 +14731,7 @@ function PriceListsScreen({
                       }`}
                       type="button"
                       key={priceList.id}
-                      onClick={() => setSelectedId(priceList.id)}
+                      onClick={() => choosePriceList(priceList.id)}
                     >
                       <span className="price-list-item__top">
                         <span>
@@ -13527,6 +14812,16 @@ function PriceListsScreen({
                         <Settings2 size={15} />
                         {p.editList}
                       </button>
+                      {selectedDirty && (
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={discardPriceDraft}
+                        >
+                          <X size={16} />
+                          {lang === "ar" ? "إلغاء التعديلات" : "Discard changes"}
+                        </button>
+                      )}
                       <button
                         className="primary-button"
                         type="button"
@@ -13550,6 +14845,25 @@ function PriceListsScreen({
                           <i style={{ backgroundColor: status.color }} />
                           {status.name[lang]}
                         </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="pricing-service-selector">
+                    <div>
+                      <strong>{lang === "ar" ? "نوع الشحنة" : "Shipment type"}</strong>
+                      <small>{lang === "ar" ? "كل نوع يحتفظ بأسعاره المستقلة داخل نفس القائمة." : "Each type keeps an independent matrix in this list."}</small>
+                    </div>
+                    <div>
+                      {activeServiceTypes.map((service) => (
+                        <button
+                          type="button"
+                          key={service.id}
+                          className={selectedServiceId === service.id ? "active" : ""}
+                          onClick={() => setSelectedServiceId(service.id)}
+                        >
+                          {service.name[lang]}
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -13614,12 +14928,25 @@ function PriceListsScreen({
                               <small>{governorate.name[lang]}</small>
                             </span>
                             {area.state === "paused" && <em>{p.stoppedArea}</em>}
+                            <button
+                              type="button"
+                              className={
+                                workingUnservedAreaIds.includes(area.id)
+                                  ? "price-area-service-state price-area-service-state--off"
+                                  : "price-area-service-state"
+                              }
+                              onClick={() => toggleAreaService(area.id)}
+                            >
+                              {workingUnservedAreaIds.includes(area.id)
+                                ? lang === "ar" ? "غير مخدومة" : "Not served"
+                                : lang === "ar" ? "متاحة" : "Served"}
+                            </button>
                           </div>
                           {pricingStatuses.map((status) => {
-                            const value = selected.prices[area.id]?.[status.id];
+                            const value = workingPrices[area.id]?.[status.id];
                             return (
                               <label
-                                className={`price-cell ${value == null ? "price-cell--missing" : ""}`}
+                                className={`price-cell ${value == null && !workingUnservedAreaIds.includes(area.id) ? "price-cell--missing" : ""}`}
                                 key={status.id}
                               >
                                 <span className="price-cell__mobile-label">
@@ -13636,6 +14963,7 @@ function PriceListsScreen({
                                     onChange={(event) =>
                                       setPrice(area.id, status.id, event.target.value)
                                     }
+                                    disabled={workingUnservedAreaIds.includes(area.id)}
                                     aria-label={`${area.name[lang]} - ${status.name[lang]}`}
                                   />
                                   <small>{p.priceCurrency}</small>
@@ -14355,11 +15683,7 @@ function LegacyCourierRatesScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -15290,28 +16614,14 @@ function CourierAgreementEditorV2({
       (
         item,
       ): item is { plan: CourierRatePlan; courier: CourierRecord } =>
-        Boolean(item.courier) && item.courier.id !== courier.id,
+        Boolean(item.courier && item.courier.id !== courier.id),
     );
 
-  function buildRates(mode: "blank" | "company") {
+  function buildBlankRates() {
     return Object.fromEntries(
       allAreas.map(({ area }) => [
         area.id,
-        Object.fromEntries(
-          commissionStatuses.map((status) => {
-            const companyValue =
-              status.id === "status-delivered"
-                ? 20
-                : status.id === "status-partial"
-                  ? 15
-                  : status.id === "status-deferred"
-                    ? 5
-                    : status.id === "status-cancelled"
-                      ? 8
-                      : null;
-            return [status.id, mode === "company" ? companyValue : null];
-          }),
-        ),
+        Object.fromEntries(commissionStatuses.map((status) => [status.id, null])),
       ]),
     );
   }
@@ -15353,10 +16663,24 @@ function CourierAgreementEditorV2({
     });
   }
 
+  function setAgreementRate(areaId: string, statusId: string, rawValue: string) {
+    const value = rawValue === "" ? null : Math.max(0, Number(rawValue));
+    setDraft((current) => ({
+      ...current,
+      rates: {
+        ...current.rates,
+        [areaId]: {
+          ...(current.rates[areaId] ?? {}),
+          [statusId]: Number.isNaN(value) ? null : value,
+        },
+      },
+    }));
+  }
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (
-      draft.compensationType === "commission" &&
+      courierPlanUsesCommission(draft) &&
       draft.coveredAreaIds &&
       draft.coveredAreaIds.length === 0
     ) {
@@ -15438,15 +16762,15 @@ function CourierAgreementEditorV2({
               </em>
             </section>
 
-            <section className="policy-form-section">
+            <section className="policy-form-section courier-agreement-copy-section">
               <div className="policy-form-section__title">
                 <span><Copy size={16} /></span>
                 <div>
-                  <strong>{lang === "ar" ? "ابدأ بالطريقة الأنسب" : "Choose a starting point"}</strong>
+                  <strong>{lang === "ar" ? "نسخ اختياري من مندوب آخر" : "Optional copy from another courier"}</strong>
                   <small>
                     {lang === "ar"
                       ? "أي نسخ هنا يصبح مستقلًا لهذا المندوب."
-                      : "Every copied setup becomes independent for this courier."}
+                      : "Optional only; the copied agreement becomes private to this courier and never affects its source."}
                   </small>
                 </div>
               </div>
@@ -15461,18 +16785,18 @@ function CourierAgreementEditorV2({
                         settlementCycle: "weekly",
                         fixedSalary: null,
                         coveredAreaIds: undefined,
-                        rates: buildRates("company"),
+                        rates: buildBlankRates(),
                       },
                       lang === "ar"
-                        ? "تم تجهيز نسخة مستقلة من نموذج الشركة."
-                        : "Independent company template prepared.",
+                        ? "تم تجهيز اتفاق عمولة مستقل؛ أدخل أسعار العمولة الخاصة بهذا المندوب."
+                        : "Independent commission agreement prepared; enter this courier's rates.",
                     )
                   }
                 >
                   <ShieldCheck size={16} />
                   <span>
-                    <strong>{lang === "ar" ? "نموذج الشركة" : "Company template"}</strong>
-                    <small>{lang === "ar" ? "عمولة أسبوعية جاهزة" : "Ready weekly commission"}</small>
+                    <strong>{lang === "ar" ? "بدء اتفاق عمولة" : "Start commission agreement"}</strong>
+                    <small>{lang === "ar" ? "عمولة أسبوعية بلا أسعار مفترضة" : "Weekly commission with no assumed rates"}</small>
                   </span>
                 </button>
                 <button
@@ -15485,7 +16809,7 @@ function CourierAgreementEditorV2({
                         settlementCycle: "weekly",
                         fixedSalary: null,
                         coveredAreaIds: undefined,
-                        rates: buildRates("blank"),
+                        rates: buildBlankRates(),
                       },
                       lang === "ar"
                         ? "تم تجهيز اتفاق فارغ؛ أدخل الأسعار قبل الحفظ."
@@ -15596,12 +16920,30 @@ function CourierAgreementEditorV2({
                   <small>{lang === "ar" ? "أسبوعي أو شهري" : "Weekly or monthly"}</small>
                   <i><Check size={14} /></i>
                 </button>
+                <button
+                  className={draft.compensationType === "salary_commission" ? "is-selected" : ""}
+                  type="button"
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      compensationType: "salary_commission",
+                      settlementCycle:
+                        current.settlementCycle === "weekly" ? "weekly" : "monthly",
+                      fixedSalary: current.fixedSalary ?? 0,
+                    }))
+                  }
+                >
+                  <span><HandCoins size={20} /></span>
+                  <strong>{lang === "ar" ? "مرتب ثابت + عمولة" : "Fixed salary + commission"}</strong>
+                  <small>{lang === "ar" ? "مرتب دوري مع عمولة حالات" : "Periodic salary plus status commission"}</small>
+                  <i><Check size={14} /></i>
+                </button>
               </div>
 
               <div className="policy-form-grid agreement-method-fields">
                 <label className="select-field">
                   <span>
-                    {draft.compensationType === "salary"
+                    {courierPlanUsesFixedSalary(draft)
                       ? lang === "ar" ? "دورية المرتب" : "Salary period"
                       : lang === "ar" ? "موعد صرف العمولة" : "Commission payout"}
                   </span>
@@ -15626,7 +16968,7 @@ function CourierAgreementEditorV2({
                     <ChevronDown size={15} />
                   </span>
                 </label>
-                {draft.compensationType === "salary" && (
+                {courierPlanUsesFixedSalary(draft) && (
                   <label className="field">
                     <span>
                       {draft.settlementCycle === "weekly"
@@ -15685,7 +17027,8 @@ function CourierAgreementEditorV2({
               </div>
             </section>
 
-            {draft.compensationType === "commission" && (
+            {courierPlanUsesCommission(draft) && (
+              <>
               <section className="policy-form-section">
                 <div className="policy-form-section__title">
                   <span><MapPin size={16} /></span>
@@ -15760,6 +17103,45 @@ function CourierAgreementEditorV2({
                   </div>
                 )}
               </section>
+              <section className="policy-form-section courier-profile-rate-section">
+                <div className="policy-form-section__title">
+                  <span><HandCoins size={16} /></span>
+                  <div>
+                    <strong>{lang === "ar" ? `جدول عمولة ${courier.name.ar}` : `${courier.name.en} commission table`}</strong>
+                    <small>{lang === "ar" ? "الأسعار خاصة بهذا المندوب وحده، حسب المنطقة والحالة المالية." : "Rates belong only to this courier, by area and financial status."}</small>
+                  </div>
+                </div>
+                <div
+                  className="pricing-matrix courier-rate-matrix"
+                  style={{ "--pricing-column-count": Math.max(commissionStatuses.length, 1) } as CSSProperties}
+                >
+                  <div className="pricing-matrix__head">
+                    <span>{lang === "ar" ? "المنطقة" : "Area"}</span>
+                    {commissionStatuses.map((status) => (
+                      <span key={status.id}><i style={{ backgroundColor: status.color }} />{status.name[lang]}</span>
+                    ))}
+                  </div>
+                  <div className="pricing-matrix__body">
+                    {allAreas
+                      .filter(({ area }) => selectedAreaIds.has(area.id))
+                      .map(({ area, governorate }) => (
+                        <article className="pricing-row" key={area.id}>
+                          <div className="pricing-area"><span className="geo-area-pin"><MapPin size={15} /></span><span><strong>{area.name[lang]}</strong><small>{governorate.name[lang]}</small></span></div>
+                          {commissionStatuses.map((status) => {
+                            const value = draft.rates[area.id]?.[status.id];
+                            return (
+                              <label className={`price-cell ${value == null ? "price-cell--missing" : ""}`} key={status.id}>
+                                <span className="price-cell__mobile-label"><i style={{ backgroundColor: status.color }} />{status.name[lang]}</span>
+                                <span><input type="number" min="0" inputMode="decimal" value={value ?? ""} placeholder={lang === "ar" ? "غير محدد" : "Not set"} onChange={(event) => setAgreementRate(area.id, status.id, event.target.value)} /><small>{lang === "ar" ? "ج.م" : "EGP"}</small></span>
+                              </label>
+                            );
+                          })}
+                        </article>
+                      ))}
+                  </div>
+                </div>
+              </section>
+              </>
             )}
 
             <section className="agreement-history-note">
@@ -15841,7 +17223,6 @@ function CourierRatesScreen({
   const [editing, setEditing] = useState(false);
   const [dirtyAgreementId, setDirtyAgreementId] = useState("");
   const [toast, setToast] = useState("");
-  const [previewShippingFee, setPreviewShippingFee] = useState(70);
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
     style: "currency",
     currency: "EGP",
@@ -15943,10 +17324,13 @@ function CourierRatesScreen({
         ).length,
       0,
     );
+    const salaryRequired = courierPlanUsesFixedSalary(plan);
+    const totalWithSalary = total + (salaryRequired ? 1 : 0);
+    const filledWithSalary = filled + (salaryRequired && (plan.fixedSalary ?? 0) > 0 ? 1 : 0);
     return {
-      filled,
-      total,
-      percent: total ? Math.round((filled / total) * 100) : 0,
+      filled: filledWithSalary,
+      total: totalWithSalary,
+      percent: totalWithSalary ? Math.round((filledWithSalary / totalWithSalary) * 100) : 0,
     };
   }
 
@@ -16030,6 +17414,10 @@ function CourierRatesScreen({
   const salaryCount = activeCouriers.filter(
     (courier) => agreementForCourier(courier)?.compensationType === "salary",
   ).length;
+  const salaryCommissionCount = activeCouriers.filter(
+    (courier) =>
+      agreementForCourier(courier)?.compensationType === "salary_commission",
+  ).length;
   const selectedCourierKeys = new Set(
     selectedAgreement?.couriers.map((courier) => courier.en) ?? [],
   );
@@ -16051,12 +17439,6 @@ function CourierRatesScreen({
     .filter((allocation) => allocation.sourceType === "commission")
     .reduce((sum, allocation) => sum + allocation.amount, 0);
   const deferredDue = Math.max(0, deferredBeforePayout - deferredPaid);
-  const previewArea = agreementAreas[0]?.area;
-  const previewStatus = commissionStatuses[0];
-  const previewCommission =
-    previewArea && previewStatus
-      ? selectedAgreement?.rates[previewArea.id]?.[previewStatus.id] ?? null
-      : null;
 
   return (
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
@@ -16088,11 +17470,7 @@ function CourierRatesScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -16155,6 +17533,10 @@ function CourierRatesScreen({
               <div><small>{lang === "ar" ? "مرتب ثابت" : "Fixed salary"}</small><strong>{salaryCount}</strong></div>
             </article>
             <article>
+              <span className="status-summary-icon status-summary-icon--blue"><HandCoins size={18} /></span>
+              <div><small>{lang === "ar" ? "مرتب + عمولة" : "Salary + commission"}</small><strong>{salaryCommissionCount}</strong></div>
+            </article>
+            <article>
               <span className="status-summary-icon status-summary-icon--orange"><CircleAlert size={18} /></span>
               <div><small>{lang === "ar" ? "تحتاج استكمال" : "Need completion"}</small><strong>{missingAgreements}</strong></div>
             </article>
@@ -16199,11 +17581,15 @@ function CourierRatesScreen({
                         <b>
                           {agreement?.compensationType === "salary"
                             ? lang === "ar" ? "مرتب ثابت" : "Fixed salary"
-                            : lang === "ar" ? "عمولة خاصة" : "Private commission"}
+                            : agreement?.compensationType === "salary_commission"
+                              ? lang === "ar" ? "مرتب + عمولة" : "Salary + commission"
+                              : lang === "ar" ? "عمولة خاصة" : "Private commission"}
                           <em className={agreementCompletion.percent === 100 ? "is-ready" : "needs-attention"}>
                             {agreementCompletion.percent === 100
                               ? lang === "ar" ? "مكتمل" : "Ready"
-                              : `${agreementCompletion.percent}%`}
+                              : lang === "ar"
+                                ? `ناقص ${Math.max(0, agreementCompletion.total - agreementCompletion.filled)} سعر`
+                                : `${Math.max(0, agreementCompletion.total - agreementCompletion.filled)} rates missing`}
                           </em>
                         </b>
                       </span>
@@ -16245,17 +17631,21 @@ function CourierRatesScreen({
                       <strong>
                         {selectedAgreement.compensationType === "salary"
                           ? lang === "ar" ? "مرتب ثابت" : "Fixed salary"
-                          : lang === "ar" ? "عمولة على الشحنات" : "Shipment commission"}
+                          : selectedAgreement.compensationType === "salary_commission"
+                            ? lang === "ar" ? "مرتب ثابت + عمولة" : "Fixed salary + commission"
+                            : lang === "ar" ? "عمولة على الشحنات" : "Shipment commission"}
                       </strong>
                       <span>
                         {selectedAgreement.compensationType === "salary"
                           ? lang === "ar" ? "لا تستخدم أسعار الحالات" : "No status rates"
-                          : lang === "ar" ? "حسب المنطقة والحالة" : "By area and status"}
+                          : selectedAgreement.compensationType === "salary_commission"
+                            ? lang === "ar" ? "مرتب دوري وعمولة حسب المنطقة والحالة" : "Periodic salary plus rates by area and status"
+                            : lang === "ar" ? "حسب المنطقة والحالة" : "By area and status"}
                       </span>
                     </article>
                     <article>
                       <small>
-                        {selectedAgreement.compensationType === "salary"
+                        {courierPlanUsesFixedSalary(selectedAgreement)
                           ? lang === "ar" ? "دورية المرتب" : "Salary period"
                           : lang === "ar" ? "موعد الصرف" : "Payout timing"}
                       </small>
@@ -16263,16 +17653,24 @@ function CourierRatesScreen({
                       <span>{lang === "ar" ? "لا يغيّر طريقة الحساب" : "Does not change calculation"}</span>
                     </article>
                     <article>
-                      <small>{lang === "ar" ? "القيمة أو التغطية" : "Value or coverage"}</small>
+                      <small>
+                        {courierPlanUsesCommission(selectedAgreement)
+                          ? lang === "ar" ? "أسعار العمولة المكتملة" : "Completed commission rates"
+                          : lang === "ar" ? "قيمة المرتب" : "Salary amount"}
+                      </small>
                       <strong>
-                        {selectedAgreement.compensationType === "salary"
-                          ? money.format(selectedAgreement.fixedSalary ?? 0)
-                          : `${selectedCompletion.filled}/${selectedCompletion.total}`}
+                        {courierPlanUsesCommission(selectedAgreement)
+                          ? `${selectedCompletion.filled}/${selectedCompletion.total}`
+                          : money.format(selectedAgreement.fixedSalary ?? 0)}
                       </strong>
                       <span>
-                        {selectedAgreement.compensationType === "salary"
-                          ? lang === "ar" ? "لكل دورة" : "Per period"
-                          : lang === "ar" ? "سعر عمولة محدد" : "Rates configured"}
+                        {courierPlanUsesCommission(selectedAgreement)
+                          ? selectedCompletion.percent === 100
+                            ? lang === "ar" ? "كل الأسعار محددة" : "All rates set"
+                            : lang === "ar"
+                              ? `ناقص ${Math.max(0, selectedCompletion.total - selectedCompletion.filled)} سعر`
+                              : `${Math.max(0, selectedCompletion.total - selectedCompletion.filled)} rates missing`
+                          : lang === "ar" ? "لكل دورة" : "Per period"}
                       </span>
                     </article>
                     <article>
@@ -16316,6 +17714,28 @@ function CourierRatesScreen({
                     </section>
                   ) : (
                     <>
+                      {selectedAgreement.compensationType === "salary_commission" && (
+                        <section className="courier-salary-agreement-v3">
+                          <span><CalendarDays size={28} /></span>
+                          <div>
+                            <small>
+                              {selectedAgreement.settlementCycle === "weekly"
+                                ? lang === "ar" ? "المرتب الأسبوعي الثابت" : "Fixed weekly salary"
+                                : lang === "ar" ? "المرتب الشهري الثابت" : "Fixed monthly salary"}
+                            </small>
+                            <strong>{money.format(selectedAgreement.fixedSalary ?? 0)}</strong>
+                            <p>
+                              {lang === "ar"
+                                ? "هذا المرتب ثابت لكل دورة، وتُضاف إليه العمولة التي تنتج من الحالات المسجلة في الجدول أدناه."
+                                : "This fixed salary is due each period, with the commission from recorded statuses added separately."}
+                            </p>
+                          </div>
+                          <button className="secondary-button" type="button" onClick={() => setEditing(true)}>
+                            <Pencil size={15} />
+                            {lang === "ar" ? "تعديل الاتفاق" : "Edit agreement"}
+                          </button>
+                        </section>
+                      )}
                       <section className="courier-rate-safety-v3">
                         <span className={selectedCompletion.percent === 100 ? "is-ready" : "needs-attention"}>
                           {selectedCompletion.percent === 100 ? <ShieldCheck size={18} /> : <CircleAlert size={18} />}
@@ -16332,45 +17752,13 @@ function CourierRatesScreen({
                               : "Missing values are never treated as zero and block the affected settlement."}
                           </small>
                         </div>
-                        <em>{selectedCompletion.percent}%</em>
-                      </section>
-
-                      <section className="courier-rate-preview-v3">
-                        <div>
-                          <strong>{lang === "ar" ? "معاينة سريعة" : "Quick preview"}</strong>
-                          <small>
-                            {previewArea?.name[lang]} · {previewStatus?.name[lang]}
-                          </small>
-                        </div>
-                        <label>
-                          <span>{lang === "ar" ? "مصاريف شحن الشركة" : "Company shipping fee"}</span>
-                          <input
-                            type="number"
-                            min="0"
-                            value={previewShippingFee}
-                            onChange={(event) =>
-                              setPreviewShippingFee(
-                                Math.max(0, Number(event.target.value) || 0),
-                              )
-                            }
-                          />
-                        </label>
-                        <article>
-                          <small>{lang === "ar" ? "عمولة المندوب" : "Courier commission"}</small>
-                          <strong>
-                            {previewCommission == null
-                              ? lang === "ar" ? "غير محددة" : "Not set"
-                              : money.format(previewCommission)}
-                          </strong>
-                        </article>
-                        <article className={previewCommission != null && previewCommission > previewShippingFee ? "danger" : ""}>
-                          <small>{lang === "ar" ? "المتبقي للشركة" : "Company remainder"}</small>
-                          <strong>
-                            {previewCommission == null
-                              ? "—"
-                              : money.format(previewShippingFee - previewCommission)}
-                          </strong>
-                        </article>
+                        <em>
+                          {selectedCompletion.percent === 100
+                            ? lang === "ar" ? "مكتمل" : "Ready"
+                            : lang === "ar"
+                              ? `ناقص ${Math.max(0, selectedCompletion.total - selectedCompletion.filled)} سعر`
+                              : `${Math.max(0, selectedCompletion.total - selectedCompletion.filled)} missing`}
+                        </em>
                       </section>
 
                       <section className="courier-private-rate-list">
@@ -16384,12 +17772,8 @@ function CourierRatesScreen({
                             </small>
                           </div>
                           <div>
-                            <button className="secondary-button" type="button" onClick={() => setEditing(true)}>
-                              <Settings2 size={15} />
-                              {lang === "ar" ? "طريقة الأجر والمناطق" : "Method & coverage"}
-                            </button>
                             <button
-                              className="primary-button"
+                              className={`primary-button ${dirtyAgreementId !== selectedAgreement.id ? "is-disabled" : ""}`}
                               type="button"
                               disabled={dirtyAgreementId !== selectedAgreement.id}
                               onClick={saveRates}
@@ -17164,7 +18548,7 @@ function LegacyShipmentPoliciesScreen({
     <div className={`erp-shell ${collapsed ? "erp-shell--collapsed" : ""}`}>
       <Sidebar
         lang={lang}
-        activeScreen="shipmentPolicies"
+        activeScreen="companyPolicy"
         collapsed={collapsed}
         mobileOpen={mobileOpen}
         onCollapse={() => setCollapsed((value) => !value)}
@@ -17190,11 +18574,7 @@ function LegacyShipmentPoliciesScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -17218,7 +18598,7 @@ function LegacyShipmentPoliciesScreen({
           </div>
         </header>
 
-        <main className="page-content shipment-policies-page">
+        <main className="page-content shipment-policies-page shipment-policies-page--defaults">
           <div className="welcome-row page-heading-row">
             <div>
               <div className="page-title-line">
@@ -17228,8 +18608,8 @@ function LegacyShipmentPoliciesScreen({
                       ? "مراجعة سياسة الراسل"
                       : "Review sender policy"
                     : lang === "ar"
-                      ? "سياسة الشركة الافتراضية"
-                      : "Company default policy"}
+                      ? "إعدادات الراسل الجديد"
+                      : "New-sender defaults"}
                 </h1>
                 <span className="demo-chip">{t.demoData}</span>
               </div>
@@ -17239,8 +18619,8 @@ function LegacyShipmentPoliciesScreen({
                     ? "اعرض السياسة الفعلية هنا، وعدّل تخصيصها من ملف الراسل."
                     : "Review the effective policy here; edit overrides from the sender profile."
                   : lang === "ar"
-                    ? "حدّد الافتراضات العامة التي يرثها كل راسل ما لم يخصص بندًا داخل ملفه."
-                    : "Define the company defaults every sender inherits unless overridden in their profile."}
+                    ? "هذه قيم بداية تُنسخ عند إنشاء سياسة راسل جديد، ولا تغيّر أي راسل موجود تلقائيًا."
+                    : "These starting values are copied into a new sender policy and never change existing senders automatically."}
               </p>
             </div>
             <div className="shipment-policy-actions">
@@ -17270,11 +18650,11 @@ function LegacyShipmentPoliciesScreen({
                     <Save size={17} />
                     {lang === "ar"
                       ? dirty
-                        ? "حفظ سياسة الشركة"
-                        : "السياسة محفوظة"
+                        ? "حفظ إعدادات البداية"
+                        : "الإعدادات محفوظة"
                       : dirty
-                        ? "Save company policy"
-                        : "Policy saved"}
+                        ? "Save starting defaults"
+                        : "Defaults saved"}
                   </button>
                 </>
               )}
@@ -17297,13 +18677,13 @@ function LegacyShipmentPoliciesScreen({
               <span>
                 <strong>
                   {lang === "ar"
-                    ? "سياسة أنواع الشحنات للشركة"
-                    : "Company shipment-type policy"}
+                    ? "أنواع الشحنات المقترحة للراسل الجديد"
+                    : "Suggested shipment types for new senders"}
                 </strong>
                 <small>
                   {lang === "ar"
-                    ? "هذه هي الخدمات العامة التي يرثها الرسل قبل أي تخصيص داخل ملف الراسل."
-                    : "These are the company services inherited before sender-specific overrides."}
+                    ? "تُنسخ كنقطة بداية فقط، وبعد الحفظ تصبح سياسة الراسل مستقلة."
+                    : "Copied as a starting point only; once saved, the sender policy is independent."}
                 </small>
               </span>
             </div>
@@ -18962,19 +20342,22 @@ function ShipmentPoliciesScreen({
     "all" | "ready" | "issues"
   >("all");
   const [inspectedSenderId, setInspectedSenderId] = useState("");
-  const [showCompanyTemplate, setShowCompanyTemplate] = useState(false);
 
   const normalizedCompanyFields = fields.map(normalizeShipmentField);
   const normalizedCompanySettings = normalizeShipmentDataSettings(settings);
 
   function linkedPriceList(sender: SenderRecord) {
     return (
-      priceLists.find((priceList) =>
-        priceList.senders.some(
-          (name) => name.en === sender.name.en || name.ar === sender.name.ar,
-        ),
+      priceLists.find(
+        (priceList) =>
+          priceList.state === "active" &&
+          priceList.senders.some(
+            (name) => name.en === sender.name.en || name.ar === sender.name.ar,
+          ),
       ) ??
-      priceLists.find((priceList) => priceList.isDefault) ??
+      priceLists.find(
+        (priceList) => priceList.state === "active" && priceList.isDefault,
+      ) ??
       null
     );
   }
@@ -19016,8 +20399,8 @@ function ShipmentPoliciesScreen({
     if (!policy) {
       return [
         {
-          ar: "مطابقة بالكامل لقالب الشركة وتتابع تحديثاته تلقائيًا.",
-          en: "Fully matches the company template and follows its updates.",
+          ar: "لم تُحفظ سياسة مستقلة بعد؛ سيبدأ الإعداد من افتراضيات الراسل الجديد.",
+          en: "No independent policy is saved yet; setup starts from the new-sender defaults.",
         },
       ];
     }
@@ -19088,8 +20471,8 @@ function ShipmentPoliciesScreen({
       ? differences
       : [
           {
-            ar: "السياسة مخصصة لكن إعداداتها الحالية مطابقة لقالب الشركة.",
-            en: "Custom policy currently matches the company template.",
+            ar: "السياسة مستقلة وإعداداتها الحالية مطابقة لقيم البداية.",
+            en: "The policy is independent and currently matches the starting defaults.",
           },
         ];
   }
@@ -19112,6 +20495,12 @@ function ShipmentPoliciesScreen({
           : "custom";
       const priceList = linkedPriceList(sender);
       const issues: Localized[] = [];
+      if (!policy) {
+        issues.push({
+          ar: "لم تُحفظ سياسة مستقلة لهذا الراسل بعد",
+          en: "An independent policy has not been saved for this sender yet",
+        });
+      }
       const recipientPhone = effectiveFields.find(
         (field) => field.code === "RECIPIENT_PHONE",
       );
@@ -19282,11 +20671,7 @@ function ShipmentPoliciesScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -19319,25 +20704,11 @@ function ShipmentPoliciesScreen({
               </div>
               <p>
                 {lang === "ar"
-                  ? "راجع سياسة كل راسل وجاهزيتها وافتح ملفه للتعديل. لا توجد تعديلات جماعية من هذه الصفحة."
-                  : "Review every sender policy and its readiness, then open the sender profile to edit. No bulk policy changes live here."}
+                  ? "اعرف سياسة كل راسل في سطر واحد، وافتحها فقط عندما تحتاج تعديلًا أو معالجة تنبيه."
+                  : "See each sender's policy in one row, and open it only to edit or resolve an alert."}
               </p>
             </div>
             <div className="page-heading-actions">
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => setShowCompanyTemplate((value) => !value)}
-              >
-                <ShieldCheck size={17} />
-                {showCompanyTemplate
-                  ? lang === "ar"
-                    ? "إخفاء قالب الشركة"
-                    : "Hide company template"
-                  : lang === "ar"
-                    ? "استعراض قالب الشركة"
-                    : "View company template"}
-              </button>
               <button
                 className="primary-button"
                 type="button"
@@ -19349,67 +20720,7 @@ function ShipmentPoliciesScreen({
             </div>
           </div>
 
-          {showCompanyTemplate && (
-            <section className="policy-center-template">
-              <div className="policy-center-template__heading">
-                <span className="workflow-policy-icon workflow-policy-icon--blue">
-                  <ShieldCheck size={19} />
-                </span>
-                <span>
-                  <strong>
-                    {lang === "ar" ? "قالب الشركة الافتراضي" : "Company default template"}
-                  </strong>
-                  <small>
-                    {lang === "ar"
-                      ? "مرجع البداية للرسل الذين لم تنشأ لهم سياسة مخصصة."
-                      : "The starting point for senders without a custom policy."}
-                  </small>
-                </span>
-                <em>
-                  <LockKeyhole size={13} />
-                  {lang === "ar" ? "للمراجعة" : "Review only"}
-                </em>
-              </div>
-              <div className="policy-center-template__facts">
-                <span>
-                  <small>{lang === "ar" ? "تأكيد الطلب" : "Confirmation"}</small>
-                  <strong>{confirmationLabel(normalizedCompanySettings.confirmationMode)}</strong>
-                </span>
-                <span>
-                  <small>{lang === "ar" ? "البيانات الناقصة" : "Incomplete data"}</small>
-                  <strong>
-                    {normalizedCompanySettings.incompleteRoute === "warehouse_and_queue"
-                      ? lang === "ar"
-                        ? "المخزن + الاستكمال"
-                        : "Warehouse + completion"
-                      : lang === "ar"
-                        ? "الاستكمال أولًا"
-                        : "Completion first"}
-                  </strong>
-                </span>
-                <span>
-                  <small>{lang === "ar" ? "متحمل الشحن" : "Shipping payer"}</small>
-                  <strong>
-                    {normalizedCompanySettings.defaultShippingPayer === "recipient"
-                      ? lang === "ar"
-                        ? "المستلم"
-                        : "Recipient"
-                      : lang === "ar"
-                        ? "الراسل"
-                        : "Sender"}
-                  </strong>
-                </span>
-                <span>
-                  <small>{lang === "ar" ? "الحقول المستخدمة" : "Active fields"}</small>
-                  <strong>
-                    {normalizedCompanyFields.filter((field) => field.mode !== "hidden").length}
-                  </strong>
-                </span>
-              </div>
-            </section>
-          )}
-
-          <section className="policy-center-metrics">
+          <section className="policy-center-metrics policy-center-metrics--simple">
             <article>
               <span className="status-summary-icon status-summary-icon--blue">
                 <UsersRound size={18} />
@@ -19457,8 +20768,8 @@ function ShipmentPoliciesScreen({
             </article>
           </section>
 
-          <section className="policy-center-panel">
-            <div className="policy-center-toolbar">
+          <section className="policy-center-panel policy-center-panel--simple">
+            <div className="policy-center-toolbar policy-center-toolbar--simple">
               <label className="shipment-search">
                 <Search size={17} />
                 <input
@@ -19591,8 +20902,8 @@ function ShipmentPoliciesScreen({
                                   ? "مسودة · قالب الشركة مطبق"
                                   : "Draft · company template active"
                                 : lang === "ar"
-                                  ? "قالب الشركة"
-                                  : "Company template"}
+                                  ? "إعداد أول مرة"
+                                  : "First-time setup"}
                           </em>
                         </span>
                       </div>
@@ -19671,8 +20982,8 @@ function ShipmentPoliciesScreen({
                                 (lang === "ar" ? "غير محدد" : "Not recorded")
                               }`
                             : lang === "ar"
-                              ? "يتبع تحديثات الشركة"
-                              : "Follows company updates"}
+                              ? "لم تُحفظ بعد"
+                              : "Not saved yet"}
                         </small>
                       </div>
                       <div className="policy-center-actions">
@@ -19699,8 +21010,8 @@ function ShipmentPoliciesScreen({
                         <div>
                           <strong>
                             {lang === "ar"
-                              ? "الاختلاف عن قالب الشركة"
-                              : "Difference from company template"}
+                              ? "ملخص سياسة الراسل"
+                              : "Sender policy summary"}
                           </strong>
                           <ul>
                             {row.differences.map((difference, index) => (
@@ -20110,11 +21421,7 @@ function IncompleteShipmentsScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -20154,7 +21461,7 @@ function IncompleteShipmentsScreen({
             <button
               className="secondary-button"
               type="button"
-              onClick={() => onNavigate("shipmentPolicies")}
+              onClick={() => onNavigate("senders")}
             >
               <SlidersHorizontal size={17} />
               {lang === "ar" ? "مراجعة سياسات الرسل" : "Review sender policies"}
@@ -20562,29 +21869,37 @@ function IncompleteShipmentsScreen({
 
 type WarehouseFilter =
   | "all"
-  | "ready"
   | "incomplete"
-  | "returns"
-  | "before_warehouse";
+  | "returns";
 
-const warehouseLocations = [
+type WarehouseLocation = {
+  id: string;
+  name: Localized;
+  state: "active" | "stopped";
+};
+
+const warehouseLocations: WarehouseLocation[] = [
   {
     id: "main-storage",
     name: { ar: "التخزين الرئيسي", en: "Main storage" },
+    state: "active",
   },
   {
     id: "dispatch-zone",
     name: { ar: "منطقة التجهيز والتوزيع", en: "Dispatch preparation zone" },
+    state: "active",
   },
   {
     id: "data-completion",
     name: { ar: "رف استكمال البيانات", en: "Data completion shelf" },
+    state: "active",
   },
   {
     id: "returns-zone",
     name: { ar: "منطقة المرتجعات", en: "Returns zone" },
+    state: "active",
   },
-] as const;
+];
 
 const trustPolicyDefault: TrustPolicy = {
   photoRequired: false,
@@ -20729,8 +22044,11 @@ const trustRecordsDemoData: TrustRecord[] = [
   },
 ];
 
-function warehouseLocationLabel(id: string): Localized {
-  return warehouseLocations.find((location) => location.id === id)?.name ?? {
+function warehouseLocationLabel(
+  id: string,
+  locations: WarehouseLocation[] = warehouseLocations,
+): Localized {
+  return locations.find((location) => location.id === id)?.name ?? {
     ar: "مكان داخلي غير محدد",
     en: "Internal location not set",
   };
@@ -20742,6 +22060,7 @@ function TrustsScreen({
   enabled,
   policy,
   records,
+  locations,
   shipmentRecords,
   onEnabledChange,
   onPolicyChange,
@@ -20758,6 +22077,7 @@ function TrustsScreen({
   enabled: boolean;
   policy: TrustPolicy;
   records: TrustRecord[];
+  locations: WarehouseLocation[];
   shipmentRecords: Shipment[];
   onEnabledChange: (enabled: boolean) => void;
   onPolicyChange: (policy: TrustPolicy) => void;
@@ -21431,7 +22751,7 @@ function TrustsScreen({
                 >
                   <option value="all">{lang === "ar" ? "كل الأماكن" : "All locations"}</option>
                   <option value="unset">{lang === "ar" ? "مكان غير محدد" : "Location not set"}</option>
-                  {warehouseLocations.map((location) => (
+                  {locations.filter((location) => location.state === "active").map((location) => (
                     <option value={location.id} key={location.id}>
                       {location.name[lang]}
                     </option>
@@ -21607,7 +22927,7 @@ function TrustsScreen({
                     <span>{lang === "ar" ? "المكان الجديد" : "New location"}</span>
                     <select value={locationDraft} onChange={(event) => setLocationDraft(event.target.value)}>
                       <option value="">{lang === "ar" ? "اختر المكان" : "Choose location"}</option>
-                      {warehouseLocations.map((location) => (
+                      {locations.filter((location) => location.state === "active").map((location) => (
                         <option value={location.id} key={location.id}>{location.name[lang]}</option>
                       ))}
                     </select>
@@ -21750,7 +23070,7 @@ function TrustsScreen({
                 <span>{lang === "ar" ? "المكان الحالي" : "Current location"}</span>
                 <select value={createDraft.locationId} onChange={(event) => setCreateDraft((current) => ({ ...current, locationId: event.target.value }))}>
                   <option value="">{lang === "ar" ? "يحتاج تحديد مكان" : "Needs location"}</option>
-                  {warehouseLocations.map((location) => (
+                  {locations.filter((location) => location.state === "active").map((location) => (
                     <option value={location.id} key={location.id}>{location.name[lang]}</option>
                   ))}
                 </select>
@@ -21820,7 +23140,7 @@ function TrustsScreen({
               <label className="field">
                 <span>{lang === "ar" ? "المكان الافتراضي" : "Default location"}</span>
                 <select value={policyDraft.defaultLocationId} onChange={(event) => setPolicyDraft((current) => ({ ...current, defaultLocationId: event.target.value }))}>
-                  {warehouseLocations.map((location) => (
+                  {locations.filter((location) => location.state === "active").map((location) => (
                     <option value={location.id} key={location.id}>{location.name[lang]}</option>
                   ))}
                 </select>
@@ -21864,10 +23184,16 @@ function WarehouseScreen({
   lang,
   theme,
   shipmentRecords,
+  locations,
+  stocktakes,
   serviceTypes,
+  statuses,
+  governorates,
   settings,
   senderPolicies,
   onShipmentsChange,
+  onLocationsChange,
+  onStocktakesChange,
   onLang,
   onTheme,
   onNavigate,
@@ -21876,10 +23202,16 @@ function WarehouseScreen({
   lang: Lang;
   theme: Theme;
   shipmentRecords: Shipment[];
+  locations: WarehouseLocation[];
+  stocktakes: WarehouseStocktake[];
   serviceTypes: ShipmentServiceType[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
   settings: ShipmentDataSettings;
   senderPolicies: SenderShipmentPolicy[];
   onShipmentsChange: (records: Shipment[]) => void;
+  onLocationsChange: (locations: WarehouseLocation[]) => void;
+  onStocktakesChange: (stocktakes: WarehouseStocktake[]) => void;
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -21895,8 +23227,15 @@ function WarehouseScreen({
     null,
   );
   const [locationDraft, setLocationDraft] = useState("");
-  const [receiverName, setReceiverName] = useState("");
-  const [handoverNote, setHandoverNote] = useState("");
+  const [selectedShipmentIds, setSelectedShipmentIds] = useState<string[]>([]);
+  const [bulkLocationId, setBulkLocationId] = useState("");
+  const [showLocations, setShowLocations] = useState(false);
+  const [showStocktake, setShowStocktake] = useState(false);
+  const [stocktakeLocationId, setStocktakeLocationId] = useState("");
+  const [stocktakeScan, setStocktakeScan] = useState("");
+  const [stocktakeFoundIds, setStocktakeFoundIds] = useState<string[]>([]);
+  const [newLocationAr, setNewLocationAr] = useState("");
+  const [newLocationEn, setNewLocationEn] = useState("");
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
 
@@ -21939,22 +23278,15 @@ function WarehouseScreen({
     return "main-storage";
   };
 
-  const locationName = warehouseLocationLabel;
+  const locationName = (id: string) => warehouseLocationLabel(id, locations);
+  const activeLocations = locations.filter((location) => location.state === "active");
 
   const physicalShipments = shipmentRecords.filter(
     isPhysicalWarehouseShipment,
   );
-  const beforeWarehouseShipments = shipmentRecords.filter(isBeforeWarehouse);
   const returnShipments = physicalShipments.filter(isReturnAwaitingSender);
   const incompleteInWarehouse = physicalShipments.filter(
     (shipment) => shipment.requiredType === "incomplete",
-  );
-  const readyShipments = physicalShipments.filter(
-    (shipment) =>
-      shipment.requiredType !== "incomplete" &&
-      !isReturnAwaitingSender(shipment) &&
-      (shipment.required.en.toLowerCase().includes("assign") ||
-        shipment.status.en.toLowerCase().includes("ready")),
   );
   const totalPieces = physicalShipments.reduce(
     (sum, shipment) => sum + inventoryPieces(shipment),
@@ -21966,7 +23298,7 @@ function WarehouseScreen({
   );
   const senderOptions = Array.from(
     new Map(
-      [...physicalShipments, ...beforeWarehouseShipments].map((shipment) => [
+      physicalShipments.map((shipment) => [
         shipment.sender.en,
         shipment.sender,
       ]),
@@ -21974,11 +23306,7 @@ function WarehouseScreen({
   );
 
   const filterSource =
-    filter === "before_warehouse"
-      ? beforeWarehouseShipments
-      : filter === "ready"
-        ? readyShipments
-        : filter === "incomplete"
+    filter === "incomplete"
           ? incompleteInWarehouse
           : filter === "returns"
             ? returnShipments
@@ -22036,9 +23364,39 @@ function WarehouseScreen({
   function openShipment(shipment: Shipment) {
     setSelectedShipment(shipment);
     setLocationDraft(defaultLocation(shipment));
-    setReceiverName("");
-    setHandoverNote("");
     setError("");
+  }
+
+  function openScannedShipment() {
+    const code = search.trim().toLowerCase();
+    if (!code) return;
+    const shipment = physicalShipments.find((item) =>
+      [item.id, item.reference].some((value) => value.toLowerCase() === code),
+    );
+    if (!shipment) {
+      setError(lang === "ar" ? "لم يتم العثور على شحنة بهذا الباركود أو الرقم." : "No shipment was found for this barcode or number.");
+      return;
+    }
+    openShipment(shipment);
+  }
+
+  function moveSelectedShipments() {
+    const selected = physicalShipments.filter((shipment) => selectedShipmentIds.includes(shipment.id));
+    if (!bulkLocationId || !selected.length) {
+      setError(lang === "ar" ? "حدد شحنة واحدة على الأقل ومكان النقل." : "Select at least one shipment and a destination location.");
+      return;
+    }
+    const timestamp = nowTimestamp();
+    onShipmentsChange(shipmentRecords.map((shipment) => {
+      if (!selectedShipmentIds.includes(shipment.id)) return shipment;
+      const from = defaultLocation(shipment);
+      if (from === bulkLocationId) return shipment;
+      const movement: WarehouseMovement = { id: `warehouse-bulk-${Date.now()}-${shipment.id}`, type: "location_changed", pieces: inventoryPieces(shipment), from: locationName(from), to: locationName(bulkLocationId), performedBy: { ar: "موظف المخزن الحالي", en: "Current warehouse user" }, note: lang === "ar" ? "نقل جماعي داخل المخزن" : "Bulk internal move", timestamp };
+      return { ...shipment, warehouseLocation: bulkLocationId, warehouseHistory: [movement, ...(shipment.warehouseHistory ?? [])], lastEvent: { ar: `نقل جماعي إلى ${locationName(bulkLocationId).ar}`, en: `Bulk moved to ${locationName(bulkLocationId).en}` } };
+    }));
+    setSelectedShipmentIds([]); setBulkLocationId(""); setError("");
+    setToast(lang === "ar" ? `تم نقل ${selected.length} شحنة داخل المخزن.` : `${selected.length} shipments moved inside warehouse.`);
+    window.setTimeout(() => setToast(""), 2800);
   }
 
   function saveLocation() {
@@ -22093,74 +23451,56 @@ function WarehouseScreen({
     window.setTimeout(() => setToast(""), 2800);
   }
 
-  function handReturnToSender() {
-    if (!selectedShipment || !isReturnAwaitingSender(selectedShipment)) return;
-    if (!receiverName.trim()) {
-      setError(
-        lang === "ar"
-          ? "اسم مستلم المرتجع من جهة الراسل مطلوب."
-          : "The sender-side return receiver name is required.",
-      );
+  function addWarehouseLocation() {
+    const nameAr = newLocationAr.trim();
+    if (!nameAr) {
+      setError(lang === "ar" ? "اكتب اسم المكان بالعربية على الأقل." : "Enter at least the Arabic location name.");
       return;
     }
-    const timestamp = nowTimestamp();
-    const pieces = inventoryPieces(selectedShipment);
-    const movement: WarehouseMovement = {
-      id: `sender-handover-${Date.now()}`,
-      type: "sender_handover",
-      pieces,
-      from: locationName(defaultLocation(selectedShipment)),
-      to: selectedShipment.sender,
-      performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
-      note:
-        handoverNote.trim() ||
-        (lang === "ar"
-          ? `استلم المرتجع: ${receiverName.trim()}`
-          : `Return received by: ${receiverName.trim()}`),
-      timestamp,
-    };
-    const updated: Shipment = {
-      ...selectedShipment,
-      custodyType: "sender",
-      custody: {
-        ar: `تم تسليم المرتجع للراسل — ${selectedShipment.sender.ar}`,
-        en: `Return handed to sender — ${selectedShipment.sender.en}`,
+    const key = nameAr
+      .normalize("NFKD")
+      .replace(/[^a-zA-Z0-9\u0600-\u06FF]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase() || "warehouse-location";
+    onLocationsChange([
+      ...locations,
+      {
+        id: `${key}-${Date.now().toString().slice(-6)}`,
+        name: { ar: nameAr, en: newLocationEn.trim() || nameAr },
+        state: "active",
       },
-      courier: null,
-      warehouseLocation: "",
-      required: { ar: "لا يوجد", en: "None" },
-      requiredType: "none",
-      lastEvent: {
-        ar: `سلّم المخزن ${pieces} قطعة للراسل واستلمها ${receiverName.trim()}`,
-        en: `Warehouse handed ${pieces} piece(s) to sender; received by ${receiverName.trim()}`,
-      },
-      warehouseHistory: [
-        movement,
-        ...(selectedShipment.warehouseHistory ?? []),
-      ],
-      statusHistory: selectedShipment.statusHistory?.map((event) =>
-        (event.returnedPieces ?? 0) > 0 &&
-        !(event.senderReturnSettled ?? false)
-          ? {
-              ...event,
-              senderReturnSettled: true,
-            }
-          : event,
-      ),
-    };
-    onShipmentsChange(
-      shipmentRecords.map((shipment) =>
-        shipment.id === updated.id ? updated : shipment,
-      ),
-    );
-    setSelectedShipment(null);
+    ]);
+    setNewLocationAr("");
+    setNewLocationEn("");
     setError("");
-    setToast(
-      lang === "ar"
-        ? `تم تسليم مرتجع ${updated.id} للراسل وإغلاق عهدته بالمخزن`
-        : `${updated.id} return handed to sender and cleared from warehouse custody`,
-    );
-    window.setTimeout(() => setToast(""), 3200);
+    setToast(lang === "ar" ? "تمت إضافة مكان مخزن جديد وهو متاح الآن للنقل الداخلي." : "New warehouse location added and ready for internal moves.");
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function toggleWarehouseLocation(location: WarehouseLocation) {
+    if (location.state === "active") {
+      const occupied = physicalShipments.filter(
+        (shipment) => defaultLocation(shipment) === location.id,
+      ).length;
+      if (occupied) {
+        setError(lang === "ar" ? `لا يمكن إيقاف «${location.name.ar}» قبل نقل ${occupied} شحنة منه.` : `Move ${occupied} shipment(s) out of ${location.name.en} before stopping it.`);
+        return;
+      }
+    }
+    onLocationsChange(locations.map((item) => item.id === location.id ? { ...item, state: item.state === "active" ? "stopped" : "active" } : item));
+    setError("");
+  }
+
+  const stocktakeExpected = physicalShipments.filter((shipment) =>
+    stocktakeLocationId ? defaultLocation(shipment) === stocktakeLocationId : false,
+  );
+  const stocktakeMissing = stocktakeExpected.filter((shipment) => !stocktakeFoundIds.includes(shipment.id));
+  const stocktakeUnexpected = stocktakeFoundIds.filter((id) => !stocktakeExpected.some((shipment) => shipment.id === id));
+  function scanForStocktake() {
+    const shipment = shipmentRecords.find((item) => [item.id, item.reference].some((value) => value.toLowerCase() === stocktakeScan.trim().toLowerCase()));
+    if (!shipment) { setError(lang === "ar" ? "لم يتم العثور على شحنة بهذا الباركود." : "No shipment found for this barcode."); return; }
+    if (!stocktakeFoundIds.includes(shipment.id)) setStocktakeFoundIds((current) => [...current, shipment.id]);
+    setStocktakeScan(""); setError("");
   }
 
   const filters: {
@@ -22174,11 +23514,6 @@ function WarehouseScreen({
       count: physicalShipments.length,
     },
     {
-      id: "ready",
-      label: { ar: "جاهزة للتوزيع", en: "Ready for dispatch" },
-      count: readyShipments.length,
-    },
-    {
       id: "incomplete",
       label: { ar: "ناقصة داخل المخزن", en: "Incomplete in warehouse" },
       count: incompleteInWarehouse.length,
@@ -22187,11 +23522,6 @@ function WarehouseScreen({
       id: "returns",
       label: { ar: "مرتجعات للرسل", en: "Sender returns" },
       count: returnShipments.length,
-    },
-    {
-      id: "before_warehouse",
-      label: { ar: "قبل اعتماد المخزن", en: "Before warehouse acceptance" },
-      count: beforeWarehouseShipments.length,
     },
   ];
 
@@ -22227,11 +23557,7 @@ function WarehouseScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -22262,18 +23588,20 @@ function WarehouseScreen({
               </div>
               <p>
                 {lang === "ar"
-                  ? "اعرف مكان كل طرد فعليًا، وحركه داخل المخزن، وسلّم المرتجعات للرسل بسجل لا يمسح الماضي."
-                  : "Know where every parcel physically is, move it internally, and hand returns to senders without erasing history."}
+                  ? "اعرف مكان كل طرد موجود فعليًا، وحركه بين أماكن المخزن، وراجعه بالجرد دون تنفيذ مهام الصفحات الأخرى."
+                  : "Track every parcel physically present, move it between warehouse locations, and verify it by stocktake without duplicating other workflows."}
               </p>
             </div>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => onNavigate("assignment")}
-            >
-              <Truck size={17} />
-              {lang === "ar" ? "التوزيع والإسناد" : "Distribution & assignment"}
-            </button>
+            <div className="page-heading-actions">
+              <button className="secondary-button" type="button" onClick={() => { setShowStocktake(true); setStocktakeLocationId(""); setStocktakeFoundIds([]); setStocktakeScan(""); }}>
+                <ScanBarcode size={17} />
+                {lang === "ar" ? "بدء جرد" : "Start stocktake"}
+              </button>
+              <button className="secondary-button" type="button" onClick={() => setShowLocations(true)}>
+                <MapPin size={17} />
+                {lang === "ar" ? "أماكن المخزن" : "Warehouse locations"}
+              </button>
+            </div>
           </div>
 
           <section className="warehouse-truth">
@@ -22286,8 +23614,8 @@ function WarehouseScreen({
               </strong>
               <small>
                 {lang === "ar"
-                  ? "النقل بين أرفف المخزن لا يغير حالة الشحنة، وتسليم المرتجع للراسل يخرجه من عهدة الشركة دون اختراع حالة جديدة."
-                  : "Moving between warehouse locations does not change shipment status; handing a return to its sender clears company custody without inventing a new status."}
+                  ? "هذه الصفحة تسجل المكان والجرد فقط؛ الإسناد واستلام مرتجع المندوب وتسليمه للراسل يتم من صفحاته المتخصصة وينعكس هنا تلقائيًا."
+                  : "This page records location and stocktake only; assignment and return handovers happen in their dedicated screens and appear here automatically."}
               </small>
             </span>
           </section>
@@ -22305,14 +23633,6 @@ function WarehouseScreen({
               </div>
             </article>
             <article>
-              <span><PackageCheck size={19} /></span>
-              <div>
-                <small>{lang === "ar" ? "جاهزة للتوزيع" : "Ready for dispatch"}</small>
-                <strong>{readyShipments.length}</strong>
-                <em>{lang === "ar" ? "يمكن إسنادها الآن" : "Can be assigned now"}</em>
-              </div>
-            </article>
-            <article>
               <span><UsersRound size={19} /></span>
               <div>
                 <small>{lang === "ar" ? "مرتجعات تنتظر الرسل" : "Returns awaiting senders"}</small>
@@ -22323,15 +23643,22 @@ function WarehouseScreen({
                 </em>
               </div>
             </article>
-            <article>
-              <span><CircleAlert size={19} /></span>
-              <div>
-                <small>{lang === "ar" ? "قبل اعتماد المخزن" : "Before warehouse acceptance"}</small>
-                <strong>{beforeWarehouseShipments.length}</strong>
-                <em>{lang === "ar" ? "ليست في عهدة المخزن" : "Not in warehouse custody"}</em>
-              </div>
-            </article>
           </section>
+
+          {stocktakes.length > 0 && (
+            <section className="warehouse-panel">
+              <div className="warehouse-toolbar"><strong>{lang === "ar" ? "سجلات الجرد الأخيرة" : "Recent stocktakes"}</strong></div>
+              <div className="warehouse-locations-list">
+                {stocktakes.slice(0, 5).map((stocktake) => (
+                  <article key={stocktake.id}>
+                    <span className="workspace-icon"><ScanBarcode size={17} /></span>
+                    <span><strong>{stocktake.id} · {locationName(stocktake.locationId)[lang]}</strong><small>{stocktake.timestamp[lang]} · {stocktake.performedBy[lang]}</small></span>
+                    <details><summary className={stocktake.missingShipmentIds.length || stocktake.unexpectedShipmentIds.length ? "policy-state policy-state--draft" : "policy-state policy-state--published"}>{stocktake.missingShipmentIds.length || stocktake.unexpectedShipmentIds.length ? (lang === "ar" ? `فروق: ${stocktake.missingShipmentIds.length + stocktake.unexpectedShipmentIds.length}` : `Differences: ${stocktake.missingShipmentIds.length + stocktake.unexpectedShipmentIds.length}`) : (lang === "ar" ? "مطابق" : "Matched")}</summary><small>{lang === "ar" ? `المتوقع: ${stocktake.expectedShipmentIds.join("، ") || "—"}` : `Expected: ${stocktake.expectedShipmentIds.join(", ") || "—"}`}</small>{stocktake.missingShipmentIds.length > 0 && <small>{lang === "ar" ? `الناقص: ${stocktake.missingShipmentIds.join("، ")}` : `Missing: ${stocktake.missingShipmentIds.join(", ")}`}</small>}{stocktake.unexpectedShipmentIds.length > 0 && <small>{lang === "ar" ? `الزائد: ${stocktake.unexpectedShipmentIds.join("، ")}` : `Unexpected: ${stocktake.unexpectedShipmentIds.join(", ")}`}</small>}</details>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="warehouse-panel">
             <div className="warehouse-toolbar">
@@ -22347,6 +23674,10 @@ function WarehouseScreen({
                   }
                 />
               </label>
+              <button className="secondary-button" type="button" onClick={openScannedShipment}>
+                <Barcode size={16} />
+                {lang === "ar" ? "فتح بالمسح" : "Open scan"}
+              </button>
               <label className="select-wrap">
                 <select
                   value={senderFilter}
@@ -22364,6 +23695,20 @@ function WarehouseScreen({
                 <ChevronDown size={15} />
               </label>
             </div>
+
+            {selectedShipmentIds.length > 0 && (
+              <div className="warehouse-bulk-actions">
+                <strong>{selectedShipmentIds.length} {lang === "ar" ? "شحنة محددة" : "selected shipment(s)"}</strong>
+                <label className="select-wrap">
+                  <select value={bulkLocationId} onChange={(event) => setBulkLocationId(event.target.value)}>
+                    <option value="">{lang === "ar" ? "نقل إلى مكان..." : "Move to location..."}</option>
+                    {activeLocations.map((location) => <option value={location.id} key={location.id}>{location.name[lang]}</option>)}
+                  </select>
+                  <ChevronDown size={15} />
+                </label>
+                <button className="primary-button" type="button" onClick={moveSelectedShipments}><Save size={15} />{lang === "ar" ? "تأكيد النقل" : "Confirm move"}</button>
+              </div>
+            )}
 
             <div className="warehouse-tabs" role="tablist">
               {filters.map((item) => (
@@ -22393,11 +23738,11 @@ function WarehouseScreen({
 
               {visibleShipments.length ? (
                 visibleShipments.map((shipment) => {
-                  const beforeWarehouse = isBeforeWarehouse(shipment);
                   const senderReturn = isReturnAwaitingSender(shipment);
                   return (
                     <article className="warehouse-row" key={shipment.id}>
                       <span className="warehouse-shipment-id">
+                        <label className="warehouse-select"><input type="checkbox" checked={selectedShipmentIds.includes(shipment.id)} onChange={() => setSelectedShipmentIds((current) => current.includes(shipment.id) ? current.filter((id) => id !== shipment.id) : [...current, shipment.id])} /><i><Check size={11} /></i></label>
                         <strong>{shipment.id}</strong>
                         <small>{shipment.reference}</small>
                         {shipmentServiceFor(shipment, serviceTypes) && (
@@ -22418,15 +23763,10 @@ function WarehouseScreen({
                         </b>
                       </span>
                       <span className="warehouse-custody-kind">
-                        {beforeWarehouse ? (
-                          <b className="warehouse-label warehouse-label--outside">
-                            <CircleAlert size={14} />
-                            {lang === "ar" ? "خارج عهدة المخزن" : "Outside warehouse custody"}
-                          </b>
-                        ) : senderReturn ? (
+                        {senderReturn ? (
                           <b className="warehouse-label warehouse-label--return">
                             <UsersRound size={14} />
-                            {lang === "ar" ? "مرتجع للراسل" : "Sender return"}
+                            {lang === "ar" ? "مرتجع موجود بالمخزن" : "Return in warehouse"}
                           </b>
                         ) : (
                           <b className="warehouse-label">
@@ -22436,7 +23776,7 @@ function WarehouseScreen({
                         )}
                       </span>
                       <span className="warehouse-pieces">
-                        <strong>{beforeWarehouse ? "—" : inventoryPieces(shipment)}</strong>
+                        <strong>{inventoryPieces(shipment)}</strong>
                         <small>
                           {lang === "ar"
                             ? `من أصل ${shipment.pieces}`
@@ -22447,20 +23787,10 @@ function WarehouseScreen({
                         <MapPin size={15} />
                         <span>
                           <strong>
-                            {beforeWarehouse
-                              ? lang === "ar"
-                                ? "قائمة استكمال البيانات"
-                                : "Data completion queue"
-                              : locationName(defaultLocation(shipment))[lang]}
+                            {locationName(defaultLocation(shipment))[lang]}
                           </strong>
                           <small>
-                            {beforeWarehouse
-                              ? lang === "ar"
-                                ? "لم تعتمد مخزنيًا"
-                                : "Not warehouse accepted"
-                              : lang === "ar"
-                                ? "الفرع الرئيسي"
-                                : "Main branch"}
+                            {lang === "ar" ? "الفرع الرئيسي" : "Main branch"}
                           </small>
                         </span>
                       </span>
@@ -22469,22 +23799,12 @@ function WarehouseScreen({
                         {shipment.lastEvent[lang]}
                       </span>
                       <button
-                        className={
-                          senderReturn
-                            ? "primary-button"
-                            : "secondary-button"
-                        }
+                        className="secondary-button"
                         type="button"
                         onClick={() => openShipment(shipment)}
                       >
-                        {senderReturn ? <UsersRound size={15} /> : <Eye size={15} />}
-                        {senderReturn
-                          ? lang === "ar"
-                            ? "تسليم الراسل"
-                            : "Handover"
-                          : lang === "ar"
-                            ? "فتح"
-                            : "Open"}
+                        <Eye size={15} />
+                        {lang === "ar" ? "فتح" : "Open"}
                       </button>
                     </article>
                   );
@@ -22509,14 +23829,28 @@ function WarehouseScreen({
         </main>
       </div>
 
+      {showStocktake && (
+        <div className="editor-modal-backdrop" role="presentation" onMouseDown={() => setShowStocktake(false)}>
+          <section className="editor-modal warehouse-locations-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+            <header className="editor-modal__header"><div><span className="workspace-icon"><ScanBarcode size={19} /></span><span><strong>{lang === "ar" ? "جرد مكان مخزن" : "Warehouse location stocktake"}</strong><small>{lang === "ar" ? "امسح الشحنات الموجودة فعليًا. الجرد لا يغير الحالة أو العهدة أو المكان." : "Scan physically present shipments. Stocktake never changes status, custody, or location."}</small></span></div><button className="square-button" type="button" onClick={() => setShowStocktake(false)}><X size={18} /></button></header>
+            <div className="editor-modal__body warehouse-locations-body"><label className="select-wrap"><select value={stocktakeLocationId} onChange={(event) => { setStocktakeLocationId(event.target.value); setStocktakeFoundIds([]); }}><option value="">{lang === "ar" ? "اختر مكان الجرد..." : "Choose location..."}</option>{activeLocations.map((location) => <option key={location.id} value={location.id}>{location.name[lang]}</option>)}</select><ChevronDown size={15} /></label>{stocktakeLocationId && <><div className="warehouse-truth"><ShieldCheck size={18} /><span><strong>{lang === "ar" ? `المتوقع: ${stocktakeExpected.length} شحنة | الممسوح: ${stocktakeFoundIds.length}` : `Expected: ${stocktakeExpected.length} | Scanned: ${stocktakeFoundIds.length}`}</strong><small>{lang === "ar" ? `ناقص: ${stocktakeMissing.length} | زائد/في مكان خاطئ: ${stocktakeUnexpected.length}` : `Missing: ${stocktakeMissing.length} | Unexpected: ${stocktakeUnexpected.length}`}</small></span></div><label className="shipment-search"><Search size={18} /><input value={stocktakeScan} onChange={(event) => setStocktakeScan(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); scanForStocktake(); } }} placeholder={lang === "ar" ? "امسح باركود الشحنة ثم Enter" : "Scan shipment barcode then Enter"} /></label><div className="warehouse-locations-list">{stocktakeExpected.map((shipment) => <article key={shipment.id}><span className="workspace-icon"><PackageCheck size={17} /></span><span><strong>{shipment.id}</strong><small>{shipment.recipient[lang]} · {stocktakeFoundIds.includes(shipment.id) ? (lang === "ar" ? "تم العثور عليها" : "Found") : (lang === "ar" ? "لم تُمسح بعد" : "Not scanned yet")}</small></span></article>)}</div><button className="primary-button" type="button" onClick={() => { onStocktakesChange([{ id: `ST-${Date.now()}`, locationId: stocktakeLocationId, performedBy: { ar: "موظف المخزن الحالي", en: "Current warehouse user" }, timestamp: nowTimestamp(), expectedShipmentIds: stocktakeExpected.map((shipment) => shipment.id), foundShipmentIds: stocktakeFoundIds, missingShipmentIds: stocktakeMissing.map((shipment) => shipment.id), unexpectedShipmentIds: stocktakeUnexpected }, ...stocktakes]); setToast(lang === "ar" ? `تم حفظ الجرد: ${stocktakeMissing.length ? `${stocktakeMissing.length} فرق يحتاج مراجعة` : "مطابق"}` : `Stocktake saved: ${stocktakeMissing.length ? `${stocktakeMissing.length} difference(s) need review` : "matched"}`); setShowStocktake(false); window.setTimeout(() => setToast(""), 3500); }}><Check size={16} />{lang === "ar" ? "حفظ سجل الجرد" : "Save stocktake record"}</button></>}</div>
+          </section>
+        </div>
+      )}
+
+      {showLocations && (
+        <div className="editor-modal-backdrop" role="presentation" onMouseDown={() => setShowLocations(false)}>
+          <section className="editor-modal warehouse-locations-modal" role="dialog" aria-modal="true" aria-label={lang === "ar" ? "أماكن المخزن" : "Warehouse locations"} onMouseDown={(event) => event.stopPropagation()}>
+            <header className="editor-modal__header"><div><span className="workspace-icon"><MapPin size={19} /></span><span><strong>{lang === "ar" ? "أماكن المخزن" : "Warehouse locations"}</strong><small>{lang === "ar" ? "أضف مكانًا أو أوقفه. لا يُحذف المكان ولا يضيع تاريخه." : "Add or stop a location. It is never deleted, so its history remains."}</small></span></div><button className="square-button" type="button" onClick={() => setShowLocations(false)}><X size={18} /></button></header>
+            <div className="editor-modal__body warehouse-locations-body"><section className="warehouse-location-create"><strong>{lang === "ar" ? "إضافة مكان جديد" : "Add new location"}</strong><div className="warehouse-location-create__fields"><label><span>{lang === "ar" ? "الاسم بالعربية *" : "Arabic name *"}</span><input value={newLocationAr} onChange={(event) => setNewLocationAr(event.target.value)} placeholder={lang === "ar" ? "مثال: رف A-3" : "e.g. Shelf A-3"} /></label><label><span>{lang === "ar" ? "الاسم بالإنجليزية" : "English name"}</span><input value={newLocationEn} onChange={(event) => setNewLocationEn(event.target.value)} placeholder="e.g. Shelf A-3" /></label><button className="primary-button" type="button" onClick={addWarehouseLocation}><Plus size={16} />{lang === "ar" ? "إضافة المكان" : "Add location"}</button></div></section><section className="warehouse-locations-list">{locations.map((location) => { const occupied = physicalShipments.filter((shipment) => defaultLocation(shipment) === location.id).length; return <article key={location.id} className={location.state === "stopped" ? "is-stopped" : ""}><span className="workspace-icon"><MapPin size={17} /></span><span><strong>{location.name[lang]}</strong><small>{occupied ? (lang === "ar" ? `${occupied} شحنة موجودة حاليًا` : `${occupied} shipment(s) currently here`) : (lang === "ar" ? "لا توجد شحنات حاليًا" : "No current shipments")}</small></span><b className={location.state === "active" ? "policy-state policy-state--published" : "policy-state policy-state--draft"}>{location.state === "active" ? (lang === "ar" ? "متاح للنقل" : "Available") : (lang === "ar" ? "موقوف" : "Stopped")}</b><button className="secondary-button" type="button" onClick={() => toggleWarehouseLocation(location)}>{location.state === "active" ? (lang === "ar" ? "إيقاف" : "Stop") : (lang === "ar" ? "إعادة تفعيل" : "Reactivate")}</button></article>; })}</section></div>
+            {error && <div className="warehouse-error" role="alert"><CircleAlert size={16} />{error}</div>}
+          </section>
+        </div>
+      )}
+
       {selectedShipment && (
         <>
-          <button
-            className="drawer-backdrop"
-            type="button"
-            aria-label={lang === "ar" ? "إغلاق" : "Close"}
-            onClick={() => setSelectedShipment(null)}
-          />
+          <button className="drawer-backdrop" type="button" aria-label={lang === "ar" ? "إغلاق" : "Close"} onClick={() => setSelectedShipment(null)} />
           <aside className="shipment-drawer warehouse-drawer">
             <header className="drawer__header">
               <div className="drawer__title-row">
@@ -22566,19 +23900,12 @@ function WarehouseScreen({
                   <small>{lang === "ar" ? "العهدة الحالية" : "Current custody"}</small>
                   <strong>{selectedShipment.custody[lang]}</strong>
                   <span>
-                    {isBeforeWarehouse(selectedShipment)
-                      ? lang === "ar"
-                        ? "لم تعتمد داخل المخزن"
-                        : "Not accepted into warehouse"
-                      : `${inventoryPieces(selectedShipment)} ${
-                          lang === "ar" ? "قطعة فعلية" : "physical piece(s)"
-                        }`}
+                    {inventoryPieces(selectedShipment)} {lang === "ar" ? "قطعة فعلية" : "physical piece(s)"}
                   </span>
                 </article>
               </section>
 
-              {!isBeforeWarehouse(selectedShipment) && (
-                <section className="warehouse-location-editor">
+              <section className="warehouse-location-editor">
                   <div>
                     <MapPin size={18} />
                     <span>
@@ -22600,7 +23927,7 @@ function WarehouseScreen({
                         setError("");
                       }}
                     >
-                      {warehouseLocations.map((location) => (
+                      {activeLocations.map((location) => (
                         <option key={location.id} value={location.id}>
                           {location.name[lang]}
                         </option>
@@ -22617,104 +23944,6 @@ function WarehouseScreen({
                     {lang === "ar" ? "حفظ المكان" : "Save location"}
                   </button>
                 </section>
-              )}
-
-              {isBeforeWarehouse(selectedShipment) && (
-                <section className="warehouse-before-note">
-                  <CircleAlert size={18} />
-                  <div>
-                    <strong>
-                      {lang === "ar"
-                        ? "هذه الشحنة ليست في عهدة المخزن"
-                        : "This shipment is not in warehouse custody"}
-                    </strong>
-                    <p>
-                      {lang === "ar"
-                        ? "سياسة الراسل تشترط استكمال البيانات قبل اعتمادها مخزنيًا؛ لذلك لا يمكن تحديد رف أو تسجيل حركة مخزن لها الآن."
-                        : "Sender policy requires data completion before warehouse acceptance, so no shelf or warehouse movement can be recorded yet."}
-                    </p>
-                    <button
-                      className="secondary-button"
-                      type="button"
-                      onClick={() => {
-                        setSelectedShipment(null);
-                        onNavigate("incompleteShipments");
-                      }}
-                    >
-                      <CircleAlert size={15} />
-                      {lang === "ar" ? "فتح قائمة الاستكمال" : "Open completion queue"}
-                    </button>
-                  </div>
-                </section>
-              )}
-
-              {isReturnAwaitingSender(selectedShipment) && (
-                <section className="warehouse-handover">
-                  <div className="warehouse-handover__head">
-                    <UsersRound size={18} />
-                    <span>
-                      <strong>
-                        {lang === "ar"
-                          ? "تسليم المرتجع للراسل"
-                          : "Handover return to sender"}
-                      </strong>
-                      <small>
-                        {lang === "ar"
-                          ? "التأكيد يخرج القطع من عهدة الشركة ويثبت من استلمها."
-                          : "Confirmation clears company custody and records who received it."}
-                      </small>
-                    </span>
-                  </div>
-                  <label className="field">
-                    <span>
-                      {lang === "ar"
-                        ? "اسم مستلم المرتجع من جهة الراسل"
-                        : "Sender-side return receiver"}
-                      <b className="required-star">*</b>
-                    </span>
-                    <span className="field__control">
-                      <input
-                        value={receiverName}
-                        onChange={(event) => {
-                          setReceiverName(event.target.value);
-                          setError("");
-                        }}
-                        placeholder={
-                          lang === "ar"
-                            ? "مثال: محمود عادل"
-                            : "Example: Mahmoud Adel"
-                        }
-                      />
-                    </span>
-                  </label>
-                  <label className="field">
-                    <span>
-                      {lang === "ar" ? "ملاحظة التسليم" : "Handover note"}
-                    </span>
-                    <span className="field__control">
-                      <input
-                        value={handoverNote}
-                        onChange={(event) => setHandoverNote(event.target.value)}
-                        placeholder={
-                          lang === "ar"
-                            ? "اختياري: رقم مستند أو ملاحظة"
-                            : "Optional: document number or note"
-                        }
-                      />
-                    </span>
-                  </label>
-                  <button
-                    className="primary-button"
-                    type="button"
-                    onClick={handReturnToSender}
-                  >
-                    <PackageCheck size={16} />
-                    {lang === "ar"
-                      ? `تأكيد تسليم ${inventoryPieces(selectedShipment)} قطعة`
-                      : `Confirm ${inventoryPieces(selectedShipment)} piece(s) handover`}
-                  </button>
-                </section>
-              )}
 
               {error && (
                 <div className="warehouse-error" role="alert">
@@ -22798,6 +24027,7 @@ type ShipmentEntryDraft = {
 type PreparedShipment = ShipmentEntryDraft & {
   localId: string;
   shippingFee: number;
+  shippingPricingSnapshot?: Shipment["shippingPricingSnapshot"];
   recipientShippingRate: number;
   recipientShippingCharge: number;
   recipientShippingSource: "company" | "custom";
@@ -22851,6 +24081,9 @@ function CourierShipmentsScreen({
   couriers,
   courierPlans,
   governorates,
+  priceLists,
+  companySettings,
+  senderPolicies,
   onShipmentsChange,
   onLang,
   onTheme,
@@ -22865,6 +24098,9 @@ function CourierShipmentsScreen({
   couriers: CourierRecord[];
   courierPlans: CourierRatePlan[];
   governorates: GovernorateRecord[];
+  priceLists: PriceListRecord[];
+  companySettings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
   onShipmentsChange: (records: Shipment[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -22873,7 +24109,9 @@ function CourierShipmentsScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const assignmentCourierProfiles = courierProfiles(couriers);
+  const assignmentCourierProfiles = courierProfiles(
+    couriers.filter((courier) => courier.state === "active"),
+  );
   const initialCourier =
     assignmentCourierProfiles.find((profile) =>
       shipmentRecords.some(
@@ -22882,7 +24120,16 @@ function CourierShipmentsScreen({
           shipment.courier?.en === profile.courier.en,
       ),
     ) ?? assignmentCourierProfiles[0];
-  const [courierKey, setCourierKey] = useState(initialCourier.courier.en);
+  const [courierKey, setCourierKey] = useState(() => {
+    const requestedCourier = window.sessionStorage.getItem(
+      "tasleem-courier-print-selected",
+    );
+    const requestedProfile = assignmentCourierProfiles.find(
+      (profile) => profile.courier.en === requestedCourier,
+    );
+    window.sessionStorage.removeItem("tasleem-courier-print-selected");
+    return requestedProfile?.courier.en ?? initialCourier.courier.en;
+  });
   const firstShipment =
     shipmentRecords.find(
       (shipment) =>
@@ -22893,6 +24140,7 @@ function CourierShipmentsScreen({
   const [search, setSearch] = useState("");
   const [selectedStatusId, setSelectedStatusId] = useState("");
   const [collectedAmount, setCollectedAmount] = useState("");
+  const [collectionDifferenceReason, setCollectionDifferenceReason] = useState("");
   const [deliveredPieces, setDeliveredPieces] = useState("");
   const [returnedPieces, setReturnedPieces] = useState("");
   const [reason, setReason] = useState("");
@@ -22919,6 +24167,11 @@ function CourierShipmentsScreen({
       shipment.custodyType === "courier" &&
       shipment.courier?.en === selectedCourier.courier.en,
   );
+  const pendingCourierReturns = shipmentRecords.filter(
+    (shipment) =>
+      shipment.custodyType === "return_route" &&
+      shipment.returnFromCourier?.en === selectedCourier.courier.en,
+  );
   const normalized = search.trim().toLowerCase();
   const visibleShipments = courierShipments.filter(
     (shipment) =>
@@ -22942,24 +24195,56 @@ function CourierShipmentsScreen({
   const selectedShipmentService = serviceTypes.find(
     (service) => service.id === selectedShipment?.serviceTypeId,
   );
+  const selectedSenderSettings = selectedShipment
+    ? resolveShipmentDataSettings(
+        selectedShipment,
+        companySettings,
+        senderPolicies,
+      )
+    : normalizeShipmentDataSettings(companySettings);
+  const selectedShipmentStatusPolicyId =
+    selectedShipment?.statusPolicyId ??
+    statuses.find(
+      (status) =>
+        status.name.en === selectedShipment?.status.en ||
+        status.name.ar === selectedShipment?.status.ar,
+    )?.id;
   const courierStatuses = statuses.filter(
     (status) =>
       status.state === "published" &&
-      (status.executors.en.includes("Courier") ||
-        status.executors.ar.includes("المندوب")) &&
-      statusAllowedForService(status, selectedShipmentService),
+      normalizeStatusPolicy(status).recordingMode === "manual" &&
+      normalizeStatusPolicy(status).courierCanRecord === true &&
+      statusAllowedForService(status, selectedShipmentService) &&
+      (status.code !== "PARTIAL" &&
+      status.pieceEffect.en !== "Enter delivered; derive return"
+        ? true
+        : Boolean(
+            selectedShipmentService?.allowsPartial &&
+              selectedSenderSettings.partialDeliveryEnabled,
+          )) &&
+      statusTransitionAllowed(status, selectedShipmentStatusPolicyId),
   );
   const selectedStatus =
     courierStatuses.find((status) => status.id === selectedStatusId) ?? null;
   const selectedStatusActions = selectedStatus
     ? normalizeStatusPolicy(selectedStatus).operationalActions ?? []
     : [];
+  const collectionPolicy = selectedStatus
+    ? normalizeStatusPolicy(selectedStatus).collectionPolicy ?? "none"
+    : "none";
+  const courierExitDestination = selectedStatus
+    ? normalizeStatusPolicy(selectedStatus).courierExitDestination ?? "warehouse"
+    : "warehouse";
   const requiresIndependentReturnCount = Boolean(
     selectedShipmentService?.createsReturnParcel &&
-      selectedStatusActions.includes("create_return"),
+      (selectedStatusActions.includes("create_return") ||
+        courierExitDestination === "return_due"),
   );
+  const hasRecipientRefund =
+    selectedShipmentService?.recipientCashFlow === "refund";
   const payerChangedFromRegistration = Boolean(
     selectedShipment &&
+      (collectionPolicy !== "none" || hasRecipientRefund) &&
       statusUsesShippingPayer(selectedStatus) &&
       finalShippingPayer !== selectedShipment.shippingPayer,
   );
@@ -22968,8 +24253,23 @@ function CourierShipmentsScreen({
       ? shipmentRecipientShippingRate(selectedShipment)
       : 0
     : 0;
+  const approvedRecipientRefund = selectedShipment && hasRecipientRefund
+    ? Math.max(
+        0,
+        (selectedShipment.recipientRefundAmount ?? selectedShipment.amount) -
+          approvedRecipientShipping -
+          (selectedShipment.customFinancialSnapshot?.recipientAdditions ?? 0),
+      )
+    : 0;
   const approvedSenderDue = selectedShipment
-    ? selectedShipment.amount +
+    ? ((selectedShipment.recipientCashFlow ??
+          (selectedShipment.serviceTypeId === "service-return-pickup"
+            ? "refund"
+            : "collect")) === "refund"
+        ? -(selectedShipment.recipientRefundAmount ?? selectedShipment.amount)
+        : (selectedShipment.recipientCashFlow ?? "collect") === "collect"
+          ? selectedShipment.amount
+          : 0) +
       approvedRecipientShipping -
       shipmentCompanyShippingFee(selectedShipment) -
       (selectedShipment.customFinancialSnapshot?.senderDeductions ?? 0)
@@ -23028,6 +24328,7 @@ function CourierShipmentsScreen({
   function resetStatusForm() {
     setSelectedStatusId("");
     setCollectedAmount("");
+    setCollectionDifferenceReason("");
     setDeliveredPieces("");
     setReturnedPieces("");
     setReason("");
@@ -23042,10 +24343,11 @@ function CourierShipmentsScreen({
     const total = shipmentTotalToCollect(selectedShipment);
     setSelectedStatusId(status.id);
     setCollectedAmount(
-      status.requiredFields.some((field) => field.en === "Collected amount")
+      normalizeStatusPolicy(status).collectionPolicy === "fixed_expected"
         ? String(total)
         : "",
     );
+    setCollectionDifferenceReason("");
     setDeliveredPieces(
       status.pieceEffect.en === "All pieces delivered"
         ? String(selectedShipment.pieces)
@@ -23065,8 +24367,32 @@ function CourierShipmentsScreen({
   function saveStatus() {
     if (!selectedShipment || !selectedStatus) return;
     const missing: string[] = [];
-    if (statusNeeds("Collected amount") && !collectedAmount.trim()) {
+    if (collectionPolicy !== "none" && !collectedAmount.trim()) {
       missing.push(lang === "ar" ? "المبلغ المحصل" : "Collected amount");
+    }
+    const expectedCollection = shipmentTotalToCollect(selectedShipment);
+    const enteredCollection = Number(collectedAmount || 0);
+    if (collectionPolicy !== "none" && (!Number.isFinite(enteredCollection) || enteredCollection < 0)) {
+      setError(lang === "ar" ? "المبلغ المحصل يجب أن يكون رقمًا صحيحًا غير سالب." : "Collected amount must be a valid non-negative number.");
+      return;
+    }
+    if (collectionPolicy === "up_to_expected" && enteredCollection > expectedCollection) {
+      setError(
+        lang === "ar"
+          ? `المبلغ المحصل لا يمكن أن يتجاوز ${money.format(expectedCollection)}`
+          : `Collected amount cannot exceed ${money.format(expectedCollection)}`,
+      );
+      return;
+    }
+    if (
+      collectionPolicy === "manual_with_reason" &&
+      collectedAmount.trim() &&
+      enteredCollection !== expectedCollection &&
+      !collectionDifferenceReason.trim()
+    ) {
+      missing.push(
+        lang === "ar" ? "سبب اختلاف المبلغ المحصل" : "Collection variance reason",
+      );
     }
     if (statusNeeds("Delivered pieces") && deliveredPieces === "") {
       missing.push(lang === "ar" ? "عدد القطع المسلمة" : "Delivered pieces");
@@ -23115,6 +24441,15 @@ function CourierShipmentsScreen({
       );
       return;
     }
+    const returned = returnedPieces === "" ? null : Number(returnedPieces);
+    if (returned !== null && (!Number.isInteger(returned) || returned < 0 || returned > selectedShipment.pieces)) {
+      setError(lang === "ar" ? `عدد قطع المرتجع يجب أن يكون من 0 إلى ${selectedShipment.pieces}` : `Returned pieces must be between 0 and ${selectedShipment.pieces}`);
+      return;
+    }
+    if (delivered !== null && returned !== null && delivered + returned > selectedShipment.pieces) {
+      setError(lang === "ar" ? "مجموع القطع المسلمة والمرتجعة أكبر من عدد قطع الشحنة." : "Delivered and returned pieces exceed the shipment piece count.");
+      return;
+    }
     if (missing.length) {
       setError(
         lang === "ar"
@@ -23158,31 +24493,70 @@ function CourierShipmentsScreen({
       governorates,
       capturedAt: timestamp,
     });
+    const appliedPriceList =
+      priceLists
+        .filter(
+          (priceList) =>
+            priceList.state === "active" &&
+            priceList.senders.some(
+              (sender) => sender.en === selectedShipment.sender.en,
+            ),
+        )
+        .sort((first, second) => Number(second.isDefault) - Number(first.isDefault))[0] ??
+      priceLists.find(
+        (priceList) => priceList.state === "active" && priceList.isDefault,
+      ) ??
+      null;
+    const snapshotAreaId = governorates
+      .flatMap((governorate) => governorate.areas)
+      .find(
+        (area) =>
+          area.name.en === selectedShipment.area.en ||
+          area.name.ar === selectedShipment.area.ar,
+      )?.id;
+    const frozenPricing = selectedShipment.shippingPricingSnapshot;
+    const snapshotStatusPrice = frozenPricing
+      ? frozenPricing.statusPrices[selectedStatus.id]
+      : snapshotAreaId && appliedPriceList
+        ? priceMatrixForService(
+            appliedPriceList,
+            selectedShipment.serviceTypeId ?? "service-standard",
+          )[snapshotAreaId]?.[selectedStatus.id]
+        : null;
+    const pricingSnapshot =
+      selectedStatus.appearsInPricing &&
+      (frozenPricing || (appliedPriceList && snapshotAreaId)) &&
+      typeof snapshotStatusPrice === "number"
+        ? {
+            priceListId: frozenPricing?.priceListId ?? appliedPriceList!.id,
+            priceListName: frozenPricing?.priceListName ?? appliedPriceList!.name,
+            priceListCode: frozenPricing?.priceListCode ?? appliedPriceList!.code,
+            priceListVersion: frozenPricing?.priceListVersion ?? appliedPriceList!.version,
+            areaId: frozenPricing?.areaId ?? snapshotAreaId!,
+            statusPrice: snapshotStatusPrice,
+          }
+        : undefined;
     const actions = normalizeStatusPolicy(selectedStatus).operationalActions ?? [];
-    const isFullyDelivered = actions.includes("deliver_to_recipient");
-    const createsReturn = actions.includes("create_return");
-    const keepsAssignment =
-      actions.includes("keep_assignment") && !actions.includes("end_assignment");
-    const entersFollowUp = actions.includes("follow_up_queue");
+    const isFullyDelivered = courierExitDestination === "recipient";
+    const createsReturn =
+      courierExitDestination === "return_due" || actions.includes("create_return");
+    const entersFollowUp = courierExitDestination === "follow_up";
+    // A courier status always ends the courier's custody. The configured destination
+    // describes the real-world location after that handover, not a second assignment.
     const nextCustody: Localized = isFullyDelivered
       ? { ar: "تم التسليم للمستلم", en: "Delivered to recipient" }
       : createsReturn
-        ? {
-            ar: "مرتجع مطلوب من المندوب",
-            en: "Return due from courier",
-          }
-        : keepsAssignment
-          ? selectedShipment.custody
+        ? { ar: "مرتجع بانتظار استلام الشركة", en: "Return awaiting company receipt" }
+        : courierExitDestination === "company_receipt_pending"
+          ? { ar: "بانتظار استلام الشركة من المندوب", en: "Awaiting company receipt" }
           : entersFollowUp
-            ? { ar: "قائمة المتابعة", en: "Follow-up queue" }
+            ? { ar: "المخزن + قائمة المتابعة", en: "Warehouse + follow-up" }
             : { ar: "المخزن الرئيسي", en: "Main warehouse" };
     const nextCustodyType: Shipment["custodyType"] = isFullyDelivered
       ? "recipient"
-      : createsReturn
+      : createsReturn || courierExitDestination === "company_receipt_pending"
         ? "return_route"
-        : keepsAssignment
-          ? "courier"
-          : "warehouse";
+        : "warehouse";
     const tone: Shipment["statusTone"] =
       selectedStatus.color.toLowerCase() === "#07835a"
         ? "green"
@@ -23191,11 +24565,9 @@ function CourierShipmentsScreen({
           : selectedStatus.color.toLowerCase() === "#e95f00"
             ? "orange"
             : "blue";
-    const remaining = keepsAssignment
-      ? courierShipments
-      : courierShipments.filter(
-          (shipment) => shipment.id !== selectedShipment.id,
-        );
+    const remaining = courierShipments.filter(
+      (shipment) => shipment.id !== selectedShipment.id,
+    );
     const needsFinancialApproval =
       normalizeStatusPolicy(selectedStatus).requiresApproval ?? false;
     const nextRecords: Shipment[] = shipmentRecords.map((shipment) => {
@@ -23207,8 +24579,8 @@ function CourierShipmentsScreen({
         statusTone: tone,
         custody: nextCustody,
         custodyType: nextCustodyType,
-        courier:
-          keepsAssignment || createsReturn ? selectedCourier.courier : null,
+        courier: null,
+        returnFromCourier: createsReturn ? selectedCourier.courier : null,
         warehouseLocation: "",
         warehouseHistory: shipment.warehouseHistory,
         deliveryDate: nextDate
@@ -23225,7 +24597,7 @@ function CourierShipmentsScreen({
               ? { ar: "متابعة الحالة", en: "Follow up status" }
               : { ar: "لا يوجد", en: "None" },
         requiredType:
-          createsReturn || entersFollowUp
+          createsReturn || entersFollowUp || courierExitDestination === "company_receipt_pending"
             ? ("attention" as const)
             : ("none" as const),
         lastEvent: {
@@ -23244,7 +24616,7 @@ function CourierShipmentsScreen({
               ? `“${selectedStatus.name.en}” was recorded; its financial effect awaits approval`
             : `Courier recorded “${selectedStatus.name.en}” just now`,
         },
-        ...(statusUsesShippingPayer(selectedStatus) && !needsFinancialApproval
+        ...((collectionPolicy !== "none" || hasRecipientRefund) && statusUsesShippingPayer(selectedStatus) && !needsFinancialApproval
           ? {
               finalShippingPayer,
               finalShippingPayerSource:
@@ -23273,11 +24645,17 @@ function CourierShipmentsScreen({
               collectedAmount === "" ? null : Number(collectedAmount),
             deliveredPieces: deliveredSnapshot,
             returnedPieces: returnedSnapshot,
-            reason,
+            reason:
+              collectionDifferenceReason.trim()
+                ? [reason.trim(), collectionDifferenceReason.trim()]
+                    .filter(Boolean)
+                    .join(" · ")
+                : reason,
             note,
             nextDate,
             customValues: customStatusValues,
             timestamp,
+            pricingSnapshot,
             settlementStatus: "pending" as const,
             courierCommissionSnapshot,
             ...(needsFinancialApproval
@@ -23290,7 +24668,7 @@ function CourierShipmentsScreen({
                       en: "Operations accountant",
                     },
                     requestedAt: timestamp,
-                    ...(statusUsesShippingPayer(selectedStatus)
+                    ...((collectionPolicy !== "none" || hasRecipientRefund) && statusUsesShippingPayer(selectedStatus)
                       ? {
                           proposedShippingPayer: finalShippingPayer,
                           proposedShippingPayerReason:
@@ -23315,14 +24693,10 @@ function CourierShipmentsScreen({
       lang === "ar"
         ? needsFinancialApproval
           ? "تم تسجيل الحالة والحيازة فعليًا، وأُرسل أثرها المالي للاعتماد"
-          : keepsAssignment
-          ? "تم تسجيل الحالة وبقيت الشحنة مع المندوب حسب السياسة"
-          : "تم تسجيل الحالة ونُفذت إجراءاتها التشغيلية"
+          : "تم تسجيل الحالة وخرجت الشحنة من حيازة المندوب"
         : needsFinancialApproval
           ? "Status and custody saved; the financial effect was sent for approval"
-          : keepsAssignment
-          ? "Status saved and the shipment stayed with the courier by policy"
-          : "Status saved and its operational actions were applied",
+          : "Status saved and the shipment left courier custody",
     );
     window.setTimeout(() => setToast(""), 2800);
   }
@@ -23434,6 +24808,27 @@ function CourierShipmentsScreen({
               </small>
             </span>
           </section>
+
+          {pendingCourierReturns.length > 0 && (
+            <section className="courier-custody-truth courier-custody-truth--returns">
+              <RotateCcw size={18} />
+              <span>
+                <strong>
+                  {lang === "ar"
+                    ? `${pendingCourierReturns.length} مرتجع بانتظار استلام الشركة من ${selectedCourier.courier[lang]}`
+                    : `${pendingCourierReturns.length} return(s) await company receipt from ${selectedCourier.courier[lang]}`}
+                </strong>
+                <small>
+                  {lang === "ar"
+                    ? `شحنات: ${pendingCourierReturns.map((shipment) => shipment.id).join("، ")}. خرجت من حيازة المندوب ولا تدخل حسابه قبل استلامها فعليًا.`
+                    : `Shipments: ${pendingCourierReturns.map((shipment) => shipment.id).join(", ")}. They are no longer in courier custody and do not enter settlement before physical company receipt.`}
+                </small>
+              </span>
+              <button type="button" onClick={() => onNavigate("warehouse")}>
+                {lang === "ar" ? "فتح الاستلام بالمخزن" : "Open warehouse receipt"}
+              </button>
+            </section>
+          )}
 
           <section className="courier-quick-selector">
             <span>
@@ -23601,6 +24996,7 @@ function CourierShipmentsScreen({
               <div className="custody-shipment-list">
                 {visibleShipments.map((shipment) => {
                   const total = shipmentTotalToCollect(shipment);
+                  const refund = shipmentAmountPaidToRecipient(shipment);
                   return (
                     <button
                       type="button"
@@ -23640,8 +25036,16 @@ function CourierShipmentsScreen({
                         <small>{lang === "ar" ? "قطعة" : "pieces"}</small>
                       </span>
                       <span className="custody-shipment__money">
-                        <strong>{money.format(total)}</strong>
-                        <small>{lang === "ar" ? "تحصيل" : "collection"}</small>
+                        <strong>{money.format(refund > 0 ? refund : total)}</strong>
+                        <small>
+                          {lang === "ar"
+                            ? refund > 0
+                              ? "يدفع للمستلم"
+                              : "تحصيل"
+                            : refund > 0
+                              ? "pay recipient"
+                              : "collection"}
+                        </small>
                       </span>
                       <span
                         className={`status-badge status-badge--${shipment.statusTone}`}
@@ -23722,10 +25126,32 @@ function CourierShipmentsScreen({
                     <span>
                       <HandCoins size={15} />
                       <b>
-                        {money.format(shipmentTotalToCollect(selectedShipment))}
+                        {money.format(
+                          hasRecipientRefund
+                            ? shipmentAmountPaidToRecipient(selectedShipment)
+                            : shipmentTotalToCollect(selectedShipment),
+                        )}
                       </b>
                     </span>
                   </div>
+
+                  {hasRecipientRefund && (
+                    <div className="courier-account-truth courier-account-truth--approval">
+                      <HandCoins size={17} />
+                      <span>
+                        <strong>
+                          {lang === "ar"
+                            ? `المندوب يسلّم المستلم ${money.format(shipmentAmountPaidToRecipient(selectedShipment))}`
+                            : `Courier pays ${money.format(shipmentAmountPaidToRecipient(selectedShipment))} to the recipient`}
+                        </strong>
+                        <small>
+                          {lang === "ar"
+                            ? "المبلغ مسجل موجبًا واتجاهه دفع للمستلم؛ سيظهر تلقائيًا كمستحق للمندوب عند التسوية."
+                            : "The amount stays positive with a pay-recipient direction and becomes due to the courier at settlement."}
+                        </small>
+                      </span>
+                    </div>
+                  )}
 
                   <div className="courier-status-choice">
                     <div>
@@ -23790,7 +25216,7 @@ function CourierShipmentsScreen({
                       <div className="status-effect-preview">
                         <GitBranch size={16} />
                         <span>
-                          <strong>{selectedStatus.assignmentEffect[lang]}</strong>
+                            <strong>{statusDestinationLabel(selectedStatus, lang)}</strong>
                           <small>
                             {lang === "ar"
                               ? "بعد الحفظ ستخرج من حيازة المندوب"
@@ -23799,7 +25225,7 @@ function CourierShipmentsScreen({
                         </span>
                       </div>
 
-                      {statusUsesShippingPayer(selectedStatus) && (
+                      {(collectionPolicy !== "none" || hasRecipientRefund) && statusUsesShippingPayer(selectedStatus) && (
                       <section
                         className={`courier-status-payer ${
                           payerChangedFromRegistration ? "has-change" : ""
@@ -23890,12 +25316,22 @@ function CourierShipmentsScreen({
 
                         <div className="courier-status-payer__money">
                           <span>
-                            <small>{lang === "ar" ? "المحصل المسجل" : "Recorded collection"}</small>
+                            <small>
+                              {lang === "ar"
+                                ? hasRecipientRefund
+                                  ? "صافي ما يدفعه المندوب للمستلم"
+                                  : "المحصل المسجل"
+                                : hasRecipientRefund
+                                  ? "Net courier payment to recipient"
+                                  : "Recorded collection"}
+                            </small>
                             <strong>
                               {money.format(
-                                collectedAmount === ""
-                                  ? shipmentTotalToCollect(selectedShipment)
-                                  : Number(collectedAmount) || 0,
+                                hasRecipientRefund
+                                  ? approvedRecipientRefund
+                                  : collectedAmount === ""
+                                    ? shipmentTotalToCollect(selectedShipment)
+                                    : Number(collectedAmount) || 0,
                               )}
                             </strong>
                           </span>
@@ -23941,13 +25377,18 @@ function CourierShipmentsScreen({
                       )}
 
                       <div className="courier-dynamic-fields">
-                        {statusNeeds("Collected amount") && (
+                        {collectionPolicy !== "none" && (
                           <label>
-                            <span>{lang === "ar" ? "المبلغ المحصل" : "Collected amount"} *</span>
+                            <span>
+                              {lang === "ar" ? "المبلغ المحصل" : "Collected amount"}
+                              {collectionPolicy !== "fixed_expected" && " *"}
+                            </span>
                             <span className="courier-field-control">
                               <input
                                 type="number"
                                 min="0"
+                                max={collectionPolicy === "up_to_expected" ? shipmentTotalToCollect(selectedShipment) : undefined}
+                                disabled={collectionPolicy === "fixed_expected"}
                                 value={collectedAmount}
                                 onChange={(event) =>
                                   setCollectedAmount(event.target.value)
@@ -23955,8 +25396,33 @@ function CourierShipmentsScreen({
                               />
                               <b>{lang === "ar" ? "ج.م" : "EGP"}</b>
                             </span>
+                            <small>
+                              {collectionPolicy === "fixed_expected"
+                                ? lang === "ar"
+                                  ? "ثابت حسب سياسة الحالة."
+                                  : "Fixed by status policy."
+                                : collectionPolicy === "up_to_expected"
+                                  ? lang === "ar"
+                                    ? `الحد الأقصى ${money.format(shipmentTotalToCollect(selectedShipment))}.`
+                                    : `Maximum ${money.format(shipmentTotalToCollect(selectedShipment))}.`
+                                  : lang === "ar"
+                                    ? "أي اختلاف عن المتوقع يحتاج سببًا."
+                                    : "A variance from expected needs a reason."}
+                            </small>
                           </label>
                         )}
+                        {collectionPolicy === "manual_with_reason" &&
+                          collectedAmount !== "" &&
+                          Number(collectedAmount) !== shipmentTotalToCollect(selectedShipment) && (
+                            <label className="courier-note-field">
+                              <span>{lang === "ar" ? "سبب اختلاف المبلغ المحصل *" : "Collection variance reason *"}</span>
+                              <textarea
+                                value={collectionDifferenceReason}
+                                onChange={(event) => setCollectionDifferenceReason(event.target.value)}
+                                placeholder={lang === "ar" ? "مثال: تسليم جزئي أو خصم معتمد..." : "Example: partial delivery or approved discount..."}
+                              />
+                            </label>
+                          )}
                         {statusNeeds("Delivered pieces") && (
                           <label>
                             <span>
@@ -24066,7 +25532,18 @@ function CourierShipmentsScreen({
                             <span>
                               {field.label[lang]} {field.required && "*"}
                             </span>
-                            {field.type === "select" && field.options.length ? (
+                            {field.type === "evidence" ? (
+                              <input
+                                type="file"
+                                accept="image/*,.pdf"
+                                onChange={(event) =>
+                                  setCustomStatusValues((current) => ({
+                                    ...current,
+                                    [field.id]: event.target.files?.[0]?.name ?? "",
+                                  }))
+                                }
+                              />
+                            ) : field.type === "select" && field.options.length ? (
                               <span className="select-wrap">
                                 <select
                                   value={customStatusValues[field.id] ?? ""}
@@ -24785,6 +26262,9 @@ function TreasuryScreen({
   statementReconciliations,
   statementLines,
   dayCloseSnapshots,
+  courierSettlements,
+  senderReceipts,
+  onAccountsChange,
   onMovementsChange,
   onCashSessionChange,
   onCashSessionHistoryChange,
@@ -24814,6 +26294,9 @@ function TreasuryScreen({
   statementReconciliations: TreasuryStatementReconciliation[];
   statementLines: TreasuryStatementLine[];
   dayCloseSnapshots: FinancialDayCloseSnapshot[];
+  courierSettlements: CourierSettlement[];
+  senderReceipts: SenderSettlementReceipt[];
+  onAccountsChange: (accounts: TreasuryAccount[]) => void;
   onMovementsChange: (movements: TreasuryMovement[]) => void;
   onCashSessionChange: (session: TreasuryCashSession) => void;
   onCashSessionHistoryChange: (sessions: TreasuryCashSession[]) => void;
@@ -24841,6 +26324,7 @@ function TreasuryScreen({
     >("ledger");
   const [accountId, setAccountId] =
     useState<TreasuryAccount["id"]>("main-cash");
+  const [lowBalanceInput, setLowBalanceInput] = useState("");
   const [search, setSearch] = useState("");
   const [directionFilter, setDirectionFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
@@ -24878,6 +26362,7 @@ function TreasuryScreen({
   const [actualCash, setActualCash] = useState("");
   const [closingNote, setClosingNote] = useState("");
   const [reverseReason, setReverseReason] = useState("");
+  const [correctedMovementAmount, setCorrectedMovementAmount] = useState("");
   const [sessionEmployeeId, setSessionEmployeeId] = useState("");
   const [selectedVarianceIssue, setSelectedVarianceIssue] =
     useState<TreasuryVarianceIssue | null>(null);
@@ -24978,6 +26463,7 @@ function TreasuryScreen({
   const categoryLabels: Record<TreasuryMovement["category"], Localized> = {
     courier_collection: { ar: "تحصيل مندوب", en: "Courier collection" },
     courier_payment: { ar: "صرف مستحق مندوب", en: "Courier payout" },
+    courier_advance: { ar: "سلفة مندوب", en: "Courier advance" },
     sender_payment: { ar: "دفع للراسل", en: "Sender payment" },
     company_deposit: { ar: "تغذية خزنة", en: "Treasury funding" },
     operating_expense: { ar: "مصروف تشغيلي", en: "Operating expense" },
@@ -25020,6 +26506,9 @@ function TreasuryScreen({
     .reduce((sum, movement) => sum + movement.amount, 0);
   const currentBalance =
     selectedAccount.openingBalance + totalIn - totalOut;
+  const selectedLowBalanceThreshold = selectedAccount.lowBalanceAlertAt ?? 0;
+  const selectedAccountIsLow =
+    selectedLowBalanceThreshold > 0 && currentBalance <= selectedLowBalanceThreshold;
   const totalTreasuryBalance = accounts.reduce((total, account) => {
     const accountTotal = movements
       .filter((movement) => movement.accountId === account.id)
@@ -25092,6 +26581,29 @@ function TreasuryScreen({
     ? Number(verifiedCount) - selectedVarianceIssue.expectedAmount
     : selectedVarianceIssue?.variance ?? 0;
   const dayCloseBlocked = cashSession.state === "open";
+  const unpostedCourierSettlements = courierSettlements.filter(
+    (settlement) =>
+      settlement.actualCash > 0 &&
+      !movements.some(
+        (movement) =>
+          movement.sourceDocument?.type === "courier_settlement" &&
+          movement.sourceDocument.id === settlement.id,
+      ),
+  );
+  const unpostedSenderReceipts = senderReceipts.filter(
+    (receipt) =>
+      receipt.moneyExecuted &&
+      receipt.paidNow > 0 &&
+      !movements.some(
+        (movement) =>
+          movement.sourceDocument?.type === "sender_receipt" &&
+          movement.sourceDocument.id === receipt.id,
+      ),
+  );
+  const dayCloseHardBlocked =
+    cashSession.state === "open" ||
+    unpostedCourierSettlements.length > 0 ||
+    unpostedSenderReceipts.length > 0;
   const sessionsForBusinessDate = [
     ...cashSessionHistory,
     cashSession,
@@ -25169,6 +26681,9 @@ function TreasuryScreen({
   const openStatementDifferences = statementReconciliations.filter(
     (reconciliation) => reconciliation.state === "under_review",
   );
+  const openStatementLineCount = statementLines.filter(
+    (line) => line.state !== "matched",
+  ).length;
   const openStatementDifferenceTotal = openStatementDifferences.reduce(
     (sum, reconciliation) =>
       sum + Math.abs(reconciliation.difference),
@@ -25347,6 +26862,22 @@ function TreasuryScreen({
     window.setTimeout(() => setToast(""), 2600);
   }
 
+  function saveLowBalanceThreshold() {
+    const nextThreshold = Math.max(0, Number(lowBalanceInput) || 0);
+    onAccountsChange(
+      accounts.map((account) =>
+        account.id === selectedAccount.id
+          ? { ...account, lowBalanceAlertAt: nextThreshold }
+          : account,
+      ),
+    );
+    showToast(
+      lang === "ar"
+        ? "تم حفظ حد التنبيه للخزنة"
+        : "Treasury alert threshold saved",
+    );
+  }
+
   function resetDialog() {
     setDialog(null);
     setFormError("");
@@ -25358,6 +26889,7 @@ function TreasuryScreen({
     setActualCash("");
     setClosingNote("");
     setReverseReason("");
+    setCorrectedMovementAmount("");
     setSessionEmployeeId("");
     setSelectedVarianceIssue(null);
     setVarianceDecision("company_expense");
@@ -25403,7 +26935,12 @@ function TreasuryScreen({
   }
 
   function openReverseDialog() {
-    if (!selectedMovement || selectedMovement.source !== "manual") return;
+    if (
+      !selectedMovement ||
+      selectedMovement.source === "transfer" ||
+      selectedMovement.reversalOf ||
+      selectedMovement.reversedBy
+    ) return;
     if (!canApproveTreasuryCorrection) {
       showToast(lang === "ar" ? "ليس لديك صلاحية اعتماد تصحيح مالي." : "You do not have permission to approve a financial correction.");
       return;
@@ -25413,6 +26950,7 @@ function TreasuryScreen({
       return;
     }
     setReverseReason("");
+    setCorrectedMovementAmount(String(selectedMovement.amount));
     setFormError("");
     setDialog("reverse");
   }
@@ -25460,6 +26998,14 @@ function TreasuryScreen({
         lang === "ar"
           ? "ليس لديك صلاحية إغلاق اليوم المالي. اطلب من مالك الشركة منحها لدورك."
           : "You do not have permission to close the financial day. Ask the company owner to grant it to your role.",
+      );
+      return;
+    }
+    if (unpostedCourierSettlements.length || unpostedSenderReceipts.length) {
+      showToast(
+        lang === "ar"
+          ? `لا يمكن الإغلاق: توجد ${unpostedCourierSettlements.length} تسوية مندوب و${unpostedSenderReceipts.length} إيصال راسل لم تُرحّل للخزنة بعد.`
+          : `Close blocked: ${unpostedCourierSettlements.length} courier settlement(s) and ${unpostedSenderReceipts.length} sender receipt(s) are not posted yet.`,
       );
       return;
     }
@@ -26118,11 +27664,15 @@ function TreasuryScreen({
 
   function submitReversal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedMovement || selectedMovement.source !== "manual") {
+    if (
+      !selectedMovement ||
+      selectedMovement.source === "transfer" ||
+      selectedMovement.reversalOf
+    ) {
       setFormError(
         lang === "ar"
-          ? "يمكن عكس الحركات اليدوية فقط من هذه الشاشة."
-          : "Only manual movements can be reversed here.",
+          ? "هذه الحركة لا تقبل التصحيح من هذه الشاشة."
+          : "This movement cannot be corrected from this screen.",
       );
       return;
     }
@@ -26172,6 +27722,15 @@ function TreasuryScreen({
       );
       return;
     }
+    const correctedAmount = Number(correctedMovementAmount);
+    if (!Number.isFinite(correctedAmount) || correctedAmount <= 0) {
+      setFormError(
+        lang === "ar"
+          ? "أدخل القيمة الصحيحة للمستند البديل."
+          : "Enter a valid amount for the replacement document.",
+      );
+      return;
+    }
     const oppositeDirection =
       selectedMovement.direction === "in" ? "out" : "in";
     if (
@@ -26188,6 +27747,7 @@ function TreasuryScreen({
     const now = Date.now();
     const reversalId = `TM-REV-${now.toString().slice(-9)}`;
     const reference = `REV-${selectedMovement.id}`;
+    const correctionId = `TM-COR-${now.toString().slice(-9)}`;
     const reversal: TreasuryMovement = {
       id: reversalId,
       accountId: selectedMovement.accountId,
@@ -26222,7 +27782,28 @@ function TreasuryScreen({
       reversalOf: selectedMovement.id,
       linkedMovementId: selectedMovement.id,
     };
+    const correction: TreasuryMovement = {
+      id: correctionId,
+      accountId: selectedMovement.accountId,
+      direction: selectedMovement.direction,
+      category: selectedMovement.category,
+      amount: correctedAmount,
+      party: selectedMovement.party,
+      description: {
+        ar: `مستند بديل مصحح للحركة ${selectedMovement.id} — ${reverseReason.trim()}`,
+        en: `Corrected replacement for ${selectedMovement.id} — ${reverseReason.trim()}`,
+      },
+      reference: `COR-${selectedMovement.reference}`,
+      source: "system",
+      createdBy: actingFinancialUser,
+      timestamp: reversal.timestamp,
+      sequence: now + 1,
+      linkedScreen: selectedMovement.linkedScreen,
+      linkedMovementId: reversalId,
+      sourceDocument: { type: "treasury_correction", id: selectedMovement.id },
+    };
     onMovementsChange([
+      correction,
       reversal,
       ...movements.map((movement) =>
         movement.id === selectedMovement.id
@@ -26234,8 +27815,8 @@ function TreasuryScreen({
     resetDialog();
     showToast(
       lang === "ar"
-        ? `تم إثبات حركة التصحيح ${reversalId}`
-        : `Reversal ${reversalId} was posted`,
+        ? `تم عكس الأصل وإصدار المستند المصحح ${correctionId}`
+        : `Original reversed and corrected document ${correctionId} posted`,
     );
   }
 
@@ -26510,6 +28091,14 @@ function TreasuryScreen({
       );
       return;
     }
+    if (unpostedCourierSettlements.length || unpostedSenderReceipts.length) {
+      setFormError(
+        lang === "ar"
+          ? "لا يمكن إغلاق اليوم قبل ترحيل كل تسويات المناديب وإيصالات الرسل للخزنة."
+          : "Post all courier settlements and sender receipts before closing the day.",
+      );
+      return;
+    }
     if (latestDayClose) {
       setFormError(
         lang === "ar"
@@ -26522,7 +28111,8 @@ function TreasuryScreen({
       openVarianceIssuesForBusinessDate.length;
     if (
       (varianceSessionCount > 0 ||
-        openStatementDifferences.length > 0) &&
+        openStatementDifferences.length > 0 ||
+        openStatementLineCount > 0) &&
       !closingNote.trim()
     ) {
       setFormError(
@@ -26550,6 +28140,9 @@ function TreasuryScreen({
       sessionIds: sessionsForBusinessDate.map((session) => session.id),
       varianceSessionCount,
       unresolvedStatementCount: openStatementDifferences.length,
+      unpostedCourierSettlementCount: unpostedCourierSettlements.length,
+      unpostedSenderReceiptCount: unpostedSenderReceipts.length,
+      unmatchedStatementLineCount: openStatementLineCount,
       closedAt: {
         ar: now.toLocaleString("ar-EG", {
           dateStyle: "medium",
@@ -28018,7 +29611,10 @@ function TreasuryScreen({
                   type="button"
                   className={`treasury-account-card ${active ? "treasury-account-card--active" : ""}`}
                   key={account.id}
-                  onClick={() => setAccountId(account.id)}
+                  onClick={() => {
+                    setAccountId(account.id);
+                    setLowBalanceInput(String(account.lowBalanceAlertAt ?? 0));
+                  }}
                 >
                   <span className="treasury-account-card__icon">
                     {accountIcon(account)}
@@ -28033,6 +29629,38 @@ function TreasuryScreen({
                 </button>
               );
             })}
+          </section>
+
+          <section className="treasury-truth">
+            <CircleAlert size={18} />
+            <span>
+              <strong>
+                {selectedAccountIsLow
+                  ? lang === "ar"
+                    ? `تنبيه: رصيد ${selectedAccount.name[lang]} وصل لحد الرصيد المنخفض`
+                    : `Alert: ${selectedAccount.name[lang]} reached its low-balance limit`
+                  : lang === "ar"
+                    ? "تنبيه الرصيد المنخفض مضبوط لهذه الخزنة"
+                    : "Low-balance alert is configured for this treasury"}
+              </strong>
+              <small>
+                {lang === "ar"
+                  ? `الرصيد الحالي ${money.format(currentBalance)} · الحد ${money.format(selectedLowBalanceThreshold)}`
+                  : `Current ${money.format(currentBalance)} · limit ${money.format(selectedLowBalanceThreshold)}`}
+              </small>
+            </span>
+            <label className="entry-select">
+              <input
+                type="number"
+                min="0"
+                value={lowBalanceInput || String(selectedLowBalanceThreshold)}
+                onChange={(event) => setLowBalanceInput(event.target.value)}
+                aria-label={lang === "ar" ? "حد الرصيد المنخفض" : "Low-balance limit"}
+              />
+            </label>
+            <button className="secondary-button" type="button" onClick={saveLowBalanceThreshold}>
+              {lang === "ar" ? "حفظ الحد" : "Save limit"}
+            </button>
           </section>
 
           <section className="treasury-metrics">
@@ -29449,12 +31077,12 @@ function TreasuryScreen({
                       <ClipboardCheck size={19} />
                       <strong>{lang === "ar" ? "جاهزية الإغلاق" : "Close readiness"}</strong>
                     </span>
-                    <b className={dayCloseBlocked ? "blocked" : "ready"}>
+                    <b className={dayCloseHardBlocked ? "blocked" : "ready"}>
                       {latestDayClose
                         ? lang === "ar"
                           ? "مغلق"
                           : "Closed"
-                        : dayCloseBlocked
+                        : dayCloseHardBlocked
                           ? lang === "ar"
                             ? "يوجد مانع"
                             : "Blocked"
@@ -29484,6 +31112,19 @@ function TreasuryScreen({
                       <span>
                         <strong>{lang === "ar" ? "الحركات المالية" : "Financial movements"}</strong>
                         <small>{lang === "ar" ? "كل الظاهر حركات مثبتة وليست طلبات" : "All visible rows are posted movements"}</small>
+                      </span>
+                    </li>
+                    <li className={unpostedCourierSettlements.length === 0 && unpostedSenderReceipts.length === 0 ? "done" : "blocked"}>
+                      {unpostedCourierSettlements.length === 0 && unpostedSenderReceipts.length === 0 ? <Check size={17} /> : <CircleAlert size={17} />}
+                      <span>
+                        <strong>{lang === "ar" ? "ترحيل مستندات التشغيل" : "Operations posting"}</strong>
+                        <small>
+                          {unpostedCourierSettlements.length === 0 && unpostedSenderReceipts.length === 0
+                            ? lang === "ar" ? "كل تسويات المناديب وإيصالات الرسل مُرحّلة" : "All courier settlements and sender receipts are posted"
+                            : lang === "ar"
+                              ? `${unpostedCourierSettlements.length} تسوية مندوب و${unpostedSenderReceipts.length} إيصال راسل غير مُرحّل — يمنع الإغلاق`
+                              : `${unpostedCourierSettlements.length} courier settlement(s) and ${unpostedSenderReceipts.length} sender receipt(s) are unposted — close is blocked`}
+                        </small>
                       </span>
                     </li>
                     <li className={openVarianceIssuesForBusinessDate.length === 0 ? "done" : "review"}>
@@ -29530,19 +31171,30 @@ function TreasuryScreen({
                         </small>
                       </span>
                     </li>
+                    <li className={openStatementLineCount === 0 ? "done" : "review"}>
+                      {openStatementLineCount === 0 ? <Check size={17} /> : <CircleAlert size={17} />}
+                      <span>
+                        <strong>{lang === "ar" ? "بنود كشف الحساب" : "Statement lines"}</strong>
+                        <small>
+                          {openStatementLineCount === 0
+                            ? lang === "ar" ? "كل البنود مطابقة بالكامل" : "All statement lines are fully matched"
+                            : lang === "ar" ? `${openStatementLineCount} بند غير مطابق أو مطابق جزئيًا ويحتاج مراجعة` : `${openStatementLineCount} unmatched or partially matched line(s) need review`}
+                        </small>
+                      </span>
+                    </li>
                   </ul>
                   {!latestDayClose && (
                     <button
                       className="primary-button"
                       type="button"
-                      disabled={dayCloseBlocked}
+                      disabled={dayCloseHardBlocked}
                       onClick={openCloseDayDialog}
                     >
                       <LockKeyhole size={17} />
-                      {dayCloseBlocked
+                      {dayCloseHardBlocked
                         ? lang === "ar"
-                          ? "أغلق جلسة النقد أولًا"
-                          : "Close cash session first"
+                          ? "عالج موانع الإغلاق أولًا"
+                          : "Resolve close blockers first"
                         : lang === "ar"
                           ? "مراجعة وإغلاق اليوم"
                           : "Review & close day"}
@@ -29768,7 +31420,7 @@ function TreasuryScreen({
                 </small>
               </span>
             </div>
-            {selectedMovement.source === "manual" &&
+            {selectedMovement.source !== "transfer" &&
               !selectedMovement.reversedBy &&
               !selectedMovement.reversalOf && (
                 <button
@@ -29778,8 +31430,8 @@ function TreasuryScreen({
                 >
                   <RotateCcw size={17} />
                   {lang === "ar"
-                    ? "تصحيح بعكس الحركة"
-                    : "Correct with reversal"}
+                    ? "عكس الأصل وإصدار مستند مصحح"
+                    : "Reverse and issue corrected document"}
                 </button>
               )}
             {selectedMovement.linkedScreen && (
@@ -31190,6 +32842,27 @@ function TreasuryScreen({
                     autoFocus
                   />
                 </label>
+                <label className="treasury-form-field">
+                  <span>
+                    {lang === "ar"
+                      ? "القيمة الصحيحة في المستند البديل — إلزامي"
+                      : "Correct amount in replacement document — required"}
+                  </span>
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={correctedMovementAmount}
+                    onChange={(event) =>
+                      setCorrectedMovementAmount(event.target.value)
+                    }
+                  />
+                  <small>
+                    {lang === "ar"
+                      ? "سيظل المستند الأصلي محفوظًا، ثم تُثبت حركة عكس كاملة ومستند جديد بهذه القيمة."
+                      : "The original stays preserved, followed by a full reversal and a new document with this amount."}
+                  </small>
+                </label>
               </div>
             ) : dialog === "open-session" || dialog === "handover" ? (
               <div className="cash-handover-dialog">
@@ -31793,6 +33466,21 @@ function SenderAccountHistoryScreen({
     (sum, receipt) => sum + receipt.returnedPieces,
     0,
   );
+  const visibleBalances = balances
+    .filter(
+      (balance) =>
+        senderFilter === "all" || balance.sender.en === senderFilter,
+    )
+    .filter((balance) => {
+      const normalized = search.trim().toLowerCase();
+      if (!normalized) return true;
+      return [
+        balance.id,
+        balance.sender.ar,
+        balance.sender.en,
+        balance.reason,
+      ].some((value) => value.toLowerCase().includes(normalized));
+    });
 
   function sourceLabel(source: string) {
     if (source === "main-cash") {
@@ -31978,6 +33666,55 @@ function SenderAccountHistoryScreen({
               </span>
             </article>
           </section>
+
+          {visibleBalances.length > 0 && (
+            <section className="sender-history-card sender-balance-statement">
+              <div className="courier-payable-heading">
+                <span>
+                  <strong>{lang === "ar" ? "كشف أرصدة الرسل" : "Sender balance statement"}</strong>
+                  <small>
+                    {lang === "ar"
+                      ? "كل رصيد يوضح أصله وما سُدد منه وما بقي؛ ولا يختلط بحساب جديد."
+                      : "Every balance shows its origin, payments, and remainder without mixing it into a new account."}
+                  </small>
+                </span>
+                <em>{visibleBalances.length} {lang === "ar" ? "رصيد" : "balances"}</em>
+              </div>
+              <div className="sender-balance-statement__list">
+                {visibleBalances.map((balance) => (
+                  <details key={balance.id} open={balance.state === "active"}>
+                    <summary>
+                      <span>
+                        <strong>{balance.sender[lang]}</strong>
+                        <small>{balance.id} · {balance.reason}</small>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "الأصل" : "Original"}</small>
+                        <strong>{money.format(balance.originalAmount)}</strong>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "المسدّد" : "Paid"}</small>
+                        <strong>{money.format(balance.paidAmount)}</strong>
+                      </span>
+                      <span>
+                        <small>{lang === "ar" ? "المتبقي" : "Remaining"}</small>
+                        <strong>{money.format(balance.balance)}</strong>
+                      </span>
+                    </summary>
+                    <div className="sender-balance-statement__history">
+                      {balance.history.map((entry) => (
+                        <article key={entry.id}>
+                          <span>{entry.type === "created" ? (lang === "ar" ? "إنشاء الرصيد" : "Balance created") : (lang === "ar" ? "سداد من الرصيد" : "Balance payment")}</span>
+                          <strong>{money.format(entry.amount)}</strong>
+                          <small>{entry.note} · {entry.timestamp[lang]}</small>
+                        </article>
+                      ))}
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="sender-history-card">
             <div className="sender-history-filters">
@@ -32197,6 +33934,9 @@ function SenderAccountHistoryScreen({
                       (lang === "ar" ? "أحمد حسن" : "Ahmed Hassan")}
                   </strong>
                   <span>{sourceLabel(selectedReceipt.paymentSource)}</span>
+                  {selectedReceipt.paymentProofReference && (
+                    <small>{selectedReceipt.paymentProofReference}</small>
+                  )}
                 </article>
                 <article>
                   <small>{lang === "ar" ? "حالة الحساب" : "Account state"}</small>
@@ -32620,11 +34360,18 @@ function SenderAccountPreparationScreen({
       .forEach((balance) => map.set(balance.sender.en, balance.sender));
     return [...map.values()];
   }, [balances, eligibleLines]);
-  const [senderKey, setSenderKey] = useState(
-    senderOptions.find((sender) => sender.en === "Orchid")?.en ??
+  const [senderKey, setSenderKey] = useState(() => {
+    const requestedSender = window.sessionStorage.getItem(
+      "tasleem-sender-account-selected",
+    );
+    window.sessionStorage.removeItem("tasleem-sender-account-selected");
+    return (
+      senderOptions.find((sender) => sender.en === requestedSender)?.en ??
+      senderOptions.find((sender) => sender.en === "Orchid")?.en ??
       senderOptions[0]?.en ??
-      "",
-  );
+      ""
+    );
+  });
   const selectedSender =
     senderOptions.find((sender) => sender.en === senderKey) ??
     senderOptions[0] ??
@@ -33286,6 +35033,7 @@ function SenderAccountScreen({
   drafts,
   receipts,
   activeDraftId,
+  operator,
   onShipmentsChange,
   onBalancesChange,
   onDraftsChange,
@@ -33306,6 +35054,7 @@ function SenderAccountScreen({
   drafts: SenderSettlementDraft[];
   receipts: SenderSettlementReceipt[];
   activeDraftId: string;
+  operator: Localized;
   onShipmentsChange: (records: Shipment[]) => void;
   onBalancesChange: (records: SenderBalance[]) => void;
   onDraftsChange: (records: SenderSettlementDraft[]) => void;
@@ -33330,6 +35079,7 @@ function SenderAccountScreen({
   const [paidNow, setPaidNow] = useState("");
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [paymentSource, setPaymentSource] = useState("main-cash");
+  const [paymentProofReference, setPaymentProofReference] = useState("");
   const [receiverType, setReceiverType] = useState<"sender" | "authorized">(
     "sender",
   );
@@ -33653,13 +35403,16 @@ function SenderAccountScreen({
           ? readyReturnLines.reduce((sum, line) => sum + line.returnPieces, 0)
           : 0,
         paymentSource: executeMoney ? paymentSource : "",
+        paymentProofReference: executeMoney
+          ? paymentProofReference.trim()
+          : "",
         receiverName:
           receiverType === "sender"
             ? activeDraft.sender[lang]
             : receiverName.trim(),
         moneyExecuted: executeMoney,
         returnsExecuted: executeReturns && readyReturnLines.length > 0,
-        executor: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+        executor: operator,
         state: accountCompleted
           ? "completed"
           : executeMoney
@@ -33682,6 +35435,7 @@ function SenderAccountScreen({
     ]);
     setCustomAmount(false);
     setAdjustmentReason("");
+    setPaymentProofReference("");
     setSelectedLine(null);
     setToast(
       accountCompleted
@@ -34317,6 +36071,18 @@ function SenderAccountScreen({
                       </select>
                       <ChevronDown size={15} />
                     </span>
+                  </label>
+                  <label className="sender-account-source">
+                    <span>{lang === "ar" ? "مرجع أو إثبات الدفع" : "Payment proof or reference"}</span>
+                    <input
+                      value={paymentProofReference}
+                      onChange={(event) => setPaymentProofReference(event.target.value)}
+                      placeholder={
+                        lang === "ar"
+                          ? "اختياري: رقم التحويل، رقم الإيصال، أو اسم ملف الإثبات"
+                          : "Optional: transfer ID, receipt number or proof filename"
+                      }
+                    />
                   </label>
                 </>
               )}
@@ -35288,7 +37054,7 @@ function AlertsScreen({
                   <button type="button" className="secondary-button" onClick={() => onOpenShipment(shipment.id)}>
                     <Eye size={16} />{lang === "ar" ? "فتح الشحنة" : "Open shipment"}
                   </button>
-                  <button type="button" className="primary-button" onClick={() => onNavigate("courierRates")}>
+                  <button type="button" className="primary-button" onClick={() => onNavigate("couriers")}>
                     <Truck size={16} />{lang === "ar" ? "فتح اتفاق المندوب" : "Open courier agreement"}
                   </button>
                 </div>
@@ -35437,6 +37203,8 @@ function CourierPayoutsScreen({
   accounts,
   movements,
   onPayoutsChange,
+  onFixedEntitlementsChange,
+  onDebtsChange,
   onMovementsChange,
   onLang,
   onTheme,
@@ -35454,6 +37222,8 @@ function CourierPayoutsScreen({
   accounts: TreasuryAccount[];
   movements: TreasuryMovement[];
   onPayoutsChange: (records: CourierPayout[]) => void;
+  onFixedEntitlementsChange: (records: CourierFixedEntitlement[]) => void;
+  onDebtsChange: (records: CourierDebt[]) => void;
   onMovementsChange: (records: TreasuryMovement[]) => void;
   onLang: () => void;
   onTheme: () => void;
@@ -35487,7 +37257,14 @@ function CourierPayoutsScreen({
     useState<TreasuryAccount["id"]>("main-cash");
   const [customAmountOpen, setCustomAmountOpen] = useState(false);
   const [customAmountInput, setCustomAmountInput] = useState("");
+  const [allocationMode, setAllocationMode] = useState<"oldest" | "manual">("oldest");
+  const [selectedSourceKeys, setSelectedSourceKeys] = useState<string[]>([]);
   const [partialReason, setPartialReason] = useState("");
+  const [receivedBy, setReceivedBy] = useState("");
+  const [proofReference, setProofReference] = useState("");
+  const [advanceOpen, setAdvanceOpen] = useState(false);
+  const [advanceAmount, setAdvanceAmount] = useState("");
+  const [advanceReason, setAdvanceReason] = useState("");
   const [error, setError] = useState("");
   const [toast, setToast] = useState("");
 
@@ -35499,6 +37276,7 @@ function CourierPayoutsScreen({
     : null;
   const selectedAccount =
     accounts.find((account) => account.id === accountId) ?? accounts[0];
+  const payoutProofRequired = selectedAccount?.kind !== "cash";
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
     style: "currency",
     currency: "EGP",
@@ -35587,7 +37365,7 @@ function CourierPayoutsScreen({
             sourceId: entitlement.id,
             title: entitlement.period[lang],
             subtitle: entitlement.planSnapshot.name[lang],
-            cycle: "monthly" as CourierSettlementCycle,
+            cycle: entitlement.planSnapshot.settlementCycle ?? "monthly",
             amount: entitlement.amount,
             paid,
             remaining: Math.max(0, entitlement.amount - paid),
@@ -35646,12 +37424,21 @@ function CourierPayoutsScreen({
     ? Math.max(0, Number(customAmountInput) || 0)
     : dueNow;
   const payoutAfter = Math.max(0, dueNow - payoutAmount);
+  const allocatableSources =
+    allocationMode === "manual"
+      ? dueSources.filter((source) => selectedSourceKeys.includes(`${source.sourceType}:${source.sourceId}`))
+      : dueSources;
+  const allocatableTotal = allocatableSources.reduce((sum, source) => sum + source.remaining, 0);
 
   function chooseCourier(nextKey: string) {
     setCourierKey(nextKey);
     setCustomAmountOpen(false);
     setCustomAmountInput("");
     setPartialReason("");
+    setAllocationMode("oldest");
+    setSelectedSourceKeys([]);
+    setReceivedBy("");
+    setProofReference("");
     setError("");
   }
 
@@ -35660,6 +37447,8 @@ function CourierPayoutsScreen({
       const next = !current;
       setCustomAmountInput(next ? String(dueNow) : "");
       setPartialReason("");
+      setAllocationMode("oldest");
+      setSelectedSourceKeys([]);
       setError("");
       return next;
     });
@@ -35674,7 +37463,7 @@ function CourierPayoutsScreen({
       );
       return;
     }
-    if (payoutAmount <= 0 || payoutAmount > dueNow) {
+    if (payoutAmount <= 0 || payoutAmount > dueNow || (allocationMode === "manual" && payoutAmount > allocatableTotal)) {
       setError(
         lang === "ar"
           ? "مبلغ الصرف يجب أن يكون أكبر من صفر ولا يتجاوز المستحق الجاهز."
@@ -35699,10 +37488,26 @@ function CourierPayoutsScreen({
       );
       return;
     }
+    if (!receivedBy.trim()) {
+      setError(
+        lang === "ar"
+          ? "اكتب اسم مستلم المبلغ قبل تأكيد الصرف."
+          : "Enter the person receiving the amount before confirming payout.",
+      );
+      return;
+    }
+    if (payoutProofRequired && !proofReference.trim()) {
+      setError(
+        lang === "ar"
+          ? "مرجع التحويل أو إثبات الصرف إجباري عند الصرف من بنك أو محفظة."
+          : "A transfer reference or payout proof is required for bank and wallet payouts.",
+      );
+      return;
+    }
 
     let amountLeft = payoutAmount;
     const allocations: CourierPayout["allocations"] = [];
-    dueSources.forEach((source) => {
+    allocatableSources.forEach((source) => {
       if (amountLeft <= 0) return;
       const allocated = Math.min(source.remaining, amountLeft);
       allocations.push({
@@ -35732,6 +37537,14 @@ function CourierPayoutsScreen({
       amount: payoutAmount,
       mode: isPartial ? "partial" : "full",
       reason: isPartial ? partialReason.trim() : "",
+      receivedBy: receivedBy.trim(),
+      payoutMethod:
+        selectedAccount.kind === "bank"
+          ? "bank"
+          : selectedAccount.kind === "wallet"
+            ? "wallet"
+            : "cash",
+      proofReference: proofReference.trim() || undefined,
       dueBefore: dueNow,
       dueAfter: payoutAfter,
       allocations,
@@ -35769,12 +37582,88 @@ function CourierPayoutsScreen({
     setCustomAmountOpen(false);
     setCustomAmountInput("");
     setPartialReason("");
+    setReceivedBy("");
+    setProofReference("");
     setError("");
     setToast(
       lang === "ar"
         ? `تم صرف ${money.format(payoutAmount)} وإصدار الإيصال ${receiptId}`
         : `${money.format(payoutAmount)} paid under receipt ${receiptId}`,
     );
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  function createFixedSalaryEntitlement() {
+    if (!selectedCourier || !selectedPlan || !courierPlanUsesFixedSalary(selectedPlan)) {
+      setError(
+        lang === "ar"
+          ? "لا يوجد اتفاق مرتب ثابت فعال لهذا المندوب."
+          : "This courier has no active fixed-salary agreement.",
+      );
+      return;
+    }
+    const now = new Date();
+    const cycle = selectedPlan.settlementCycle === "weekly" ? "weekly" : "monthly";
+    const periodAnchor = new Date(now);
+    if (cycle === "weekly") {
+      const day = periodAnchor.getDay() || 7;
+      periodAnchor.setDate(periodAnchor.getDate() - day + 1);
+    } else {
+      periodAnchor.setDate(1);
+    }
+    const periodCode = periodAnchor.toISOString().slice(0, 10);
+    const periodKey = `${selectedPlan.id}-${selectedCourier.courier.en}-${cycle}-${periodCode}`;
+    if (fixedEntitlements.some((item) => item.id === `fixed-${periodKey}`)) {
+      setError(lang === "ar" ? "تم إنشاء استحقاق هذه الفترة بالفعل." : "An entitlement for this period already exists.");
+      return;
+    }
+    const period = now.toLocaleDateString(lang === "ar" ? "ar-EG" : "en-EG", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    });
+    const timestamp: Localized = { ar: `إغلاق فترة ${period}`, en: `Period closed ${period}` };
+    onFixedEntitlementsChange([
+      ...fixedEntitlements,
+      {
+        id: `fixed-${periodKey}`,
+        courier: selectedCourier.courier,
+        planSnapshot: {
+          id: selectedPlan.id,
+          name: selectedPlan.name,
+          code: selectedPlan.code,
+          version: selectedPlan.version,
+          compensationType: selectedPlan.compensationType,
+          settlementCycle: cycle,
+        },
+        period: { ar: `${cycle === "weekly" ? "مرتب أسبوع" : "مرتب شهر"} ${period}`, en: `${cycle === "weekly" ? "Weekly salary" : "Monthly salary"} ${period}` },
+        amount: selectedPlan.fixedSalary ?? 0,
+        dueAt: now.toISOString(),
+        createdAt: timestamp,
+      },
+    ]);
+    setToast(lang === "ar" ? "تم إغلاق فترة المرتب وإضافة استحقاقه للصرف." : "Salary period closed and entitlement added for payout.");
+    window.setTimeout(() => setToast(""), 3200);
+  }
+
+  function issueCourierAdvance() {
+    const amount = Math.max(0, Number(advanceAmount) || 0);
+    if (!selectedCourier || !selectedAccount || amount <= 0 || !advanceReason.trim()) {
+      setError(lang === "ar" ? "اكتب مبلغ السلفة وسببها أولًا." : "Enter the advance amount and reason first.");
+      return;
+    }
+    if (accountBalance < amount) {
+      setError(lang === "ar" ? "رصيد الخزنة لا يكفي لهذه السلفة." : "Treasury balance is insufficient for this advance.");
+      return;
+    }
+    const now = new Date();
+    const reference = `CAD-${String(debts.length + 1).padStart(5, "0")}`;
+    const timestamp: Localized = { ar: now.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" }), en: now.toLocaleString("en-EG", { dateStyle: "medium", timeStyle: "short" }) };
+    onDebtsChange([...debts, { id: reference, courier: selectedCourier.courier, originalAmount: amount, paidAmount: 0, balance: amount, reason: `سلفة: ${advanceReason.trim()}`, createdAt: timestamp, state: "active", history: [{ id: `${reference}-created`, type: "created", amount, note: "سلفة مندوب مستقلة", timestamp }] }]);
+    const sequence = movements.reduce((largest, movement) => Math.max(largest, movement.sequence), 0) + 1;
+    onMovementsChange([...movements, { id: `TM-${reference}`, accountId: selectedAccount.id, direction: "out", category: "courier_advance", amount, party: selectedCourier.courier, description: { ar: `سلفة مندوب ${reference}: ${advanceReason.trim()}`, en: `Courier advance ${reference}: ${advanceReason.trim()}` }, reference, source: "system", createdBy: { ar: "محاسب التشغيل", en: "Operations accountant" }, timestamp, sequence, linkedScreen: "courierPayouts", sourceDocument: { type: "courier_advance", id: reference } }]);
+    setAdvanceOpen(false); setAdvanceAmount(""); setAdvanceReason("");
+    setToast(lang === "ar" ? `تم صرف سلفة وتسجيلها كمديونية ${reference}` : `Advance paid and registered as debt ${reference}`);
     window.setTimeout(() => setToast(""), 3200);
   }
 
@@ -35896,6 +37785,12 @@ function CourierPayoutsScreen({
                   (lang === "ar" ? "لا توجد خطة فعالة" : "No active plan")}
               </strong>
               <em>{cycleLabel(selectedPlan?.settlementCycle)}</em>
+              {selectedPlan && courierPlanUsesFixedSalary(selectedPlan) && (
+                <button type="button" onClick={createFixedSalaryEntitlement}>
+                  <CalendarDays size={14} />
+                  {lang === "ar" ? "إغلاق فترة المرتب" : "Close salary period"}
+                </button>
+              )}
             </div>
           </section>
 
@@ -36030,16 +37925,67 @@ function CourierPayoutsScreen({
               </div>
 
               {customAmountOpen && payoutAmount < dueNow && (
-                <label className="courier-payout-reason">
-                  <span>{lang === "ar" ? "سبب الصرف الجزئي" : "Partial payout reason"} *</span>
-                  <textarea
-                    value={partialReason}
-                    onChange={(event) => { setPartialReason(event.target.value); setError(""); }}
-                    placeholder={lang === "ar" ? "اكتب سبب إبقاء جزء من المستحق..." : "Explain why part of the due remains..."}
-                  />
-                  <small>{lang === "ar" ? "المتبقي بعد الصرف:" : "Remaining after payout:"} {money.format(payoutAfter)}</small>
-                </label>
+                <>
+                  <label className="courier-payout-reason">
+                    <span>{lang === "ar" ? "سبب الصرف الجزئي" : "Partial payout reason"} *</span>
+                    <textarea
+                      value={partialReason}
+                      onChange={(event) => { setPartialReason(event.target.value); setError(""); }}
+                      placeholder={lang === "ar" ? "اكتب سبب إبقاء جزء من المستحق..." : "Explain why part of the due remains..."}
+                    />
+                    <small>{lang === "ar" ? "المتبقي بعد الصرف:" : "Remaining after payout:"} {money.format(payoutAfter)}</small>
+                  </label>
+                  <div className="courier-payout-allocation-mode">
+                    <strong>{lang === "ar" ? "توزيع الصرف الجزئي" : "Partial payout allocation"}</strong>
+                    <div>
+                      <button type="button" className={allocationMode === "oldest" ? "is-selected" : ""} onClick={() => setAllocationMode("oldest")}>
+                        {lang === "ar" ? "الأقدم أولًا" : "Oldest first"}
+                      </button>
+                      <button type="button" className={allocationMode === "manual" ? "is-selected" : ""} onClick={() => setAllocationMode("manual")}>
+                        {lang === "ar" ? "تخصيص البنود" : "Choose items"}
+                      </button>
+                    </div>
+                    {allocationMode === "manual" && (
+                      <div className="courier-payout-source-picker">
+                        {dueSources.map((source) => {
+                          const key = `${source.sourceType}:${source.sourceId}`;
+                          return <label key={key}><input type="checkbox" checked={selectedSourceKeys.includes(key)} onChange={() => setSelectedSourceKeys((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key])} /><span>{source.title}</span><b>{money.format(source.remaining)}</b></label>;
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
+
+              <div className="policy-form-grid courier-payout-proof">
+                <label className="field">
+                  <span>{lang === "ar" ? "استلم المبلغ بواسطة" : "Amount received by"} *</span>
+                  <span className="field__control">
+                    <input
+                      value={receivedBy}
+                      onChange={(event) => { setReceivedBy(event.target.value); setError(""); }}
+                      placeholder={lang === "ar" ? "اسم المندوب أو من ينوب عنه" : "Courier or authorized recipient"}
+                    />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>
+                    {lang === "ar" ? "مرجع / إثبات الاستلام" : "Receipt proof / reference"}
+                    {payoutProofRequired ? " *" : ""}
+                  </span>
+                  <span className="field__control">
+                    <input
+                      value={proofReference}
+                      onChange={(event) => setProofReference(event.target.value)}
+                      placeholder={
+                        payoutProofRequired
+                          ? lang === "ar" ? "إجباري: رقم التحويل أو مرجع العملية" : "Required: transfer or transaction reference"
+                          : lang === "ar" ? "اختياري: رقم إيصال نقدي" : "Optional: cash receipt reference"
+                      }
+                    />
+                  </span>
+                </label>
+              </div>
 
               <div className="courier-payout-allocation">
                 <div>
@@ -36062,6 +38008,12 @@ function CourierPayoutsScreen({
                   <button type="button" onClick={() => onNavigate("courierAccount")}>{lang === "ar" ? "فتح الحساب" : "Open account"}</button>
                 </div>
               )}
+
+              <div className="courier-advance-box">
+                <div><strong>{lang === "ar" ? "سلفة مندوب" : "Courier advance"}</strong><small>{lang === "ar" ? "عملية مستقلة تُسجل مديونية ولا تخصم من استحقاقه تلقائيًا." : "A separate operation recorded as debt; it is never auto-deducted from dues."}</small></div>
+                <button type="button" className="secondary-button" onClick={() => setAdvanceOpen((current) => !current)}>{advanceOpen ? (lang === "ar" ? "إلغاء" : "Cancel") : (lang === "ar" ? "صرف سلفة" : "Issue advance")}</button>
+                {advanceOpen && <div className="policy-form-grid"><label className="field"><span>{lang === "ar" ? "مبلغ السلفة" : "Advance amount"}</span><span className="field__control"><input type="number" min="0" value={advanceAmount} onChange={(event) => setAdvanceAmount(event.target.value)} /></span></label><label className="field"><span>{lang === "ar" ? "سبب السلفة" : "Advance reason"}</span><span className="field__control"><input value={advanceReason} onChange={(event) => setAdvanceReason(event.target.value)} /></span></label><button type="button" className="secondary-button" onClick={issueCourierAdvance}>{lang === "ar" ? "تأكيد السلفة" : "Confirm advance"}</button></div>}
+              </div>
 
               {error && <div className="courier-settlement-error" role="alert"><CircleAlert size={16} />{error}</div>}
 
@@ -36096,6 +38048,14 @@ function CourierPayoutsScreen({
                     <div><small>{lang === "ar" ? "من" : "From"}</small><strong>{account?.name[lang] ?? payout.accountId}</strong></div>
                     <div><small>{lang === "ar" ? "النوع" : "Type"}</small><strong>{payout.mode === "partial" ? (lang === "ar" ? "صرف جزئي" : "Partial") : (lang === "ar" ? "صرف كامل" : "Full")}</strong></div>
                     <b>{money.format(payout.amount)}</b>
+                    <details className="courier-payout-receipt-details">
+                      <summary>{lang === "ar" ? "تفاصيل الإيصال" : "Receipt details"}</summary>
+                      <p>{lang === "ar" ? "المستلم:" : "Received by:"} <strong>{payout.receivedBy || "—"}</strong></p>
+                      <p>{lang === "ar" ? "طريقة الصرف:" : "Method:"} <strong>{payout.payoutMethod === "bank" ? (lang === "ar" ? "تحويل بنكي" : "Bank") : payout.payoutMethod === "wallet" ? (lang === "ar" ? "محفظة" : "Wallet") : (lang === "ar" ? "نقدي" : "Cash")}</strong></p>
+                      {payout.reason && <p>{lang === "ar" ? "سبب الجزئي:" : "Partial reason:"} {payout.reason}</p>}
+                      {payout.proofReference && <p>{lang === "ar" ? "المرجع:" : "Reference:"} {payout.proofReference}</p>}
+                      <ul>{payout.allocations.map((allocation) => <li key={`${allocation.sourceType}-${allocation.sourceId}`}>{allocation.sourceType === "fixed_salary" ? (lang === "ar" ? "مرتب ثابت" : "Fixed salary") : (lang === "ar" ? "عمولة" : "Commission")} · {money.format(allocation.amount)}</li>)}</ul>
+                    </details>
                   </article>
                 );
               })}
@@ -36125,6 +38085,8 @@ function CourierAccountScreen({
   debts,
   settlements,
   payouts,
+  accounts,
+  operator,
   onShipmentsChange,
   onDebtsChange,
   onSettlementsChange,
@@ -36143,6 +38105,8 @@ function CourierAccountScreen({
   debts: CourierDebt[];
   settlements: CourierSettlement[];
   payouts: CourierPayout[];
+  accounts: TreasuryAccount[];
+  operator: Localized;
   onShipmentsChange: (records: Shipment[]) => void;
   onDebtsChange: (records: CourierDebt[]) => void;
   onSettlementsChange: (records: CourierSettlement[]) => void;
@@ -36179,6 +38143,8 @@ function CourierAccountScreen({
   );
   const [customAmountOpen, setCustomAmountOpen] = useState(false);
   const [actualCashInput, setActualCashInput] = useState("");
+  const [settlementAccountId, setSettlementAccountId] =
+    useState<TreasuryAccount["id"]>("main-cash");
   const [adjustmentReason, setAdjustmentReason] = useState("");
   const [debtMode, setDebtMode] = useState<"none" | "full" | "partial">(
     "none",
@@ -36196,6 +38162,13 @@ function CourierAccountScreen({
     assignmentCourierProfiles.find(
       (profile) => profile.courier.en === courierKey,
     ) ?? assignmentCourierProfiles[0];
+  const activeSettlementAccounts = accounts.filter(
+    (account) => account.state === "active",
+  );
+  const settlementAccount =
+    activeSettlementAccounts.find(
+      (account) => account.id === settlementAccountId,
+    ) ?? activeSettlementAccounts[0];
   const pendingItems = shipmentRecords.flatMap((shipment) =>
     (shipment.statusHistory ?? [])
       .filter(
@@ -36307,6 +38280,10 @@ function CourierAccountScreen({
     (sum, item) => sum + (item.event.collectedAmount ?? 0),
     0,
   );
+  const totalRecipientDisbursement = pendingItems.reduce(
+    (sum, item) => sum + shipmentAmountPaidToRecipient(item.shipment),
+    0,
+  );
   const commissionResults = pendingItems.map((item) => ({
     item,
     result: itemCommission(item),
@@ -36362,16 +38339,19 @@ function CourierAccountScreen({
   );
   const totalDeferredCommission =
     previousDeferredCommission + deferredCurrentCommission;
-  const currentCompanyDue = Math.max(
-    0,
-    totalCollected - commissionPaidNow,
-  );
+  const companyNetCash =
+    totalCollected - commissionPaidNow - totalRecipientDisbursement;
+  const settlementCashDirection: "in" | "out" =
+    companyNetCash >= 0 ? "in" : "out";
+  const currentCompanyDue = Math.abs(companyNetCash);
   const totalReturnedPieces = pendingItems.reduce(
     (sum, item) => sum + (item.event.returnedPieces ?? 0),
     0,
   );
   const requestedDebtPayment =
-    debtMode === "full"
+    settlementCashDirection === "out"
+      ? 0
+      : debtMode === "full"
       ? debtBalance
       : debtMode === "partial"
         ? Math.min(
@@ -36388,11 +38368,14 @@ function CourierAccountScreen({
     requestedDebtPayment,
     Math.max(0, actualCash - currentSettlementCash),
   );
-  const shortage = Math.max(0, currentCompanyDue - currentSettlementCash);
-  const surplus = Math.max(
-    0,
-    actualCash - currentSettlementCash - debtPayment,
-  );
+  const shortage =
+    settlementCashDirection === "in"
+      ? Math.max(0, currentCompanyDue - currentSettlementCash)
+      : 0;
+  const surplus =
+    settlementCashDirection === "in"
+      ? Math.max(0, actualCash - currentSettlementCash - debtPayment)
+      : 0;
   const latestSettlement = settlements
     .filter(
       (settlement) =>
@@ -36427,6 +38410,14 @@ function CourierAccountScreen({
   }
 
   function settleCourierAccount() {
+    if (!settlementAccount) {
+      setError(
+        lang === "ar"
+          ? "لا يوجد حساب خزنة نشط لاستلام التسوية."
+          : "No active treasury account is available for this settlement.",
+      );
+      return;
+    }
     if (!pendingItems.length && debtPayment === 0) {
       setError(
         lang === "ar"
@@ -36510,7 +38501,7 @@ function CourierAccountScreen({
               pieces: receivedPieces,
               from: selectedCourier.courier,
               to: warehouseLocationLabel("returns-zone"),
-              performedBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+              performedBy: operator,
               note:
                 lang === "ar"
                   ? `استلام المرتجع فعليًا ضمن تسوية المندوب ${settlementId}`
@@ -36624,8 +38615,12 @@ function CourierAccountScreen({
       {
         id: settlementId,
         courier: selectedCourier.courier,
+        treasuryAccountId: settlementAccount.id,
+        receivedBy: operator,
         shipmentEventIds: [...pendingIds],
         collectedAmount: totalCollected,
+        recipientDisbursement: totalRecipientDisbursement,
+        cashDirection: settlementCashDirection,
         commissionEarned: totalCommission,
         commissionPaidNow,
         commissionDeferred: deferredCurrentCommission,
@@ -36664,8 +38659,12 @@ function CourierAccountScreen({
     setSelectedItem(null);
     setToast(
       lang === "ar"
-        ? `تم استلام ${money.format(actualCash)} وإثباتها للخزنة`
-        : `${money.format(actualCash)} received and recorded for treasury`,
+        ? settlementCashDirection === "in"
+          ? `تم استلام ${money.format(actualCash)} وإثباتها في ${settlementAccount.name.ar}`
+          : `تم صرف ${money.format(actualCash)} للمندوب من ${settlementAccount.name.ar}`
+        : settlementCashDirection === "in"
+          ? `${money.format(actualCash)} received into ${settlementAccount.name.en}`
+          : `${money.format(actualCash)} paid to the courier from ${settlementAccount.name.en}`,
     );
     window.setTimeout(() => setToast(""), 3200);
   }
@@ -36745,7 +38744,7 @@ function CourierAccountScreen({
                 <h1>{lang === "ar" ? "حساب المندوب" : "Courier account"}</h1>
                 <span className="demo-chip">
                   {pendingItems.length}{" "}
-                  {lang === "ar" ? "شحنة غير مسوّاة" : "unsettled shipments"}
+                  {lang === "ar" ? "نتيجة بانتظار الاستلام" : "results awaiting receipt"}
                 </span>
               </div>
               <p>
@@ -36909,7 +38908,7 @@ function CourierAccountScreen({
               <button
                 className="secondary-button"
                 type="button"
-                onClick={() => onNavigate("courierRates")}
+                onClick={() => onNavigate("couriers")}
               >
                 <Settings2 size={15} />
                 {lang === "ar" ? "فتح قوائم العمولات" : "Open commission lists"}
@@ -36925,8 +38924,8 @@ function CourierAccountScreen({
                   <span>
                     <strong>
                       {lang === "ar"
-                        ? "الشحنات غير المسوّاة"
-                        : "Unsettled shipments"}
+                        ? "نتائج المندوب بانتظار الاستلام"
+                        : "Courier results awaiting receipt"}
                     </strong>
                     <small>
                       {lang === "ar"
@@ -37089,7 +39088,7 @@ function CourierAccountScreen({
               <div className="courier-settlement-heading">
                 <span className="entry-step">2</span>
                 <span>
-                  <strong>{lang === "ar" ? "استلام الحساب" : "Receive account"}</strong>
+                  <strong>{lang === "ar" ? "استلام النتائج والتسوية" : "Receive results and settle"}</strong>
                   <small>
                     {lang === "ar"
                       ? "الفلوس والمرتجعات في عملية واحدة"
@@ -37103,6 +39102,12 @@ function CourierAccountScreen({
                   <small>{lang === "ar" ? "تحصيل الشحنات" : "Shipment collection"}</small>
                   <strong>{money.format(totalCollected)}</strong>
                 </span>
+                {totalRecipientDisbursement > 0 && (
+                  <span>
+                    <small>{lang === "ar" ? "دفعه المندوب للمستلمين" : "Paid by courier to recipients"}</small>
+                    <strong>- {money.format(totalRecipientDisbursement)}</strong>
+                  </span>
+                )}
                 <span>
                   <small>{lang === "ar" ? "عمولة مكتسبة" : "Commission earned"}</small>
                   <strong>
@@ -37126,7 +39131,15 @@ function CourierAccountScreen({
                   <strong>{money.format(previousDeferredCommission)}</strong>
                 </span>
                 <span className="courier-settlement-breakdown__due">
-                  <small>{lang === "ar" ? "مطلوب من الحساب الحالي" : "Current account due"}</small>
+                  <small>
+                    {lang === "ar"
+                      ? settlementCashDirection === "in"
+                        ? "مطلوب من الحساب الحالي"
+                        : "مستحق للمندوب من الحساب الحالي"
+                      : settlementCashDirection === "in"
+                        ? "Current account due"
+                        : "Current amount owed to courier"}
+                  </small>
                   <strong>{money.format(currentCompanyDue)}</strong>
                 </span>
               </div>
@@ -37173,7 +39186,7 @@ function CourierAccountScreen({
                 <strong className="courier-debt-balance">
                   {money.format(debtBalance)}
                 </strong>
-                {debtBalance > 0 ? (
+                {debtBalance > 0 && settlementCashDirection === "in" ? (
                   <div className="courier-debt-options">
                     <button
                       type="button"
@@ -37210,8 +39223,12 @@ function CourierAccountScreen({
                   <small className="courier-debt-clear">
                     <Check size={14} />
                     {lang === "ar"
-                      ? "لا توجد مديونية سابقة"
-                      : "No previous debt"}
+                      ? settlementCashDirection === "out" && debtBalance > 0
+                        ? "لا يُخلط سداد المديونية مع عملية صرف للمندوب"
+                        : "لا توجد مديونية سابقة"
+                      : settlementCashDirection === "out" && debtBalance > 0
+                        ? "Debt payment is kept separate from a courier payout"
+                        : "No previous debt"}
                   </small>
                 )}
                 {debtMode === "partial" && (
@@ -37240,7 +39257,15 @@ function CourierAccountScreen({
 
               <div className="courier-final-cash">
                 <div>
-                  <small>{lang === "ar" ? "الحساب الحالي" : "Current account"}</small>
+                  <small>
+                    {lang === "ar"
+                      ? settlementCashDirection === "in"
+                        ? "مطلوب من المندوب"
+                        : "مستحق للمندوب"
+                      : settlementCashDirection === "in"
+                        ? "Due from courier"
+                        : "Due to courier"}
+                  </small>
                   <strong>{money.format(currentCompanyDue)}</strong>
                 </div>
                 <i>+</i>
@@ -37250,7 +39275,15 @@ function CourierAccountScreen({
                 </div>
                 <i>=</i>
                 <div className="courier-final-cash__total">
-                  <small>{lang === "ar" ? "المتوقع للخزنة" : "Expected for treasury"}</small>
+                  <small>
+                    {lang === "ar"
+                      ? settlementCashDirection === "in"
+                        ? "المتوقع دخوله الخزنة"
+                        : "المتوقع خروجه من الخزنة"
+                      : settlementCashDirection === "in"
+                        ? "Expected into treasury"
+                        : "Expected out of treasury"}
+                  </small>
                   <strong>{money.format(expectedCash)}</strong>
                 </div>
               </div>
@@ -37258,22 +39291,32 @@ function CourierAccountScreen({
               <div className="courier-actual-cash">
                 <div className="courier-actual-cash__heading">
                   <span>
-                    <strong>{lang === "ar" ? "المبلغ المستلم فعليًا" : "Actual cash received"}</strong>
+                    <strong>
+                      {lang === "ar"
+                        ? settlementCashDirection === "in"
+                          ? "المبلغ المستلم فعليًا"
+                          : "المبلغ المصروف للمندوب"
+                        : settlementCashDirection === "in"
+                          ? "Actual cash received"
+                          : "Amount paid to courier"}
+                    </strong>
                     <small>
                       {lang === "ar"
                         ? "مقفول على المتوقع لحماية الحساب"
                         : "Locked to expected amount for safety"}
                     </small>
                   </span>
-                  <button type="button" onClick={toggleCustomAmount}>
-                    {customAmountOpen
-                      ? lang === "ar"
-                        ? "إلغاء المبلغ الآخر"
-                        : "Cancel other amount"
-                      : lang === "ar"
-                        ? "مبلغ آخر"
-                        : "Other amount"}
-                  </button>
+                  {settlementCashDirection === "in" && (
+                    <button type="button" onClick={toggleCustomAmount}>
+                      {customAmountOpen
+                        ? lang === "ar"
+                          ? "إلغاء المبلغ الآخر"
+                          : "Cancel other amount"
+                        : lang === "ar"
+                          ? "مبلغ آخر"
+                          : "Other amount"}
+                    </button>
+                  )}
                 </div>
                 <span
                   className={
@@ -37366,7 +39409,33 @@ function CourierAccountScreen({
 
               <div className="courier-settlement-submit">
                 <span>
-                  <small>{lang === "ar" ? "سيدخل الخزنة" : "Treasury receives"}</small>
+                  <small>
+                    {lang === "ar"
+                      ? settlementCashDirection === "in"
+                        ? "حساب الاستلام"
+                        : "حساب الصرف"
+                      : settlementCashDirection === "in"
+                        ? "Receiving account"
+                        : "Payout account"}
+                  </small>
+                  <label className="entry-select">
+                    <select
+                      value={settlementAccount?.id ?? ""}
+                      onChange={(event) => {
+                        setSettlementAccountId(
+                          event.target.value as TreasuryAccount["id"],
+                        );
+                        setError("");
+                      }}
+                    >
+                      {activeSettlementAccounts.map((account) => (
+                        <option value={account.id} key={account.id}>
+                          {account.name[lang]}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown size={14} />
+                  </label>
                   <strong>{money.format(actualCash)}</strong>
                   <small>
                     + {totalReturnedPieces}{" "}
@@ -37378,12 +39447,19 @@ function CourierAccountScreen({
                   type="button"
                   disabled={
                     (!pendingItems.length && debtPayment === 0) ||
-                    commissionGaps.length > 0
+                    commissionGaps.length > 0 ||
+                    !settlementAccount
                   }
                   onClick={settleCourierAccount}
                 >
                   <ShieldCheck size={17} />
-                  {lang === "ar" ? "تأكيد واستلام الحساب" : "Confirm and receive"}
+                  {lang === "ar"
+                    ? settlementCashDirection === "in"
+                      ? "تأكيد استلام النتائج والتسوية"
+                      : "تأكيد صرف المستحق وتسوية النتائج"
+                    : settlementCashDirection === "in"
+                      ? "Confirm receipt and settlement"
+                      : "Confirm payout and settle results"}
                 </button>
               </div>
             </aside>
@@ -37683,7 +39759,9 @@ function AssignmentScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const assignmentCourierProfiles = courierProfiles(couriers);
+  const assignmentCourierProfiles = courierProfiles(
+    couriers.filter((courier) => courier.state === "active"),
+  );
   const [courierKey, setCourierKey] = useState(
     assignmentCourierProfiles[0].courier.en,
   );
@@ -37718,7 +39796,12 @@ function AssignmentScreen({
             record.name.ar === shipment.area.ar ||
             record.name.en === shipment.area.en,
         );
-        if (!area || area.state !== "active" || !area.assignmentAllowed) {
+        if (
+          !area ||
+          area.governorate.state !== "active" ||
+          area.state !== "active" ||
+          !area.assignmentAllowed
+        ) {
           return false;
         }
         const matchingPolicy = statuses.find(
@@ -37727,8 +39810,11 @@ function AssignmentScreen({
             (status.name.ar === shipment.status.ar ||
               status.name.en === shipment.status.en),
         );
-        if (matchingPolicy && !matchingPolicy.appearsInAssignment) return false;
-        if (matchingPolicy && !statusAllowedForService(matchingPolicy, service)) {
+        // A shipment may only be assigned when its current status is explicitly
+        // defined and published by the company.  A removed/unknown status must
+        // never become eligible merely because it has no matching policy record.
+        if (!matchingPolicy || !matchingPolicy.appearsInAssignment) return false;
+        if (!statusAllowedForService(matchingPolicy, service)) {
           return false;
         }
         const shipmentSettings = resolveShipmentDataSettings(
@@ -37738,6 +39824,7 @@ function AssignmentScreen({
         );
         if (
           shipmentSettings.confirmationMode === "required_before_assignment" &&
+          !shipmentSettings.allowAssignmentWithoutConfirmation &&
           getShipmentConfirmationCode(shipment) !== "confirmed"
         ) {
           return false;
@@ -37878,6 +39965,16 @@ function AssignmentScreen({
         : `${count} shipment(s) assigned and handed to courier`,
     );
     window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function openCourierPrint() {
+    // The print page is intentionally a separate page.  Keep the selected
+    // courier so the user lands directly on that courier's full current custody.
+    window.sessionStorage.setItem(
+      "tasleem-courier-print-selected",
+      selectedCourier.courier.en,
+    );
+    onNavigate("courierPrint");
   }
 
   return (
@@ -38272,6 +40369,16 @@ function AssignmentScreen({
                         : "They left the available list and now appear in courier custody."}
                     </small>
                   </span>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    onClick={openCourierPrint}
+                  >
+                    <Printer size={16} />
+                    {lang === "ar"
+                      ? "طباعة كشف المندوب الحالي"
+                      : "Print current courier sheet"}
+                  </button>
                 </div>
               )}
 
@@ -39082,7 +41189,6 @@ function AccessControlScreen({
               <button
                 className="primary-button"
                 type="button"
-                disabled={availableEmployeeCandidates.length === 0}
                 onClick={openUserDialog}
               >
                 <Plus size={17} />
@@ -39690,6 +41796,7 @@ function ShipmentReplacementScreen({
             replacementPriceList,
             statuses,
             areaId,
+            shipment.serviceTypeId ?? "service-standard",
           )
         : null;
       if (financiallyClosed) {
@@ -40308,6 +42415,7 @@ function ConfirmationScreen({
   const [filter, setFilter] = useState<ConfirmationFilter>("pending");
   const confirmationRecords = shipmentRecords.filter(
     (shipment) =>
+      shipment.custodyType === "warehouse" &&
       resolveShipmentDataSettings(shipment, settings, senderPolicies)
         .confirmationMode !== "off",
   );
@@ -40446,9 +42554,12 @@ function ConfirmationScreen({
           : result === "no_answer"
             ? { ar: "لم يرد", en: "No answer" }
             : { ar: "تواصل لاحقًا", en: "Contact later" };
-      const confirmationWasRequired =
-        shipment.required.ar.includes("تأكيد") ||
-        shipment.required.en.toLowerCase().includes("confirm");
+      // Confirmation may be one of several assignment blockers.  It may clear
+      // the whole requirement only when it was the only blocker, never when
+      // other missing shipment data is still listed.
+      const confirmationWasOnlyRequirement =
+        shipment.required.ar === "تأكيد الطلب" ||
+        shipment.required.en === "Confirm order";
       const needsRequiredConfirmation =
         selectedShipmentSettings.confirmationMode ===
           "required_before_assignment" && !confirmed;
@@ -40467,16 +42578,16 @@ function ConfirmationScreen({
           ...(shipment.confirmationHistory ?? []),
         ],
         required:
-          confirmed && confirmationWasRequired
+          confirmed && confirmationWasOnlyRequirement
             ? { ar: "لا يوجد", en: "None" }
             : needsRequiredConfirmation && shipment.requiredType === "none"
               ? { ar: "تأكيد الطلب", en: "Confirm order" }
               : shipment.required,
         requiredType:
-          confirmed && confirmationWasRequired
+          confirmed && confirmationWasOnlyRequirement
             ? "none"
             : needsRequiredConfirmation && shipment.requiredType === "none"
-              ? "incomplete"
+              ? "attention"
               : shipment.requiredType,
         lastEvent: {
           ar:
@@ -40495,10 +42606,18 @@ function ConfirmationScreen({
       };
     });
     onShipmentsChange(nextRecords);
+    const attemptLimitReached =
+      result !== "confirmed" &&
+      (selectedShipment.confirmationHistory?.length ?? 0) + 1 >=
+        selectedShipmentSettings.confirmationAttempts;
     setToast(
-      lang === "ar"
-        ? "تم تسجيل نتيجة التواصل بدون تغيير حالة الشحنة"
-        : "Contact result saved without changing shipment status",
+      attemptLimitReached
+        ? lang === "ar"
+          ? "تم الحفظ ووصلت محاولات التواصل للحد المحدد؛ تحتاج مراجعة موظف دون إلغاء تلقائي."
+          : "Saved. The contact-attempt limit was reached; staff review is required without automatic cancellation."
+        : lang === "ar"
+          ? "تم تسجيل نتيجة التواصل بدون تغيير حالة الشحنة"
+          : "Contact result saved without changing shipment status",
     );
     setNote("");
     setNextContact("");
@@ -40603,7 +42722,7 @@ function ConfirmationScreen({
             <button
               className="secondary-button"
               type="button"
-              onClick={() => onNavigate("shipmentPolicies")}
+              onClick={() => onNavigate("senders")}
             >
               <SlidersHorizontal size={17} />
               {lang === "ar" ? "سياسة التأكيد" : "Confirmation policy"}
@@ -40630,7 +42749,7 @@ function ConfirmationScreen({
               <button
                 className="primary-button"
                 type="button"
-                onClick={() => onNavigate("shipmentPolicies")}
+                onClick={() => onNavigate("senders")}
               >
                 {lang === "ar" ? "فتح السياسات" : "Open policies"}
               </button>
@@ -40830,6 +42949,26 @@ function ConfirmationScreen({
                         <Phone size={17} />
                         {selectedShipment.phone}
                       </a>
+                      <a
+                        href={`https://wa.me/${normalizePhone(selectedShipment.phone).replace(/^0/, "20")}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={lang === "ar" ? "فتح واتساب" : "Open WhatsApp"}
+                      >
+                        <Send size={16} />
+                        {lang === "ar" ? "واتساب" : "WhatsApp"}
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard?.writeText(selectedShipment.phone);
+                          setToast(lang === "ar" ? "تم نسخ رقم الهاتف" : "Phone number copied");
+                          window.setTimeout(() => setToast(""), 1800);
+                        }}
+                      >
+                        <Copy size={15} />
+                        {lang === "ar" ? "نسخ" : "Copy"}
+                      </button>
                       <span>
                         <MapPin size={16} />
                         {selectedShipment.area[lang]}،{" "}
@@ -41079,11 +43218,6 @@ function AddShipmentScreen({
       initialPayer,
       senderPolicyDefault ??
         serviceTypes.find(
-        (service) =>
-          service.state === "published" &&
-          (service.defaultForSenderIds ?? []).includes(firstSender.id),
-      )?.id ??
-        serviceTypes.find(
           (service) => service.state === "published" && service.isCompanyDefault,
         )?.id ??
         serviceTypes.find((service) => service.state === "published")?.id ??
@@ -41127,6 +43261,13 @@ function AddShipmentScreen({
     settings,
     senderPolicies,
   );
+  useEffect(() => {
+    if (entryMode === "manual" && !policySettings.manualEntryEnabled) {
+      setEntryMode("excel");
+    } else if (entryMode === "excel" && !policySettings.excelImportEnabled) {
+      setEntryMode("manual");
+    }
+  }, [entryMode, policySettings.manualEntryEnabled, policySettings.excelImportEnabled]);
   const policyFields = resolveSenderPolicyFields(
     selectedSender,
     fields,
@@ -41143,7 +43284,6 @@ function AddShipmentScreen({
   const availableServiceTypes = serviceTypes.filter(
     (service) =>
       service.state === "published" &&
-      (!service.senderIds.length || service.senderIds.includes(senderKey)) &&
       (senderAllowedServiceIds === null ||
         senderAllowedServiceIds.includes(service.id)),
   );
@@ -41161,13 +43301,21 @@ function AddShipmentScreen({
         ),
     ) ??
     priceLists.find((priceList) => priceList.state === "active" && priceList.isDefault);
-  const pricingStatus = statuses.find(
-    (status) => status.state === "published" && status.appearsInPricing,
-  );
+  const pricingStatus = initialShippingPriceStatus(statuses);
+  const currentServicePriceMatrix = senderPriceList
+    ? priceMatrixForService(
+        senderPriceList,
+        draft.serviceTypeId || "service-standard",
+      )
+    : {};
+  const shippingPriceRow = draft.areaId
+    ? currentServicePriceMatrix[draft.areaId]
+    : undefined;
+  const configuredShippingFee = pricingStatus
+    ? shippingPriceRow?.[pricingStatus.id]
+    : undefined;
   const shippingFee =
-    draft.areaId && senderPriceList && pricingStatus
-      ? senderPriceList.prices[draft.areaId]?.[pricingStatus.id] ?? 0
-      : 0;
+    typeof configuredShippingFee === "number" ? configuredShippingFee : 0;
   const recipientAreaRate =
     effectiveSenderPolicy?.recipientAreaRates?.[draft.areaId];
   const recipientShippingRate = recipientAreaShippingCharge(
@@ -41176,6 +43324,7 @@ function AddShipmentScreen({
     selectedSender,
     draft.areaId,
     senderPolicies,
+    draft.serviceTypeId,
   );
   const recipientShippingCharge =
     draft.shippingPayer === "recipient" ? recipientShippingRate : 0;
@@ -41219,10 +43368,23 @@ function AddShipmentScreen({
     { recipientAdditions: 0, senderDeductions: 0, companyCosts: 0 },
   );
   const shipmentPrice = Number(draft.shipmentPrice) || 0;
-  const totalDue =
-    shipmentPrice +
-    recipientShippingCharge +
-    customFinancialSnapshot.recipientAdditions;
+  const recipientCashFlow = selectedService?.recipientCashFlow ?? "collect";
+  const totalDue = Math.max(
+    0,
+    (recipientCashFlow === "collect" ? shipmentPrice : 0) +
+      recipientShippingCharge +
+      customFinancialSnapshot.recipientAdditions -
+      (recipientCashFlow === "refund" ? shipmentPrice : 0),
+  );
+  const recipientRefundDue =
+    recipientCashFlow === "refund"
+      ? Math.max(
+          0,
+          shipmentPrice -
+            recipientShippingCharge -
+            customFinancialSnapshot.recipientAdditions,
+        )
+      : 0;
 
   function fieldVisible(code: string) {
     return fieldMap.has(code);
@@ -41266,7 +43428,6 @@ function AddShipmentScreen({
     const nextAvailableServices = serviceTypes.filter(
       (service) =>
         service.state === "published" &&
-        (!service.senderIds.length || service.senderIds.includes(nextSender.id)) &&
         (nextAllowedServiceIds === null ||
           nextAllowedServiceIds.includes(service.id)),
     );
@@ -41278,9 +43439,6 @@ function AddShipmentScreen({
             ? nextSenderPolicy.defaultServiceTypeId
             : ""),
       ) ??
-      nextAvailableServices.find((service) =>
-          (service.defaultForSenderIds ?? []).includes(nextSender.id),
-        ) ??
       nextAvailableServices.find((service) => service.isCompanyDefault) ??
       nextAvailableServices[0];
     setSenderKey(nextKey);
@@ -41295,7 +43453,7 @@ function AddShipmentScreen({
     setSavedSummary(null);
   }
 
-  function useSavedRecipient(recipient: RecipientRecord) {
+  function applySavedRecipient(recipient: RecipientRecord) {
     const address =
       recipient.addresses.find((candidate) => candidate.primary) ??
       recipient.addresses[0];
@@ -41381,6 +43539,17 @@ function AddShipmentScreen({
       return null;
     }
     const normalizedReference = draft.senderReference.trim().toLowerCase();
+    if (
+      policySettings.senderReferenceMode === "required_unique" &&
+      !normalizedReference
+    ) {
+      setError(
+        lang === "ar"
+          ? "مرجع الراسل مطلوب حسب سياسة هذا الراسل."
+          : "Sender reference is required by this sender policy.",
+      );
+      return null;
+    }
     const referenceMustBeUnique =
       policySettings.senderReferenceMode !== "optional";
     const duplicateReference = normalizedReference
@@ -41402,7 +43571,52 @@ function AddShipmentScreen({
       );
       return null;
     }
-    if (draft.areaId && !shippingFee) {
+    const probableDuplicate = shipmentRecords.some(
+      (shipment) =>
+        shipment.sender.en === selectedSender.en &&
+        normalizePhone(shipment.phone) === normalizePhone(draft.phone) &&
+        shipment.amount === shipmentPrice &&
+        (!normalizedReference ||
+          shipment.reference.trim().toLowerCase() === normalizedReference),
+    );
+    if (probableDuplicate && policySettings.duplicateCheckMode === "block") {
+      setError(
+        lang === "ar"
+          ? "توجد شحنة محتملة التكرار لنفس الراسل والهاتف والقيمة."
+          : "A likely duplicate exists for the same sender, phone and amount.",
+      );
+      return null;
+    }
+    if (
+      probableDuplicate &&
+      policySettings.duplicateCheckMode === "warn" &&
+      !window.confirm(
+        lang === "ar"
+          ? "قد تكون هذه الشحنة مكررة. هل راجعتها وتريد المتابعة؟"
+          : "This shipment may be duplicated. Continue after review?",
+      )
+    ) return null;
+    if (
+      policySettings.collectionWarningLimit > 0 &&
+      totalDue > policySettings.collectionWarningLimit &&
+      !window.confirm(
+        lang === "ar"
+          ? `التحصيل يتجاوز حد التنبيه (${policySettings.collectionWarningLimit} ج.م). هل راجعت القيمة؟`
+          : `Collection exceeds the warning limit (${policySettings.collectionWarningLimit} EGP). Continue?`,
+      )
+    ) return null;
+    if (
+      draft.areaId &&
+      (senderPriceList?.unservedAreaIds ?? []).includes(draft.areaId)
+    ) {
+      setError(
+        lang === "ar"
+          ? "هذه المنطقة غير مخدومة في قائمة أسعار الراسل."
+          : "This area is not served by the sender price list.",
+      );
+      return null;
+    }
+    if (draft.areaId && typeof configuredShippingFee !== "number") {
       setError(
         lang === "ar"
           ? "لا يوجد سعر مكتمل لهذه المنطقة داخل قائمة أسعار الراسل."
@@ -41427,19 +43641,6 @@ function AddShipmentScreen({
         lang === "ar" ? "تأكيد الطلب مع المستلم" : "Recipient order confirmation",
       );
     }
-    if (
-      selectedService?.requiresConfirmation &&
-      draft.confirmation !== "confirmed" &&
-      !incompleteFields.some((field) =>
-        field.includes(lang === "ar" ? "تأكيد" : "confirmation"),
-      )
-    ) {
-      incompleteFields.push(
-        lang === "ar"
-          ? `تأكيد المستلم لخدمة ${selectedService.name.ar}`
-          : `Recipient confirmation for ${selectedService.name.en}`,
-      );
-    }
     if (trustConversion && incompleteFields.length) {
       setError(
         lang === "ar"
@@ -41452,6 +43653,34 @@ function AddShipmentScreen({
       ...draft,
       localId: `prepared-${Date.now()}-${prepared.length}`,
       shippingFee,
+      shippingPricingSnapshot:
+        senderPriceList && draft.areaId
+          ? {
+              priceListId: senderPriceList.id,
+              priceListName: senderPriceList.name,
+              priceListCode: senderPriceList.code,
+              priceListVersion: senderPriceList.version,
+              serviceTypeId: draft.serviceTypeId,
+              areaId: draft.areaId,
+              statusPrices: Object.fromEntries(
+                statuses
+                  .filter(
+                    (status) =>
+                      status.state === "published" && status.appearsInPricing,
+                  )
+                  .map((status) => [
+                    status.id,
+                    typeof shippingPriceRow?.[status.id] === "number"
+                      ? shippingPriceRow[status.id]
+                      : null,
+                  ]),
+              ),
+              capturedAt: {
+                ar: new Date().toLocaleString("ar-EG"),
+                en: new Date().toLocaleString("en-EG"),
+              },
+            }
+          : undefined,
       recipientShippingRate,
       recipientShippingCharge,
       recipientShippingSource: recipientAreaRate?.source ?? "company",
@@ -41538,6 +43767,10 @@ function AddShipmentScreen({
       return {
         id: `TS-${String(now + index).slice(-6)}`,
         serviceTypeId: item.serviceTypeId,
+        serviceTypeSnapshot: serviceTypes.find(
+          (service) => service.id === item.serviceTypeId,
+        ),
+        shippingPricingSnapshot: item.shippingPricingSnapshot,
         recipientProfileId: item.recipientProfileId || undefined,
         reference: item.senderReference.trim(),
         recipient: {
@@ -41562,6 +43795,14 @@ function AddShipmentScreen({
         custodyType: "warehouse",
         courier: null,
         amount: Number(item.shipmentPrice) || 0,
+        recipientCashFlow:
+          serviceTypes.find((service) => service.id === item.serviceTypeId)
+            ?.recipientCashFlow ?? "collect",
+        recipientRefundAmount:
+          serviceTypes.find((service) => service.id === item.serviceTypeId)
+            ?.recipientCashFlow === "refund"
+            ? Number(item.shipmentPrice) || 0
+            : 0,
         deliveryDate: item.deliveryDate
           ? { ar: item.deliveryDate, en: item.deliveryDate }
           : { ar: "غير محدد", en: "Not set" },
@@ -41751,6 +43992,7 @@ function AddShipmentScreen({
                 type="button"
                 className={entryMode === "manual" ? "entry-mode--active" : ""}
                 onClick={() => setEntryMode("manual")}
+                disabled={!policySettings.manualEntryEnabled}
               >
                 <PackagePlus size={17} />
                 {lang === "ar" ? "تسجيل يدوي" : "Manual entry"}
@@ -41759,6 +44001,7 @@ function AddShipmentScreen({
                 type="button"
                 className={entryMode === "excel" ? "entry-mode--active" : ""}
                 onClick={() => setEntryMode("excel")}
+                disabled={!policySettings.excelImportEnabled}
               >
                 <FileSpreadsheet size={17} />
                 Excel
@@ -41821,7 +44064,7 @@ function AddShipmentScreen({
               </span>
             </div>
             <div className="entry-payer-source">
-              <small>{lang === "ar" ? "الافتراضي" : "Default payer"}</small>
+              <small>{lang === "ar" ? "افتراضي التسجيل" : "Registration default"}</small>
               <strong>
                 {policySettings.defaultShippingPayer === "recipient"
                   ? lang === "ar"
@@ -41831,6 +44074,11 @@ function AddShipmentScreen({
                     ? "الشحن على الراسل"
                     : "Sender pays shipping"}
               </strong>
+              <small>
+                {lang === "ar"
+                  ? "يمكن تغييره لهذه الشحنة فقط إذا سمحت سياسة الراسل"
+                  : "Can be changed for this shipment only if the sender policy permits"}
+              </small>
             </div>
           </section>
 
@@ -41877,9 +44125,9 @@ function AddShipmentScreen({
             {selectedService && (
               <div className="entry-service-effects">
                 <span><Boxes size={14} />{selectedService.defaultPieces} {lang === "ar" ? "قطعة افتراضيًا" : "default pieces"}</span>
-                {selectedService.hasCollection && <span><HandCoins size={14} />{lang === "ar" ? "يدعم التحصيل" : "Collection enabled"}</span>}
+                {selectedService.recipientCashFlow === "collect" && <span><HandCoins size={14} />{lang === "ar" ? "يدعم التحصيل" : "Collection enabled"}</span>}
+                {selectedService.recipientCashFlow === "refund" && <span><HandCoins size={14} />{lang === "ar" ? "المندوب يدفع للمستلم" : "Courier pays recipient"}</span>}
                 {selectedService.createsReturnParcel && <span><ArrowLeftRight size={14} />{lang === "ar" ? "ينشئ مرتجعًا" : "Creates return"}</span>}
-                {selectedService.requiresConfirmation && <span><Phone size={14} />{lang === "ar" ? "يحتاج تأكيدًا" : "Confirmation required"}</span>}
               </div>
             )}
           </section>
@@ -42013,7 +44261,7 @@ function AddShipmentScreen({
                             }
                             type="button"
                             key={recipient.id}
-                            onClick={() => useSavedRecipient(recipient)}
+                            onClick={() => applySavedRecipient(recipient)}
                           >
                             <span className="mini-avatar">
                               {recipient.name[lang].slice(0, 1)}
@@ -42297,24 +44545,40 @@ function AddShipmentScreen({
                     <span>
                       <strong>
                         {lang === "ar"
-                          ? "التحصيل ومصاريف الشحن"
-                          : "Collection and shipping fees"}
+                          ? recipientCashFlow === "refund"
+                            ? "المبلغ المرتجع ومصاريف الشحن"
+                            : recipientCashFlow === "none"
+                              ? "مصاريف الشحن"
+                              : "التحصيل ومصاريف الشحن"
+                          : recipientCashFlow === "refund"
+                            ? "Recipient refund and shipping fees"
+                            : recipientCashFlow === "none"
+                              ? "Shipping fees"
+                              : "Collection and shipping fees"}
                       </strong>
-                      <small>
-                        {lang === "ar"
-                          ? "هذه بيانات التحصيل للمندوب؛ الحساب النهائي للراسل يعتمد لاحقًا عند تسوية المندوب."
-                          : "These are courier collection instructions; the sender's final account is approved later during courier settlement."}
-                      </small>
+                        <small>
+                          {lang === "ar"
+                            ? recipientCashFlow === "refund"
+                              ? "المبلغ موجب ويُسلّمه المندوب للمستلم؛ لا تستخدم سعرًا بالسالب، ويُعاد للمندوب عند التسوية."
+                              : "هذه بيانات التحصيل للمندوب؛ الحساب النهائي للراسل يعتمد لاحقًا عند تسوية المندوب."
+                            : recipientCashFlow === "refund"
+                              ? "Enter a positive amount the courier will hand to the recipient; never use a negative price."
+                              : "These are courier collection instructions; the sender's final account is approved later during courier settlement."}
+                        </small>
                     </span>
                   </div>
                   <div className="entry-financial-layout">
                     {fieldVisible("SHIPMENT_PRICE") && (
                       <label className="entry-field entry-price-input">
                         <span>
-                          {fieldLabel("SHIPMENT_PRICE", {
-                            ar: "سعر الشحنة",
-                            en: "Shipment price",
-                          })}
+                          {recipientCashFlow === "refund"
+                            ? lang === "ar"
+                              ? "المبلغ الذي سيُرد للمستلم"
+                              : "Amount to refund recipient"
+                            : fieldLabel("SHIPMENT_PRICE", {
+                                ar: "سعر الشحنة",
+                                en: "Shipment price",
+                              })}
                           {requiredMark("SHIPMENT_PRICE")}
                         </span>
                         <span className="entry-input">
@@ -42331,8 +44595,12 @@ function AddShipmentScreen({
                         </span>
                         <small>
                           {lang === "ar"
-                            ? "قيمة المنتج المطلوب تحصيلها، ولا تشمل مصاريف الشحن."
-                            : "Product value to collect; shipping fees are not included."}
+                            ? recipientCashFlow === "refund"
+                              ? "اكتب المبلغ موجبًا؛ اتجاهه محفوظ كدفع للمستلم وليس تحصيلًا منه."
+                              : "قيمة المنتج المطلوب تحصيلها، ولا تشمل مصاريف الشحن."
+                            : recipientCashFlow === "refund"
+                              ? "Enter a positive value; its direction is stored as a payment to the recipient."
+                              : "Product value to collect; shipping fees are not included."}
                         </small>
                       </label>
                     )}
@@ -42425,18 +44693,42 @@ function AddShipmentScreen({
                   </div>
                   <div className="entry-money-summary">
                     <span>
-                      <small>{lang === "ar" ? "سعر الشحنة" : "Shipment price"}</small>
+                      <small>
+                        {lang === "ar"
+                          ? recipientCashFlow === "refund"
+                            ? "المبلغ المرتجع"
+                            : "سعر الشحنة"
+                          : recipientCashFlow === "refund"
+                            ? "Recipient refund"
+                            : "Shipment price"}
+                      </small>
                       <strong>{money.format(shipmentPrice)}</strong>
                     </span>
-                    <i>+</i>
+                    <i>{recipientCashFlow === "refund" ? "−" : "+"}</i>
                     <span>
-                      <small>{lang === "ar" ? "شحن مطلوب من المستلم" : "Shipping requested from recipient"}</small>
+                      <small>
+                        {lang === "ar"
+                          ? recipientCashFlow === "refund"
+                            ? "شحن وخصومات على المستلم"
+                            : "شحن مطلوب من المستلم"
+                          : recipientCashFlow === "refund"
+                            ? "Recipient charges"
+                            : "Shipping requested from recipient"}
+                      </small>
                       <strong>{money.format(recipientShippingCharge)}</strong>
                     </span>
                     <i>=</i>
                     <span className="entry-money-summary__total">
-                      <small>{lang === "ar" ? "المطلوب تحصيله" : "Total to collect"}</small>
-                      <strong>{money.format(totalDue)}</strong>
+                      <small>
+                        {lang === "ar"
+                          ? recipientCashFlow === "refund"
+                            ? "صافي ما يدفعه المندوب للمستلم"
+                            : "المطلوب تحصيله"
+                          : recipientCashFlow === "refund"
+                            ? "Net courier payment to recipient"
+                            : "Total to collect"}
+                      </small>
+                      <strong>{money.format(recipientCashFlow === "refund" ? recipientRefundDue : totalDue)}</strong>
                     </span>
                     <span>
                       <small>{lang === "ar" ? "سعر شحن الشركة" : "Company shipping fee"}</small>
@@ -42476,24 +44768,16 @@ function AddShipmentScreen({
                       </span>
                     </div>
                     <div className="entry-confirmation-options">
-                      {(
-                        [
-                          ["not_recorded", "لم يُسجل", "Not recorded"],
-                          ["confirmed", "تم التأكيد", "Confirmed"],
-                          ["no_answer", "لم يرد", "No answer"],
-                          ["later", "تواصل لاحقًا", "Contact later"],
-                        ] as const
-                      ).map(([value, ar, en]) => (
-                        <button
-                          type="button"
-                          key={value}
-                          className={draft.confirmation === value ? "active" : ""}
-                          onClick={() => updateDraft("confirmation", value)}
-                        >
-                          {draft.confirmation === value && <Check size={14} />}
-                          {lang === "ar" ? ar : en}
-                        </button>
-                      ))}
+                      <span>
+                        <Phone size={15} />
+                        {policySettings.confirmationMode === "required_before_assignment"
+                          ? lang === "ar"
+                            ? "تسجّل الشحنة الآن، ثم تظهر لفريق التأكيد قبل أن يسمح النظام بإسنادها للمندوب."
+                            : "The shipment is registered now, then appears for confirmation before assignment is allowed."
+                          : lang === "ar"
+                            ? "التأكيد اختياري ويُسجّل لاحقًا من صفحة التأكيد والمتابعة."
+                            : "Confirmation is optional and recorded later from Confirmation & follow-up."}
+                      </span>
                     </div>
                   </div>
                 )}
@@ -42621,10 +44905,12 @@ function AddShipmentScreen({
                     {lang === "ar" ? "تفريغ الحقول" : "Clear fields"}
                   </button>
                   {!trustConversion && (
-                    <button className="secondary-button" type="button" onClick={addAnother}>
-                      <Plus size={17} />
-                      {lang === "ar" ? "إضافة شحنة أخرى" : "Add another shipment"}
-                    </button>
+                    policySettings.batchEntryEnabled && (
+                      <button className="secondary-button" type="button" onClick={addAnother}>
+                        <Plus size={17} />
+                        {lang === "ar" ? "إضافة شحنة أخرى" : "Add another shipment"}
+                      </button>
+                    )
                   )}
                   <button className="primary-button" type="button" onClick={savePrepared}>
                     <Save size={17} />
@@ -42814,7 +45100,23 @@ function AddShipmentScreen({
                 </div>
               )}
               <div className="excel-entry-actions">
-                <button className="secondary-button" type="button">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => {
+                    const headers = activeFields
+                      .filter((field) => field.inExcel)
+                      .map((field) => field.name[lang]);
+                    const csv = `\uFEFF${headers.join(",")}\r\n`;
+                    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+                    const url = URL.createObjectURL(blob);
+                    const anchor = document.createElement("a");
+                    anchor.href = url;
+                    anchor.download = lang === "ar" ? "نموذج-استيراد-الشحنات.csv" : "shipment-import-template.csv";
+                    anchor.click();
+                    URL.revokeObjectURL(url);
+                  }}
+                >
                   <FileSpreadsheet size={17} />
                   {lang === "ar" ? "تنزيل النموذج" : "Download template"}
                 </button>
@@ -43847,6 +46149,128 @@ function RecipientsScreen({
   );
 }
 
+function ShipmentStatusDialog({
+  lang,
+  shipment,
+  statuses,
+  services,
+  roles,
+  currentRoleIds,
+  priceLists,
+  governorates,
+  companySettings,
+  senderPolicies,
+  onClose,
+  onSave,
+}: {
+  lang: Lang;
+  shipment: Shipment;
+  statuses: StatusPolicy[];
+  services: ShipmentServiceType[];
+  roles: AccessRole[];
+  currentRoleIds: string[];
+  priceLists: PriceListRecord[];
+  governorates: GovernorateRecord[];
+  companySettings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
+  onClose: () => void;
+  onSave: (shipment: Shipment) => void;
+}) {
+  const service = shipmentServiceFor(shipment, services);
+  const senderSettings = resolveShipmentDataSettings(
+    shipment,
+    companySettings,
+    senderPolicies,
+  );
+  const previousStatusId = shipment.statusPolicyId;
+  const available = statuses.filter((status) => {
+    const normalized = normalizeStatusPolicy(status);
+    const isPartial =
+      status.code === "PARTIAL" ||
+      status.pieceEffect.en === "Enter delivered; derive return";
+    return status.state === "published" && normalized.recordingMode === "manual" && (normalized.executorRoleIds ?? []).some((roleId) => currentRoleIds.includes(roleId)) && statusAllowedForService(normalized, service) && (!isPartial || (service?.allowsPartial && senderSettings.partialDeliveryEnabled)) && statusTransitionAllowed(normalized, previousStatusId);
+  });
+  const [statusId, setStatusId] = useState("");
+  const [reason, setReason] = useState("");
+  const [note, setNote] = useState("");
+  const [nextDate, setNextDate] = useState("");
+  const [amount, setAmount] = useState("");
+  const [deliveredPieces, setDeliveredPieces] = useState("");
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
+  const [error, setError] = useState("");
+  const selected = available.find((status) => status.id === statusId) ?? null;
+  const normalizedSelected = selected ? normalizeStatusPolicy(selected) : null;
+
+  function needs(field: string) {
+    return selected?.requiredFields.some((item) => item.en === field) ?? false;
+  }
+
+  function commit() {
+    if (!selected || !normalizedSelected) return;
+    if (shipment.custodyType === "courier") {
+      setError(lang === "ar" ? "الشحنة مع المندوب فعليًا؛ يجب تسجيل نتيجتها من صفحة شحنات المندوب حتى يُغلق تكليفه وحسابه بصورة صحيحة." : "The shipment is physically with a courier. Record its result from Courier shipments so custody and settlement close correctly.");
+      return;
+    }
+    const missing: string[] = [];
+    if (needs("Reason") && !reason.trim()) missing.push(lang === "ar" ? "سبب الحالة" : "Reason");
+    if (needs("Note") && !note.trim()) missing.push(lang === "ar" ? "الملاحظة" : "Note");
+    if (needs("New date") && !nextDate) missing.push(lang === "ar" ? "الموعد الجديد" : "New date");
+    if (needs("Delivered pieces") && !deliveredPieces) missing.push(lang === "ar" ? "القطع المسلمة" : "Delivered pieces");
+    if (normalizedSelected.collectionPolicy !== "none" && !amount) missing.push(lang === "ar" ? "المبلغ" : "Amount");
+    (selected.customInputFields ?? []).forEach((field) => { if (field.required && !customValues[field.id]?.trim()) missing.push(field.label[lang]); });
+    if (missing.length) { setError(`${lang === "ar" ? "استكمل أولًا" : "Complete first"}: ${missing.join("، ")}`); return; }
+    const numericAmount = amount ? Number(amount) : 0;
+    if (!Number.isFinite(numericAmount) || numericAmount < 0) { setError(lang === "ar" ? "المبلغ يجب أن يكون رقمًا غير سالب." : "Amount must be a non-negative number."); return; }
+    const delivered = selected.pieceEffect.en === "All pieces delivered" ? shipment.pieces : selected.pieceEffect.en === "All pieces returned" ? 0 : deliveredPieces ? Number(deliveredPieces) : null;
+    if (delivered !== null && (!Number.isInteger(delivered) || delivered < 0 || delivered > shipment.pieces)) { setError(lang === "ar" ? `القطع المسلمة يجب أن تكون من 0 إلى ${shipment.pieces}.` : `Delivered pieces must be between 0 and ${shipment.pieces}.`); return; }
+    const returned = delivered === null ? null : Math.max(0, shipment.pieces - delivered);
+    const now = new Date();
+    const timestamp: Localized = { ar: now.toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" }), en: now.toLocaleString("en-EG", { dateStyle: "medium", timeStyle: "short" }) };
+    const destination = normalizedSelected.courierExitDestination ?? "warehouse";
+    const createsReturn = destination === "return_due" || (normalizedSelected.operationalActions ?? []).includes("create_return");
+    const custodyType: Shipment["custodyType"] = destination === "recipient" ? "recipient" : createsReturn || destination === "company_receipt_pending" ? "return_route" : "warehouse";
+    const custody: Localized = destination === "recipient" ? { ar: "تم التسليم للمستلم", en: "Delivered to recipient" } : createsReturn ? { ar: "مرتجع بانتظار استلام الشركة", en: "Return awaiting company receipt" } : destination === "follow_up" ? { ar: "المخزن + قائمة المتابعة", en: "Warehouse + follow-up" } : { ar: "المخزن الرئيسي", en: "Main warehouse" };
+    const areaId = governorates.flatMap((governorate) => governorate.areas).find((area) => area.name.ar === shipment.area.ar || area.name.en === shipment.area.en)?.id;
+    const priceList = priceLists.find((list) => list.state === "active" && list.senders.some((sender) => sender.ar === shipment.sender.ar || sender.en === shipment.sender.en)) ?? priceLists.find((list) => list.state === "active" && list.isDefault);
+    const frozenPricing = shipment.shippingPricingSnapshot;
+    const statusPrice = frozenPricing
+      ? frozenPricing.statusPrices[selected.id]
+      : areaId && priceList
+        ? priceMatrixForService(
+            priceList,
+            shipment.serviceTypeId ?? "service-standard",
+          )[areaId]?.[selected.id]
+        : undefined;
+    const recorderRole = roles.find((role) => currentRoleIds.includes(role.id));
+    const createsFinancialSettlement =
+      normalizedSelected.financialEffect.en !== "No financial effect" ||
+      createsReturn;
+    const event: NonNullable<Shipment["statusHistory"]>[number] = {
+      id: `status-event-${Date.now()}`,
+      statusPolicyId: selected.id,
+      status: selected.name,
+      color: selected.color,
+      recordedBy: recorderRole?.name ?? { ar: "موظف التشغيل", en: "Operations user" },
+      collectedAmount: normalizedSelected.collectionPolicy === "none" ? null : numericAmount,
+      deliveredPieces: delivered,
+      returnedPieces: returned,
+      reason,
+      note,
+      nextDate,
+      customValues,
+      timestamp,
+      ...(createsFinancialSettlement
+        ? { settlementStatus: "pending" as const, senderSettlementStatus: "eligible" as const }
+        : {}),
+      ...((frozenPricing || (priceList && areaId)) && typeof statusPrice === "number" ? { pricingSnapshot: { priceListId: frozenPricing?.priceListId ?? priceList!.id, priceListName: frozenPricing?.priceListName ?? priceList!.name, priceListCode: frozenPricing?.priceListCode ?? priceList!.code, priceListVersion: frozenPricing?.priceListVersion ?? priceList!.version, areaId: frozenPricing?.areaId ?? areaId!, statusPrice } } : {}),
+      ...(normalizedSelected.requiresApproval ? { financialApproval: { state: "pending" as const, scope: "financial_effect" as const, requestedBy: { ar: "موظف التشغيل", en: "Operations user" }, requestedAt: timestamp } } : {}),
+    };
+    onSave({ ...shipment, status: selected.name, statusPolicyId: selected.id, statusTone: normalizedSelected.operationalCategory === "success" ? "green" : normalizedSelected.operationalCategory === "failure" ? "red" : normalizedSelected.operationalCategory === "follow_up" ? "orange" : "blue", custody, custodyType, courier: null, returnFromCourier: createsReturn ? shipment.courier : null, deliveryDate: nextDate ? { ar: nextDate, en: nextDate } : shipment.deliveryDate, required: createsReturn ? { ar: "تسليم المرتجع للشركة", en: "Hand return to company" } : destination === "follow_up" ? { ar: "متابعة الحالة", en: "Follow up status" } : { ar: "لا يوجد", en: "None" }, requiredType: destination === "follow_up" || createsReturn ? "attention" : "none", lastEvent: timestamp, statusHistory: [event, ...(shipment.statusHistory ?? [])] });
+  }
+
+  return <div className="dialog-layer" role="dialog" aria-modal="true"><section className="dialog-card shipment-status-dialog"><header><span className="workspace-icon"><SlidersHorizontal size={20} /></span><div><small>{shipment.id}</small><h2>{lang === "ar" ? "تسجيل حالة للشحنة" : "Record shipment status"}</h2></div><button className="square-button" type="button" onClick={onClose}><X size={18} /></button></header>{shipment.custodyType === "courier" && <div className="settings-alert settings-alert--danger"><CircleAlert size={18} /><span>{lang === "ar" ? "الشحنة مع مندوب؛ سجّل النتيجة من صفحة شحنات المندوب." : "Shipment is with a courier; record the result from Courier shipments."}</span></div>}<label><span>{lang === "ar" ? "الحالة المسموحة لدورك" : "Status allowed for your role"}</span><select value={statusId} onChange={(event) => { setStatusId(event.target.value); setError(""); }}><option value="">{lang === "ar" ? "اختر الحالة" : "Select status"}</option>{available.map((status) => <option key={status.id} value={status.id}>{status.name[lang]}</option>)}</select></label>{selected && <><div className="status-dialog-outcome"><strong>{lang === "ar" ? "النتيجة قبل الحفظ" : "Outcome before saving"}</strong><span>{statusDestinationLabel(selected, lang)} · {selected.pieceEffect[lang]} · {selected.financialEffect[lang]}</span></div><div className="settings-form-grid">{needs("Reason") && <label><span>{lang === "ar" ? "سبب الحالة" : "Reason"}</span><input value={reason} onChange={(event) => setReason(event.target.value)} /></label>}<label><span>{lang === "ar" ? "ملاحظة" : "Note"}</span><input value={note} onChange={(event) => setNote(event.target.value)} /></label>{needs("New date") && <label><span>{lang === "ar" ? "الموعد الجديد" : "New date"}</span><input type="datetime-local" value={nextDate} onChange={(event) => setNextDate(event.target.value)} /></label>}{needs("Delivered pieces") && <label><span>{lang === "ar" ? "القطع المسلمة" : "Delivered pieces"}</span><input type="number" min={0} max={shipment.pieces} value={deliveredPieces} onChange={(event) => setDeliveredPieces(event.target.value)} /></label>}{normalizedSelected?.collectionPolicy !== "none" && <label><span>{lang === "ar" ? "المبلغ المحصل" : "Collected amount"}</span><input type="number" min={0} value={amount} onChange={(event) => setAmount(event.target.value)} /></label>}{(selected.customInputFields ?? []).map((field) => <label key={field.id}><span>{field.label[lang]}{field.required ? " *" : ""}</span><input type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"} value={customValues[field.id] ?? ""} onChange={(event) => setCustomValues((current) => ({ ...current, [field.id]: event.target.value }))} /></label>)}</div></>}{!available.length && <div className="settings-alert"><Info size={18} /><span>{lang === "ar" ? "لا توجد حالة منشورة مسموحة لدورك ومن الحالة الحالية." : "No published status is allowed for your role and the current status."}</span></div>}{error && <div className="settings-alert settings-alert--danger"><CircleAlert size={18} /><span>{error}</span></div>}<footer><button className="secondary-button" type="button" onClick={onClose}>{lang === "ar" ? "إلغاء" : "Cancel"}</button><button className="primary-button" type="button" disabled={!selected || shipment.custodyType === "courier"} onClick={commit}><Save size={17} />{lang === "ar" ? "حفظ الحالة" : "Save status"}</button></footer></section></div>;
+}
+
 type ShipmentFileTab = "summary" | "operations" | "finance" | "record";
 
 function Shipment360Screen({
@@ -43854,15 +46278,22 @@ function Shipment360Screen({
   theme,
   shipment,
   serviceTypes,
+  statuses,
+  roles,
+  currentRoleIds,
+  priceLists,
   courierPlans,
   governorates,
   courierSettlements,
   senderDrafts,
   senderReceipts,
+  companySettings,
+  senderPolicies,
   onLang,
   onTheme,
   onNavigate,
   onOpenRecipient,
+  onShipmentChange,
   onBack,
   onLogout,
 }: {
@@ -43870,15 +46301,22 @@ function Shipment360Screen({
   theme: Theme;
   shipment: Shipment | null;
   serviceTypes: ShipmentServiceType[];
+  statuses: StatusPolicy[];
+  roles: AccessRole[];
+  currentRoleIds: string[];
+  priceLists: PriceListRecord[];
   courierPlans: CourierRatePlan[];
   governorates: GovernorateRecord[];
   courierSettlements: CourierSettlement[];
   senderDrafts: SenderSettlementDraft[];
   senderReceipts: SenderSettlementReceipt[];
+  companySettings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
   onOpenRecipient: (recipientId: string) => void;
+  onShipmentChange: (shipment: Shipment) => void;
   onBack: () => void;
   onLogout: () => void;
 }) {
@@ -43886,6 +46324,7 @@ function Shipment360Screen({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<ShipmentFileTab>("summary");
   const [toast, setToast] = useState("");
+  const [statusDialogOpen, setStatusDialogOpen] = useState(false);
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
     style: "currency",
     currency: "EGP",
@@ -44123,7 +46562,14 @@ function Shipment360Screen({
       id: "statuses",
       title: lang === "ar" ? "سجل الحالات" : "Status history",
       icon: SlidersHorizontal,
-      events: (shipment.statusHistory ?? []).map((event) => ({
+      events: (shipment.statusHistory ?? [])
+        .filter((event) => {
+          const policy = statuses.find((candidate) => candidate.id === event.statusPolicyId);
+          if (!policy) return true;
+          const viewers = normalizeStatusPolicy(policy).internalViewerRoleIds ?? [];
+          return !viewers.length || viewers.some((roleId) => currentRoleIds.includes(roleId));
+        })
+        .map((event) => ({
         id: event.id,
         title: event.status[lang],
         details: [
@@ -44433,14 +46879,10 @@ function Shipment360Screen({
               <strong>{shipment.required[lang]}</strong>
               <p>{primaryAction.hint}</p>
             </div>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={() => onNavigate(primaryAction.screen)}
-            >
-              {primaryAction.label}
-              {lang === "ar" ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
-            </button>
+            <div className="shipment360-next__actions">
+              <button className="secondary-button" type="button" onClick={() => setStatusDialogOpen(true)}><SlidersHorizontal size={17} />{lang === "ar" ? "تسجيل حالة" : "Record status"}</button>
+              <button className="primary-button" type="button" onClick={() => onNavigate(primaryAction.screen)}>{primaryAction.label}{lang === "ar" ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}</button>
+            </div>
           </section>
 
           <nav className="shipment360-tabs" aria-label={lang === "ar" ? "تبويبات ملف الشحنة" : "Shipment file tabs"}>
@@ -44796,6 +47238,7 @@ function Shipment360Screen({
           )}
         </main>
       </div>
+      {statusDialogOpen && <ShipmentStatusDialog lang={lang} shipment={shipment} statuses={statuses} services={serviceTypes} roles={roles} currentRoleIds={currentRoleIds} priceLists={priceLists} governorates={governorates} companySettings={companySettings} senderPolicies={senderPolicies} onClose={() => setStatusDialogOpen(false)} onSave={(next) => { onShipmentChange(next); setStatusDialogOpen(false); showToast(lang === "ar" ? "تم تسجيل الحالة في ملف الشحنة." : "Status recorded in the shipment file."); }} />}
       {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
     </div>
   );
@@ -44806,6 +47249,10 @@ function ShipmentsScreen({
   theme,
   shipmentRecords,
   serviceTypes,
+  statuses,
+  governorates,
+  settings,
+  senderPolicies,
   onLang,
   onTheme,
   onNavigate,
@@ -44816,6 +47263,10 @@ function ShipmentsScreen({
   theme: Theme;
   shipmentRecords: Shipment[];
   serviceTypes: ShipmentServiceType[];
+  statuses: StatusPolicy[];
+  governorates: GovernorateRecord[];
+  settings: ShipmentDataSettings;
+  senderPolicies: SenderShipmentPolicy[];
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -44832,6 +47283,10 @@ function ShipmentsScreen({
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState("");
   const [custodyFilter, setCustodyFilter] = useState("");
+  const [governorateFilter, setGovernorateFilter] = useState("");
+  const [areaFilter, setAreaFilter] = useState("");
+  const [senderFilter, setSenderFilter] = useState("");
+  const [courierFilter, setCourierFilter] = useState("");
   const [toast, setToast] = useState("");
 
   const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", {
@@ -44839,6 +47294,47 @@ function ShipmentsScreen({
     currency: "EGP",
     maximumFractionDigits: 0,
   });
+
+  const readyForAssignmentIds = useMemo(() => {
+    const allAreas = governorates.flatMap((governorate) =>
+      governorate.areas.map((area) => ({ ...area, governorate })),
+    );
+    return new Set(
+      shipmentRecords
+        .filter((shipment) => {
+          if (shipment.custodyType !== "warehouse") return false;
+          if (shipment.requiredType === "incomplete") return false;
+          const service = shipmentServiceFor(shipment, serviceTypes);
+          if (!service) return false;
+          const area = allAreas.find(
+            (record) =>
+              record.name.ar === shipment.area.ar ||
+              record.name.en === shipment.area.en,
+          );
+          if (!area || area.state !== "active" || !area.assignmentAllowed) {
+            return false;
+          }
+          const status = statuses.find(
+            (candidate) =>
+              candidate.state === "published" &&
+              (candidate.name.ar === shipment.status.ar ||
+                candidate.name.en === shipment.status.en),
+          );
+          if (status && !status.appearsInAssignment) return false;
+          if (status && !statusAllowedForService(status, service)) return false;
+          const shipmentSettings = resolveShipmentDataSettings(
+            shipment,
+            settings,
+            senderPolicies,
+          );
+          return !(
+            shipmentSettings.confirmationMode === "required_before_assignment" &&
+            getShipmentConfirmationCode(shipment) !== "confirmed"
+          );
+        })
+        .map((shipment) => shipment.id),
+    );
+  }, [governorates, senderPolicies, serviceTypes, settings, shipmentRecords, statuses]);
 
   const filteredShipments = useMemo(() => {
     const normalized = search.trim().toLowerCase();
@@ -44853,10 +47349,17 @@ function ShipmentsScreen({
           shipment.recipient.en,
           shipment.sender.ar,
           shipment.sender.en,
+          shipment.area.ar,
+          shipment.area.en,
+          shipment.governorate.ar,
+          shipment.governorate.en,
+          shipment.courier?.ar ?? "",
+          shipment.courier?.en ?? "",
         ].some((value) => value.toLowerCase().includes(normalized));
       const matchesTab =
         activeTab === "all" ||
-        (activeTab === "action" && shipment.requiredType === "attention") ||
+        (activeTab === "ready" && readyForAssignmentIds.has(shipment.id)) ||
+        (activeTab === "action" && shipment.requiredType !== "none") ||
         (activeTab === "warehouse" && shipment.custodyType === "warehouse") ||
         (activeTab === "courier" && shipment.custodyType === "courier") ||
         (activeTab === "incomplete" && shipment.requiredType === "incomplete");
@@ -44864,9 +47367,14 @@ function ShipmentsScreen({
         !statusFilter || shipment.statusTone === statusFilter;
       const matchesCustody =
         !custodyFilter || shipment.custodyType === custodyFilter;
-      return matchesSearch && matchesTab && matchesStatus && matchesCustody;
+      const matchesGovernorate =
+        !governorateFilter || shipment.governorate.en === governorateFilter;
+      const matchesArea = !areaFilter || shipment.area.en === areaFilter;
+      const matchesSender = !senderFilter || shipment.sender.en === senderFilter;
+      const matchesCourier = !courierFilter || shipment.courier?.en === courierFilter;
+      return matchesSearch && matchesTab && matchesStatus && matchesCustody && matchesGovernorate && matchesArea && matchesSender && matchesCourier;
     });
-  }, [activeTab, custodyFilter, search, shipmentRecords, statusFilter]);
+  }, [activeTab, areaFilter, courierFilter, custodyFilter, governorateFilter, readyForAssignmentIds, search, senderFilter, shipmentRecords, statusFilter]);
 
   const visibleShipments =
     scenario === "ready" ||
@@ -44878,9 +47386,14 @@ function ShipmentsScreen({
   const tabs: { id: TabId; label: string; count: number }[] = [
     { id: "all", label: t.all, count: shipmentRecords.length },
     {
+      id: "ready",
+      label: lang === "ar" ? "جاهزة للإسناد" : "Ready to assign",
+      count: readyForAssignmentIds.size,
+    },
+    {
       id: "action",
       label: t.needAction,
-      count: shipmentRecords.filter((item) => item.requiredType === "attention").length,
+      count: shipmentRecords.filter((item) => item.requiredType !== "none").length,
     },
     {
       id: "warehouse",
@@ -44908,6 +47421,10 @@ function ShipmentsScreen({
     setSearch("");
     setStatusFilter("");
     setCustodyFilter("");
+    setGovernorateFilter("");
+    setAreaFilter("");
+    setSenderFilter("");
+    setCourierFilter("");
     setActiveTab("all");
     setScenario("ready");
   }
@@ -44944,11 +47461,7 @@ function ShipmentsScreen({
               <small>{t.branch}</small>
             </span>
           </div>
-          <label className="command-search">
-            <Search size={17} />
-            <input placeholder={t.globalSearch} />
-            <kbd>⌘ K</kbd>
-          </label>
+          <CommandSearch lang={lang} onNavigate={onNavigate} />
           <div className="topbar__actions">
             <LanguageThemeControls
               lang={lang}
@@ -45112,10 +47625,6 @@ function ShipmentsScreen({
                   <Filter size={17} />
                   {t.filters}
                   {(statusFilter || custodyFilter) && <i />}
-                </button>
-                <button className="secondary-button" type="button">
-                  <Columns3 size={17} />
-                  {t.columns}
                 </button>
               </div>
             </div>
@@ -45391,8 +47900,17 @@ function ShipmentsScreen({
           onClose={() => setFiltersOpen(false)}
           statusFilter={statusFilter}
           custodyFilter={custodyFilter}
+          governorateFilter={governorateFilter}
+          areaFilter={areaFilter}
+          senderFilter={senderFilter}
+          courierFilter={courierFilter}
+          shipmentRecords={shipmentRecords}
           onStatus={setStatusFilter}
           onCustody={setCustodyFilter}
+          onGovernorate={setGovernorateFilter}
+          onArea={setAreaFilter}
+          onSender={setSenderFilter}
+          onCourier={setCourierFilter}
           onClear={clearFilters}
         />
       )}
@@ -45406,10 +47924,1030 @@ function ShipmentsScreen({
   );
 }
 
+type SmartHelpTopic = {
+  title: Localized;
+  purpose: Localized;
+  result: Localized;
+  target?: Exclude<Screen, "login">;
+};
+
+const smartHelpTopics: Partial<Record<Exclude<Screen, "login">, SmartHelpTopic>> = {
+  dashboard: {
+    title: { ar: "الرئيسية", en: "Overview" },
+    purpose: { ar: "تعرض مؤشرات التشغيل والتنبيهات التي تحتاج تدخلًا سريعًا دون تنفيذ العمليات من مكانها.", en: "Shows operational indicators and items requiring attention without executing their workflows here." },
+    result: { ar: "فتح أي مؤشر ينقلك إلى الصفحة المتخصصة؛ الأرقام نفسها للمتابعة وليست أرصدة محاسبية نهائية.", en: "Opening an indicator takes you to its dedicated screen; dashboard figures are monitoring indicators, not final ledger balances." },
+    target: "dashboard",
+  },
+  reports: {
+    title: { ar: "التقارير", en: "Reports" },
+    purpose: { ar: "تحلل التشغيل والتحصيل والتسليم والمرتجعات وفق الفترة والفلاتر المختارة.", en: "Analyzes operations, collection, delivery, and returns for the selected period and filters." },
+    result: { ar: "التقرير يقرأ السجلات المثبتة ولا يغير حالة أو حسابًا؛ دقته تعتمد على اكتمال تسجيل العمليات الأصلية.", en: "Reports read posted records without changing status or accounts; accuracy depends on complete source operations." },
+    target: "reports",
+  },
+  settings: {
+    title: { ar: "الإعدادات العامة", en: "General settings" },
+    purpose: { ar: "تضبط هوية النظام واللغة والمظهر وإعدادات الشركة العامة التي لا تخص راسلًا أو مندوبًا بعينه.", en: "Controls system identity, language, appearance, and company-wide settings not owned by one sender or courier." },
+    result: { ar: "تظهر التغييرات المعتمدة على واجهة الشركة، بينما تظل سياسات الرسل والأسعار والحالات في صفحاتها المتخصصة.", en: "Approved changes update company UI while sender policies, pricing, and statuses remain in their dedicated control pages." },
+    target: "settings",
+  },
+  help: {
+    title: { ar: "المساعدة الذكية", en: "Smart help" },
+    purpose: { ar: "تشرح رحلات العمل والصفحات، مع شرح أي عنصر مباشرة بالكليك اليمين أو الضغط المطول.", en: "Explains workflows and pages, with direct element help through right-click or long press." },
+    result: { ar: "الشرح لا ينفذ عملية ولا يغير البيانات؛ يمكن الانتقال منه إلى الصفحة المتخصصة فقط.", en: "Help never performs operations or changes data; it only navigates to dedicated screens." },
+    target: "help",
+  },
+  shipments: {
+    title: { ar: "الشحنات", en: "Shipments" },
+    purpose: { ar: "البحث عن كل شحنة ومتابعة حالتها وحيازتها وما هو مطلوب منها.", en: "Find every shipment and follow its status, custody, and required action." },
+    result: { ar: "فتح ملف الشحنة يعرض حقيقتها الحالية وتاريخها، ولا يغيّرها بمجرد الفتح.", en: "Opening a shipment shows its current facts and history without changing it." },
+    target: "shipments",
+  },
+  addShipment: {
+    title: { ar: "إضافة الشحنات", en: "Add shipments" },
+    purpose: { ar: "تسجيل الطرود الموجودة فعليًا بالشركة يدويًا أو جماعيًا أو من Excel.", en: "Register parcels physically received by the company, manually, in bulk, or from Excel." },
+    result: { ar: "بعد الحفظ تدخل الشحنة المخزن، وقد تظهر أيضًا في الاستكمال حسب سياسة الراسل.", en: "After saving, the shipment enters warehouse custody and may also require completion under sender policy." },
+    target: "addShipment",
+  },
+  incompleteShipments: {
+    title: { ar: "استكمال بيانات الشحنات", en: "Complete shipment data" },
+    purpose: { ar: "إكمال الحقول التي تمنع الإسناد أو تحتاج متابعة وفق سياسة الراسل.", en: "Complete fields that block assignment or require follow-up under sender policy." },
+    result: { ar: "تختفي الشحنة من القائمة تلقائيًا عندما لا يبقى سبب للاستكمال.", en: "The shipment leaves the list automatically when no completion reason remains." },
+    target: "incompleteShipments",
+  },
+  confirmation: {
+    title: { ar: "التأكيد والمتابعة", en: "Confirmation and follow-up" },
+    purpose: { ar: "تسجيل نتيجة التواصل مع المستلم دون اختراع حالة شحنة ثابتة.", en: "Record recipient contact results without inventing a fixed shipment status." },
+    result: { ar: "تظهر نتيجة التأكيد والملاحظة للموظف، وتؤثر في الإسناد فقط إذا نصت السياسة على ذلك.", en: "The confirmation result is visible and affects assignment only when policy requires it." },
+    target: "confirmation",
+  },
+  assignment: {
+    title: { ar: "التوزيع والإسناد", en: "Assignment" },
+    purpose: { ar: "اختيار شحنات المخزن المؤهلة وتسليم حيازتها لمندوب محدد.", en: "Select eligible warehouse shipments and hand their custody to a courier." },
+    result: { ar: "بعد الحفظ تصبح الشحنات مع المندوب وتختفي من قائمة الإسناد.", en: "After saving, shipments move to courier custody and leave the assignment list." },
+    target: "assignment",
+  },
+  courierShipments: {
+    title: { ar: "شحنات المناديب", en: "Courier shipments" },
+    purpose: { ar: "عرض الشحنات الموجودة حاليًا مع المندوب وتسجيل نتيجتها التشغيلية.", en: "Show shipments currently with a courier and record their operational result." },
+    result: { ar: "تسجيل أي حالة ينهي وجود الشحنة في قائمة المندوب ويطبق أثر الحالة المنشور.", en: "Recording a status removes the shipment from the courier list and applies the published status effect." },
+    target: "courierShipments",
+  },
+  courierAccount: {
+    title: { ar: "حساب المندوب", en: "Courier account" },
+    purpose: { ar: "استلام التحصيل والمرتجعات وتسوية نتائج المندوب في عملية واحدة.", en: "Receive cash and returns and settle courier results in one operation." },
+    result: { ar: "التأكيد ينشئ التسوية وحركات الخزنة والمديونية إن وجدت، ولا يحتاج اعتماد كل شحنة منفردة.", en: "Confirmation posts the settlement, treasury movement, and any debt without approving each shipment separately." },
+    target: "courierAccount",
+  },
+  senderAccountPrep: {
+    title: { ar: "تجهيز حساب الراسل", en: "Prepare sender account" },
+    purpose: { ar: "اختيار الشحنات التي تريد محاسبة الراسل عليها الآن فقط.", en: "Choose only the shipments to include in the sender's current settlement." },
+    result: { ar: "ينشأ حساب مجهز ينتقل إلى صفحة الحساب النهائي قبل الدفع أو تسليم المرتجعات.", en: "A prepared settlement moves to the final account before payment or return handover." },
+    target: "senderAccountPrep",
+  },
+  senderAccount: {
+    title: { ar: "حساب الراسل", en: "Sender account" },
+    purpose: { ar: "مراجعة صافي استحقاق الراسل ودفع المبلغ وتسليم المرتجعات.", en: "Review the sender's net entitlement, pay money, and hand over returns." },
+    result: { ar: "الحفظ يثبت ما تم دفعه وما بقي مستحقًا وما تم تسليمه من مرتجعات.", en: "Saving posts what was paid, what remains due, and which returns were handed over." },
+    target: "senderAccount",
+  },
+  warehouse: {
+    title: { ar: "المخزن", en: "Warehouse" },
+    purpose: { ar: "معرفة الطرود الموجودة فعليًا وأماكنها وإجراء الجرد وحركات المخزن فقط.", en: "Track parcels physically present, their locations, stocktakes, and warehouse-only movements." },
+    result: { ar: "لا يتم الإسناد أو حساب المندوب من هنا؛ لكل عملية صفحتها المتخصصة.", en: "Courier assignment and settlement are not performed here; each has its own screen." },
+    target: "warehouse",
+  },
+  statuses: {
+    title: { ar: "حالات الشحنات والإجراءات", en: "Shipment statuses and actions" },
+    purpose: { ar: "تعريف الحالة وما تفعله وأين تظهر وأثرها المالي والحيازي دون تغيير الكود.", en: "Define what a status does, where it appears, and its financial and custody effects without code changes." },
+    result: { ar: "بعد النشر تستخدم الصفحات الحالة وفق صلاحياتها وانتقالاتها وحقولها، وليس حسب اسمها.", en: "After publication, screens use the status by permissions, transitions, and fields—not by its name." },
+    target: "statuses",
+  },
+  areas: {
+    title: { ar: "المحافظات والمناطق", en: "Governorates and areas" },
+    purpose: { ar: "إدارة نطاق التغطية الجغرافي الذي تعتمد عليه الأسعار والإسناد.", en: "Manage geographic coverage used by pricing and assignment." },
+    result: { ar: "المنطقة الجديدة تصبح متاحة لقوائم الأسعار، لكن سعرها يحدد داخل كل قائمة مستقلة.", en: "A new area becomes available to price lists, while its price is set in each list independently." },
+    target: "areas",
+  },
+  priceLists: {
+    title: { ar: "قوائم الأسعار", en: "Price lists" },
+    purpose: { ar: "تحديد سعر الشركة لكل منطقة وحالة مالية وخدمة وربط كل راسل بقائمة واحدة.", en: "Set company prices by area, financial status, and service, with one list per sender." },
+    result: { ar: "تغيير القائمة يؤثر في الشحنات الجديدة؛ الشحنات القديمة تحتفظ بنسخة سعرها.", en: "List changes affect new shipments; old shipments retain their price snapshot." },
+    target: "priceLists",
+  },
+  courierRates: {
+    title: { ar: "عمولات المناديب", en: "Courier compensation" },
+    purpose: { ar: "إنشاء اتفاق مستقل لكل مندوب: عمولة أو مرتب أو الاثنين معًا.", en: "Create an independent agreement per courier: commission, salary, or both." },
+    result: { ar: "يقرأ حساب المندوب الاتفاق الساري وقت التنفيذ دون مشاركة اتفاق مندوب آخر.", en: "Courier accounting uses the effective agreement without sharing another courier's plan." },
+    target: "courierRates",
+  },
+  shipmentPolicies: {
+    title: { ar: "سياسات الرسل", en: "Sender policies" },
+    purpose: { ar: "مراجعة السياسة الفعلية لكل راسل ثم تعديلها من ملفه بصورة مستقلة.", en: "Review each sender's effective policy and edit it independently from the sender profile." },
+    result: { ar: "السياسة تحدد التسجيل والاستكمال والتأكيد والتحصيل لكل راسل ولا تغيّر أحداثًا قديمة.", en: "Policy controls registration, completion, confirmation, and collection per sender without rewriting history." },
+    target: "shipmentPolicies",
+  },
+  treasury: {
+    title: { ar: "الخزنة والدفتر المالي", en: "Treasury and ledger" },
+    purpose: { ar: "متابعة النقد والحسابات والحركات والفروق وإغلاق اليوم.", en: "Track cash, accounts, movements, variances, and day close." },
+    result: { ar: "كل حركة يجب أن تحمل مصدرًا ومرجعًا؛ الخزنة لا تغيّر نتيجة الشحنة التشغيلية.", en: "Every movement has a source and reference; treasury does not change operational shipment results." },
+    target: "treasury",
+  },
+  shipment360: {
+    title: { ar: "ملف الشحنة", en: "Shipment file" },
+    purpose: { ar: "يجمع بيانات الشحنة وحيازتها ومالياتها وتاريخ الأحداث في مرجع واحد للقراءة والمتابعة.", en: "Combines shipment data, custody, finances, and event history in one reference view." },
+    result: { ar: "فتح الملف لا يغير الشحنة؛ أي تعديل أو حالة يجب أن يتم من الإجراء المتخصص وبصلاحية واضحة.", en: "Opening the file changes nothing; edits and status events require their dedicated authorized action." },
+    target: "shipment360",
+  },
+  services: {
+    title: { ar: "أنواع الشحنات والخدمات", en: "Shipment types and services" },
+    purpose: { ar: "تعرف حقيقة الخدمة: حركة الطرد والمال والمرتجع والحقول والحالات المتاحة لها.", en: "Defines each service's parcel, cash, return, field, and allowed-status behavior." },
+    result: { ar: "الخدمة المنشورة تصبح متاحة للتسجيل حسب نطاق الرسل، وتحتفظ الشحنات القديمة بنسخة تعريفها.", en: "A published service becomes available for allowed senders while old shipments retain their saved definition." },
+    target: "services",
+  },
+  trusts: {
+    title: { ar: "الأمانات والطرود غير المعرّفة", en: "Unidentified parcels" },
+    purpose: { ar: "تسجل طردًا موجودًا فعليًا لا يمكن ربطه بعد بشحنة معروفة حتى تصل بياناته الصحيحة.", en: "Records a physically present parcel that cannot yet be linked to a known shipment." },
+    result: { ar: "تظل الأمانة منفصلة عن الشحنات والتسعير حتى تحويلها إلى شحنة معروفة مع حفظ تاريخ التعريف.", en: "The parcel stays outside shipment pricing and operations until converted with an identification audit trail." },
+    target: "trusts",
+  },
+  courierReplacement: {
+    title: { ar: "استبدال شحنات بين المناديب", en: "Replace courier shipments" },
+    purpose: { ar: "يصحح المندوب المسؤول عن شحنة أُسندت خطأ مع تسجيل من نقلها ولمن وسبب التصحيح.", en: "Corrects a shipment assigned to the wrong courier with a reasoned transfer audit trail." },
+    result: { ar: "تنتقل الحيازة للمندوب الجديد فور الحفظ، ولا تُنشأ نسخة ثانية من الشحنة.", en: "Custody moves to the new courier after saving without duplicating the shipment." },
+    target: "courierReplacement",
+  },
+  senderReplacement: {
+    title: { ar: "استبدال الشحنات بين الرسل", en: "Replace sender shipments" },
+    purpose: { ar: "يصحح الراسل المرتبط بشحنة سُجلت على راسل خاطئ قبل إغلاق حسابها.", en: "Corrects a shipment registered under the wrong sender before its account is closed." },
+    result: { ar: "تقرأ الشحنة سياسة وقائمة سعر الراسل الجديد وفق قواعد الحماية، مع حفظ السعر القديم عند وجوب ذلك.", en: "The shipment follows the new sender's policy and price rules while protected historical snapshots remain intact." },
+    target: "senderReplacement",
+  },
+  courierPrint: {
+    title: { ar: "طباعة شحنات المندوب", en: "Print courier shipments" },
+    purpose: { ar: "تطبع كل الشحنات الموجودة حاليًا في حيازة مندوب محدد بغض النظر عن يوم الإسناد.", en: "Prints all shipments currently in a courier's custody regardless of assignment date." },
+    result: { ar: "الطباعة لا تغير الحيازة أو الحالة، وتعرض المديونية والتنبيهات المطلوبة للمراجعة عند الحاجة.", en: "Printing changes no custody or status and may include debt and review warnings." },
+    target: "courierPrint",
+  },
+  courierPayouts: {
+    title: { ar: "مستحقات المناديب", en: "Courier payouts" },
+    purpose: { ar: "تدفع العمولة والمرتب والسلف والمبالغ التي دفعها المندوب للمستلمين وفق اتفاقه المثبت.", en: "Pays courier commission, salary, advances, and recipient reimbursements under the effective agreement." },
+    result: { ar: "الصرف ينشئ حركة خزنة وإيصالًا، ولا يكرر عمولة صُرفت سابقًا.", en: "A payout creates a treasury movement and receipt without paying an entitlement twice." },
+    target: "courierPayouts",
+  },
+  senderAccountHistory: {
+    title: { ar: "سجل حسابات الراسل", en: "Sender account history" },
+    purpose: { ar: "يراجع الحسابات والإيصالات والمدفوع والمتبقي والمرتجعات لكل راسل عبر الزمن.", en: "Reviews sender settlements, receipts, paid balances, remaining dues, and returns over time." },
+    result: { ar: "السجل للقراءة والمراجعة؛ التصحيح المالي يتم بإجراء موثق لا بحذف الحساب القديم.", en: "History is read-only; financial corrections require a documented correction instead of deleting old accounts." },
+    target: "senderAccountHistory",
+  },
+  senders: {
+    title: { ar: "الرسل", en: "Senders" },
+    purpose: { ar: "يدير بيانات كل راسل وسياسة شحناته وقائمة سعره وملخص حسابه من ملف واحد.", en: "Manages each sender's identity, shipment policy, price-list link, and account summary in one profile." },
+    result: { ar: "تؤثر تعديلات السياسة والسعر في الشحنات الجديدة وفق تاريخ السريان ولا تعيد كتابة التاريخ.", en: "Policy and pricing changes affect new shipments from their effective date without rewriting history." },
+    target: "senders",
+  },
+  recipients: {
+    title: { ar: "المستلمون", en: "Recipients" },
+    purpose: { ar: "يجمع المستلمين حسب الهاتف ويعرض عناوينهم وسجل محاولات التسليم لمساعدة الرسل والموظفين.", en: "Groups recipients by phone and shows addresses and delivery history for operational review." },
+    result: { ar: "السجل مؤشر مساعدة وليس حكمًا نهائيًا؛ يجب التحقق من كل طلب وعنوان جديد.", en: "History is a decision aid, not a final judgment; every new order and address still requires verification." },
+    target: "recipients",
+  },
+  couriers: {
+    title: { ar: "المناديب", en: "Couriers" },
+    purpose: { ar: "يدير بيانات المندوب ومناطق عمله واتفاق أجره وحالته وملخص مستحقاته.", en: "Manages courier identity, work areas, pay agreement, status, and entitlement summary." },
+    result: { ar: "لكل مندوب اتفاق مستقل؛ أي تعديل لا يغير حساب مندوب آخر ولا نتائج سابقة مغلقة.", en: "Every courier has an independent agreement; changes never affect another courier or closed results." },
+    target: "couriers",
+  },
+  employees: {
+    title: { ar: "الموظفون", en: "Employees" },
+    purpose: { ar: "يسجل الأشخاص العاملين بالشركة وبياناتهم الوظيفية قبل إنشاء حسابات دخول لهم.", en: "Registers company employees and job data before creating login accounts." },
+    result: { ar: "إضافة الموظف لا تمنحه دخولًا تلقائيًا؛ حساب الدخول ينشأ منفصلًا ويرتبط به.", en: "Adding an employee does not grant access; a separate user account must be linked." },
+    target: "employees",
+  },
+  users: {
+    title: { ar: "المستخدمون", en: "Users" },
+    purpose: { ar: "يدير حسابات الدخول والدعوات والجلسات والمصادقة وربط كل حساب بموظف واحد.", en: "Manages login accounts, invitations, sessions, authentication, and one-to-one employee binding." },
+    result: { ar: "تعطيل الحساب يسحب الوصول مع بقاء سجل نشاطه، ولا تُخزن كلمة المرور داخل صفحة الإدارة.", en: "Disabling an account revokes access while retaining its audit history; passwords are not stored on the admin page." },
+    target: "users",
+  },
+  roles: {
+    title: { ar: "الأدوار والصلاحيات", en: "Roles and permissions" },
+    purpose: { ar: "يحدد ما يراه وينفذه كل دور ونطاق البيانات المتاح له.", en: "Defines what each role can view and execute and which data scope it can access." },
+    result: { ar: "تسري الصلاحيات على الواجهة والتنفيذ، وتُحفظ الإصدارات حتى يمكن مراجعة من غيّر ماذا.", en: "Permissions apply to UI and execution with versioned auditability." },
+    target: "roles",
+  },
+  activity: {
+    title: { ar: "سجل النشاط", en: "Activity log" },
+    purpose: { ar: "يعرض محاولات الدخول والتغييرات والنجاح والرفض والفشل التقني بترتيب زمني.", en: "Shows login attempts, changes, success, rejection, and technical failure chronologically." },
+    result: { ar: "السجل لا يعدل البيانات ويجب ألا يُحذف لإخفاء أثر عملية سابقة.", en: "The log is read-only and must not be deleted to conceal previous activity." },
+    target: "activity",
+  },
+  alerts: {
+    title: { ar: "مركز التنبيهات", en: "Alerts center" },
+    purpose: { ar: "يجمع فروق المال والبيانات الناقصة والاعتمادات والتعارضات التي تحتاج قرارًا بشريًا.", en: "Collects cash variances, missing data, approvals, and conflicts requiring human action." },
+    result: { ar: "إغلاق التنبيه يتطلب حل سببه أو توثيق القرار، وليس مجرد إخفائه من القائمة.", en: "Closing an alert requires resolving its cause or documenting a decision—not merely hiding it." },
+    target: "alerts",
+  },
+  companyPolicy: {
+    title: { ar: "سياسة الشركة الافتراضية", en: "Company default policy" },
+    purpose: { ar: "تحدد الإعدادات الافتراضية التي يبدأ منها الراسل الجديد قبل تخصيص سياسته.", en: "Defines defaults inherited by a new sender before its policy is customized." },
+    result: { ar: "تغيير الافتراضي يطبق على الوراثة المستقبلية ولا يمحو تخصيصات الرسل المستقلة.", en: "Default changes affect future inheritance without erasing independent sender overrides." },
+    target: "companyPolicy",
+  },
+};
+
+type SmartHelpJourney = SmartHelpTopic & {
+  path: Localized[];
+};
+
+const smartHelpJourneys: SmartHelpJourney[] = [
+  {
+    title: { ar: "رحلة الشحنة الكاملة", en: "Full shipment journey" },
+    purpose: { ar: "من وصول الطرد إلى الشركة حتى إغلاق حساب الراسل.", en: "From parcel arrival at the company through sender settlement." },
+    result: { ar: "كل خطوة تُنفذ في صفحتها وتحفظ أثرها دون تكرار الحيازة أو التحصيل.", en: "Each step is performed on its dedicated screen with no duplicate custody or collection." },
+    target: "addShipment",
+    path: [
+      { ar: "إضافة الشحنة ودخولها المخزن", en: "Register shipment into warehouse custody" },
+      { ar: "استكمال البيانات والتأكيد حسب سياسة الراسل", en: "Complete data and confirm per sender policy" },
+      { ar: "إسنادها للمندوب وتسجيل النتيجة", en: "Assign to courier and record the result" },
+      { ar: "استلام حساب المندوب", en: "Receive courier settlement" },
+      { ar: "تجهيز حساب الراسل ثم دفعه", en: "Prepare and pay sender account" },
+    ],
+  },
+  {
+    title: { ar: "الجزئي والمرتجع والاستبدال", en: "Partial, return, and exchange" },
+    purpose: { ar: "تسجيل الواقع عندما تُسلّم قطع ويعود الباقي، أو يُستلم مرتجع، أو تُنفذ خدمة استبدال.", en: "Record real outcomes for partial delivery, return pickup, and exchange services." },
+    result: { ar: "يتحدد المال والقطع والمرتجع من تعريف الخدمة والحالة، ثم تدخل النتيجة حساب المندوب والراسل الصحيح.", en: "Cash, pieces, and returns follow service and status definitions into the correct courier and sender accounts." },
+    target: "services",
+    path: [
+      { ar: "تعريف الخدمة وحركة الطرد والمال", en: "Define service parcel and cash behavior" },
+      { ar: "اختيار الخدمة عند تسجيل الشحنة", en: "Choose the service during registration" },
+      { ar: "تسجيل الحالة والقطع والمبلغ الفعلي", en: "Record status, actual pieces, and cash" },
+      { ar: "استلام المال أو المرتجع مع حساب المندوب", en: "Receive cash or return in courier settlement" },
+    ],
+  },
+  {
+    title: { ar: "التسوية المالية اليومية", en: "Daily financial settlement" },
+    purpose: { ar: "ربط ما حدث مع المندوب والراسل بحركة الخزنة وإغلاق اليوم.", en: "Connect courier and sender settlements to treasury movements and day close." },
+    result: { ar: "كل مبلغ يصبح له مصدر ومرجع وإيصال، وتظل الفروق والمديونيات ظاهرة حتى تسويتها.", en: "Every amount has a source, reference, and receipt while variances and debts remain visible until settled." },
+    target: "courierAccount",
+    path: [
+      { ar: "استلام نتيجة وحساب المندوب", en: "Receive courier results and settlement" },
+      { ar: "إثبات حركة الخزنة والمديونية إن وجدت", en: "Post treasury movement and any debt" },
+      { ar: "تجهيز ودفع حساب الراسل", en: "Prepare and pay sender settlement" },
+      { ar: "مراجعة الدفتر وإغلاق اليوم", en: "Review ledger and close the day" },
+    ],
+  },
+  {
+    title: { ar: "ضبط شركة جديدة", en: "Configure a new company" },
+    purpose: { ar: "ترتيب صفحات القيادة قبل بدء التشغيل الحقيقي.", en: "Configure control pages before live operations start." },
+    result: { ar: "تدخل الشحنات بعد ذلك بسياسات وأسعار وحالات واتفاقات واضحة قابلة للتغيير دون تعديل الكود.", en: "Shipments then follow explicit policies, pricing, statuses, and agreements without code changes." },
+    target: "areas",
+    path: [
+      { ar: "إضافة المحافظات والمناطق", en: "Add governorates and areas" },
+      { ar: "تعريف الخدمات والحالات وآثارها", en: "Define services, statuses, and effects" },
+      { ar: "بناء قوائم الأسعار وربط الرسل", en: "Build price lists and link senders" },
+      { ar: "ضبط سياسة كل راسل واتفاق كل مندوب", en: "Configure each sender policy and courier agreement" },
+    ],
+  },
+  {
+    title: { ar: "تجهيز الموظفين والأمان", en: "Staff and access setup" },
+    purpose: { ar: "إضافة الموظف ومنحه حسابًا وصلاحية مناسبة مع بقاء كل حركة قابلة للمراجعة.", en: "Add staff, grant appropriate access, and retain a reviewable audit trail." },
+    result: { ar: "كل موظف يرى وينفذ ما يخص عمله فقط، ويمكن سحب وصوله دون حذف سجله.", en: "Each employee sees and performs only their job scope, and access can be revoked without deleting history." },
+    target: "employees",
+    path: [
+      { ar: "إضافة الموظف", en: "Add employee" },
+      { ar: "إنشاء مستخدم وربطه بالموظف", en: "Create and link user account" },
+      { ar: "اختيار الدور والصلاحيات", en: "Assign role and permissions" },
+      { ar: "متابعة الجلسات وسجل النشاط", en: "Monitor sessions and activity log" },
+    ],
+  },
+];
+
+const commandSearchHiddenScreens = new Set<Exclude<Screen, "login">>([
+  "shipment360",
+  "courierRates",
+  "shipmentPolicies",
+  "companyPolicy",
+]);
+
+function CommandSearch({
+  lang,
+  onNavigate,
+}: {
+  lang: Lang;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const normalized = query.trim().toLocaleLowerCase();
+  const results = normalized
+    ? Object.values(smartHelpTopics)
+        .filter(
+          (topic): topic is SmartHelpTopic & { target: Exclude<Screen, "login"> } =>
+            Boolean(topic?.target) && !commandSearchHiddenScreens.has(topic!.target!),
+        )
+        .filter((topic) =>
+          `${topic.title[lang]} ${topic.purpose[lang]}`
+            .toLocaleLowerCase()
+            .includes(normalized),
+        )
+        .slice(0, 7)
+    : [];
+
+  const goTo = (target: Exclude<Screen, "login">) => {
+    setQuery("");
+    onNavigate(target);
+  };
+
+  return (
+    <div className="command-search">
+      <Search size={17} />
+      <input
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && results[0]?.target) {
+            event.preventDefault();
+            goTo(results[0].target);
+          }
+          if (event.key === "Escape") setQuery("");
+        }}
+        placeholder={copy[lang].globalSearch}
+        aria-label={copy[lang].globalSearch}
+      />
+      <kbd>⌘ K</kbd>
+      {normalized && (
+        <div className="command-search__results" role="listbox">
+          {results.map((topic) => (
+            <button key={topic.target} type="button" onClick={() => goTo(topic.target)}>
+              <span><strong>{topic.title[lang]}</strong><small>{topic.purpose[lang]}</small></span>
+              {lang === "ar" ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
+          ))}
+          {results.length === 0 && (
+            <span className="command-search__empty">
+              {lang === "ar" ? "لا توجد صفحة أو مهمة مطابقة" : "No matching page or task"}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type SmartControlHelp = {
+  purpose: string;
+  when: string;
+  effect: string;
+  safety: string;
+};
+
+function resolveControlHelp(
+  label: string,
+  lang: Lang,
+  pageTopic: SmartHelpTopic,
+  elementKind = "control",
+  disabled = false,
+): SmartControlHelp {
+  const normalized = label.trim().replace(/\s+/g, " ");
+  const linkedPageTopic = Object.values(smartHelpTopics).find(
+    (topic) =>
+      topic &&
+      (normalized === topic.title[lang] ||
+        normalized.startsWith(`${topic.title[lang]} `)),
+  );
+  if (linkedPageTopic) {
+    return {
+      purpose: linkedPageTopic.purpose[lang],
+      when:
+        lang === "ar"
+          ? `افتح صفحة ${linkedPageTopic.title.ar} عندما تكون المهمة الحالية من اختصاصها، بدل تنفيذها من صفحة أخرى.`
+          : `Open ${linkedPageTopic.title.en} when the current task belongs to it instead of performing it elsewhere.`,
+      effect: linkedPageTopic.result[lang],
+      safety:
+        lang === "ar"
+          ? "فتح الصفحة وحده لا يغيّر البيانات؛ التغيير يحدث فقط عند تنفيذ إجراء ثم حفظه."
+          : "Opening the page changes no data; a change happens only after an action is performed and saved.",
+    };
+  }
+  const rules = [
+    {
+      match: /إضافة شحن(?:ة|ات)|add shipment/i,
+      ar: ["يسجل طردًا موجودًا فعليًا داخل الشركة، يدويًا أو ضمن مجموعة أو من ملف Excel.", "استخدمه بعد وصول الطرد للشركة وتأكد الموظف أنه موجود أمامه، وليس لإنشاء طلب بيك أب مستقبلي.", "بعد الحفظ تدخل الشحنة حيازة المخزن؛ وإذا نقص بيان وفق سياسة الراسل تظهر أيضًا في قائمة الاستكمال ولا تُسند حتى تصبح مؤهلة.", "راجع الراسل ومرجعه ونوع الخدمة وعدد القطع والتحصيل ومصاريف الشحن قبل الحفظ."],
+      en: ["Registers a parcel physically present at the company, manually, in a batch, or from Excel.", "Use it after the parcel reaches the company—not to create a future pickup request.", "After saving, the shipment enters warehouse custody and may also enter data completion until eligible for assignment.", "Review sender, reference, service type, pieces, collection, and shipping fees first."],
+    },
+    {
+      match: /إسناد|تسليم للمندوب|assign/i,
+      ar: ["ينقل حيازة الشحنات المؤهلة من المخزن إلى المندوب المختار.", "استخدمه عندما تكون الطرود أمام الموظف وسيستلمها المندوب فعليًا الآن.", "بعد التأكيد تختفي الشحنات من قائمة الإسناد وتظهر ضمن شحنات المندوب مع تسجيل وقت ومنفذ العملية.", "راجع المندوب وعدد الشحنات والقطع قبل الحفظ؛ الإسناد هنا إثبات حيازة حقيقية."],
+      en: ["Moves eligible shipment custody from warehouse to the selected courier.", "Use it when the parcels are physically handed to the courier now.", "After confirmation, shipments leave assignment and appear under courier custody with an audit event.", "Review courier, shipments, and pieces before saving; this is a real custody event."],
+    },
+    {
+      match: /حساب المندوب|تأكيد واستلام|تسوية المندوب|courier account|settle/i,
+      ar: ["يستلم نتائج المندوب: التحصيل والمرتجعات والمديونية وعمولته في تسوية واحدة.", "استخدمه بعد رجوع المندوب وتسليم ما معه للشركة.", "ينشئ تسوية مثبتة وحركة خزنة، ويُبقي أي عجز مديونية على المندوب حتى السداد.", "لا تعدّل المبلغ إلا من «مبلغ آخر» ومع تسجيل السبب؛ راجع المرتجعات قبل التأكيد."],
+      en: ["Receives courier cash, returns, debt, and commission in one settlement.", "Use it when the courier returns and hands results to the company.", "It posts a settlement and treasury movement, preserving any shortage as courier debt.", "Use the controlled alternate-amount path with a reason and review returns before confirmation."],
+    },
+    {
+      match: /تجهيز حساب الراسل|prepare sender/i,
+      ar: ["يحدد الشحنات التي سيدخل استحقاقها في حساب الراسل الحالي فقط.", "استخدمه عندما تريد محاسبة الراسل على مجموعة محددة دون انتظار باقي شحناته.", "تنشأ مسودة حساب تنتقل إلى صفحة حساب الراسل للمراجعة والدفع وتسليم المرتجعات.", "الاختيار لا يدفع مالًا وحده؛ راجع الشحنات المختارة قبل تجهيز الحساب."],
+      en: ["Selects only the shipments included in the sender's current account.", "Use it to settle a chosen group without waiting for all sender shipments.", "It creates a prepared account for final review, payment, and return handover.", "Selection alone does not pay money; review included shipments first."],
+    },
+    {
+      match: /قائمة أسعار|سعر الشحن|سعر المنطقة|price list|shipping price/i,
+      ar: ["يضبط سعر الشركة حسب المنطقة والحالة المالية داخل قائمة أسعار مستقلة.", "استخدمه عند إنشاء اتفاق سعر جديد أو تعديل أسعار الشحنات المستقبلية.", "تقرأ الشحنات الجديدة السعر الساري، بينما تحتفظ الشحنات القديمة بنسخة سعرها المحفوظة.", "تأكد أن كل منطقة وحالة مالية لها سعر وأن الراسل مرتبط بقائمة واحدة فقط."],
+      en: ["Sets company pricing by area and financial status inside an independent price list.", "Use it for a new pricing agreement or future shipment pricing changes.", "New shipments use the effective price while old shipments keep their saved snapshot.", "Ensure every required area/status has a price and each sender has one list only."],
+    },
+    {
+      match: /حالة|تسجيل الحالة|status/i,
+      ar: ["يختار أو يعرّف نتيجة تشغيلية للشحنة وفق الحالات التي أنشأتها الشركة.", "استخدمه عندما حدثت النتيجة فعليًا وتريد تسجيل أثرها على الحيازة والمال والمرتجع.", "عند الحفظ يطبق النظام إعداد الحالة المنشور: المكان التالي، القطع، التحصيل، المرتجع والظهور.", "لا تعتمد على اسم الحالة؛ راجع أثرها الظاهر وحقولها المطلوبة قبل الحفظ."],
+      en: ["Selects or defines an operational shipment result under company-defined statuses.", "Use it after the real-world result occurs and must affect custody, money, or returns.", "Saving applies the published status configuration: destination, pieces, collection, return, and visibility.", "Do not rely on the status name; review its shown effects and required fields."],
+    },
+    {
+      match: /متحمل|المستلم|الراسل|shipping payer|recipient|sender pays/i,
+      ar: ["يحدد الطرف الذي تتحمل عليه مصاريف شحن الشركة لهذه الشحنة.", "استخدمه عند التسجيل أو التسوية إذا سمحت سياسة الراسل بتغيير الاختيار الافتراضي.", "يؤثر في المبلغ المطلوب من المستلم وصافي مستحق الراسل، ويُحفظ القرار النهائي مع الشحنة.", "إذا خالف القرار المسجل، يجب أن يظهر تنبيه وسبب للمراجعة المالية."],
+      en: ["Defines who bears the company's shipping fee for this shipment.", "Use it at entry or settlement when sender policy allows overriding the default.", "It changes recipient collection and sender net due, and the final decision is saved with the shipment.", "An override should create a reasoned financial-review alert."],
+    },
+    {
+      match: /عمولة|مرتب|أجر المندوب|commission|salary|wage/i,
+      ar: ["يحدد اتفاق أجر المندوب: عمولة أو مرتب ثابت أو مرتب وعمولة معًا.", "استخدمه عند التعاقد مع المندوب أو تغيير الاتفاق من تاريخ محدد.", "يقرأ حساب المندوب الاتفاق الساري وقت تنفيذ الشحنة ويحسب المستحق دون التأثير على مندوب آخر.", "أكمل أسعار كل منطقة وحالة مستخدمة قبل تفعيل الاتفاق."],
+      en: ["Defines courier pay as commission, fixed salary, or salary plus commission.", "Use it when creating or changing a courier agreement from an effective date.", "Courier accounting reads the effective agreement for each completed shipment independently.", "Complete every used area/status rate before activating the agreement."],
+    },
+    {
+      match: /خزنة|إيداع|مصروف|تحويل|treasury|deposit|expense|transfer/i,
+      ar: ["يسجل أو يعرض حركة مالية حقيقية داخل حسابات الشركة.", "استخدمه فقط عند دخول أو خروج أو تحويل مال فعلي، وليس لتغيير نتيجة شحنة.", "ينشئ قيدًا بمرجع ومصدر ويحدث رصيد الحساب المحدد مع بقاء سجل المراجعة.", "الحركات الناتجة من حساب المندوب أو الراسل تُرحّل تلقائيًا ولا تُكرر يدويًا."],
+      en: ["Records or displays a real financial movement in company accounts.", "Use it only for actual money in, out, or transfer—not to change shipment results.", "It posts a sourced, referenced ledger entry and updates the selected account balance.", "Courier and sender account movements post automatically and must not be duplicated manually."],
+    },
+    {
+      match: /صلاحية|دور|مستخدم|موظف|permission|role|user|employee/i,
+      ar: ["يدير من يستطيع الدخول وما الصفحات والإجراءات والبيانات التي يراها.", "استخدمه لإضافة موظف حقيقي ثم إنشاء حساب وربطه بدور ونطاق مناسب.", "تسري الصلاحيات على الواجهة والإجراءات، ويُسجل التغيير في سجل النشاط.", "لا تشارك الحسابات بين الموظفين ولا تمنح صلاحيات مالية إلا لمن يحتاجها."],
+      en: ["Controls who can sign in and which pages, actions, and data they can access.", "Use it by creating a real employee, then binding one account to a role and scope.", "Permissions affect UI and actions, and changes are audit logged.", "Never share accounts or grant financial permissions without operational need."],
+    },
+    {
+      match: /Excel|استيراد|رفع ملف|import|upload/i,
+      ar: ["يستورد مجموعة شحنات من ملف واحد بعد فحص كل الصفوف.", "استخدمه عندما يرسل الراسل ملف شحنات وتكون الطرود موجودة فعليًا بالشركة.", "لا يُحفظ أي صف حتى تصحيح جميع الأخطاء؛ بعدها تُسجل المجموعة كوحدة واحدة.", "استخدم النموذج المعتمد ولا تقبل حفظًا جزئيًا حتى لا تضيع الشحنات بين القوائم."],
+      en: ["Imports a shipment batch after validating every row.", "Use it when the sender supplies a shipment file and parcels are physically present.", "Nothing is saved until all errors are fixed; then the batch is registered together.", "Use the approved template and avoid partial imports."],
+    },
+    {
+      match: /طباعة|print/i,
+      ar: ["ينشئ كشفًا قابلًا للطباعة من النتائج المطابقة للفلاتر الحالية.", "استخدمه لإعطاء المندوب كشف كل الشحنات الموجودة معه الآن، لا شحنات يوم واحد فقط.", "الطباعة لا تغيّر حالة أو حيازة أي شحنة.", "راجع اسم المندوب والفلاتر وعدد الشحنات قبل الطباعة."],
+      en: ["Creates a printable manifest from currently filtered results.", "Use it for all shipments currently held by a courier, not only today's assignments.", "Printing never changes shipment status or custody.", "Review courier, filters, and shipment count first."],
+    },
+    {
+      match: /بحث|search/i,
+      ar: ["يبحث داخل السجلات الظاهرة باستخدام الرقم أو الاسم أو الهاتف أو المرجع.", "استخدمه للوصول السريع إلى سجل محدد دون تغيير البيانات.", "تتغير النتائج المعروضة فقط، ومسح البحث يعيد القائمة كاملة.", "البحث لا يحذف ولا يعدل ولا ينشئ أي حركة."],
+      en: ["Searches visible records by number, name, phone, or reference.", "Use it to find a specific record without changing data.", "Only visible results change; clearing search restores the full list.", "Search never deletes, edits, or posts activity."],
+    },
+    {
+      match: /فلتر|تصفية|filter/i,
+      ar: ["يقصر العرض مؤقتًا على السجلات المطابقة للشروط المختارة.", "استخدمه للمراجعة أو الطباعة أو الوصول لمجموعة محددة.", "لا تتغير البيانات، وإزالة الفلاتر تعيد كل النتائج.", "راجع وجود فلاتر نشطة إذا اختفى سجل تتوقع ظهوره."],
+      en: ["Temporarily limits the view to records matching selected criteria.", "Use it for review, printing, or locating a group.", "Data never changes; clearing filters restores all results.", "Check active filters when an expected record is missing."],
+    },
+    {
+      match: /حفظ|تأكيد|استلام|save|confirm/i,
+      ar: ["يثبت المدخلات والإجراء الظاهر بعد اجتياز قواعد التحقق.", "استخدمه بعد مراجعة الملخص والتأكد أن ما على الشاشة يطابق ما حدث في الواقع.", "ينشئ سجلًا أو حدثًا وقد يغير الحيازة أو الحساب حسب الصفحة الحالية.", "الحفظ ليس زر انتقال؛ اقرأ النتيجة المتوقعة وأي تنبيه قبل الضغط."],
+      en: ["Commits visible inputs and action after validation.", "Use it after checking the summary matches the real-world event.", "It creates a record or event and may change custody or accounting according to the page.", "Saving is not navigation; read the expected outcome and warnings first."],
+    },
+    {
+      match: /إلغاء|إغلاق|رجوع|cancel|close|back/i,
+      ar: ["يغلق النافذة أو يرجع دون تثبيت التغييرات الحالية.", "استخدمه عندما لا تريد إكمال التعديل المفتوح.", "يلغي المدخلات غير المحفوظة فقط ولا يعكس عملية حُفظت سابقًا.", "لعكس حركة مثبتة استخدم إجراء التصحيح أو العكس المخصص، لا زر الإلغاء."],
+      en: ["Closes the panel or goes back without committing current edits.", "Use it when you do not want to finish the open edit.", "It discards only unsaved input and never reverses a saved event.", "Use the dedicated correction or reversal workflow for posted activity."],
+    },
+    {
+      match: /إضافة|جديد|إنشاء|add|new|create/i,
+      ar: ["يفتح نموذج إنشاء سجل جديد من هذا النوع.", "استخدمه عندما يوجد كيان أو عملية جديدة فعلًا وليست تعديلًا لسجل موجود.", "لن يتغير النظام حتى تكمل الحقول المطلوبة وتضغط حفظ.", "ابحث أولًا لتجنب إنشاء سجل مكرر، خصوصًا الرسل والمناديب والمستلمين."],
+      en: ["Opens a form for a new record of this type.", "Use it for a genuinely new entity or operation, not to edit an existing record.", "Nothing changes until required fields are completed and saved.", "Search first to avoid duplicate senders, couriers, or recipients."],
+    },
+  ];
+  const rule = rules.find((candidate) => candidate.match.test(normalized));
+  if (rule) {
+    const [purpose, when, effect, safety] = rule[lang];
+    return { purpose, when, effect, safety };
+  }
+  const isField = /input|select|textarea|textbox|combobox|spinbutton/.test(elementKind);
+  return lang === "ar"
+    ? {
+        purpose: isField
+          ? `هذه خانة «${normalized || "بيانات"}» داخل صفحة ${pageTopic.title.ar}، وتُستخدم لإدخال أو اختيار البيان المرتبط بالسجل الحالي.`
+          : `هذا العنصر «${normalized || "عنصر الصفحة"}» جزء من عمل صفحة ${pageTopic.title.ar}: ${pageTopic.purpose.ar}`,
+        when: isField
+          ? "استخدمها أثناء إنشاء السجل أو تعديله عندما تكون هذه المعلومة متاحة ومطابقة للواقع."
+          : "استخدمه عندما تكون في هذه المرحلة من رحلة العمل وتريد تنفيذ المهمة الظاهرة عليه.",
+        effect: isField
+          ? "تغيير الخانة وحده لا يثبت شيئًا؛ يسري التغيير عند استخدام زر الحفظ أو التأكيد الخاص بالنموذج."
+          : pageTopic.result.ar,
+        safety: disabled
+          ? "العنصر مقفول حاليًا لأن شرطًا سابقًا أو صلاحية أو بيانًا مطلوبًا لم يكتمل. راجع الرسالة القريبة منه والحقول المطلوبة في الصفحة."
+          : "إذا لم تكن النتيجة واضحة، راجع ملخص الصفحة والتنبيهات الظاهرة قبل الحفظ.",
+      }
+    : {
+        purpose: isField
+          ? `“${normalized || "Data"}” is an input on ${pageTopic.title.en} used for the current record.`
+          : `“${normalized || "Page control"}” belongs to ${pageTopic.title.en}: ${pageTopic.purpose.en}`,
+        when: isField ? "Use it while creating or editing the record when the value is known and accurate." : "Use it at this stage of the workflow to perform the shown task.",
+        effect: isField ? "Changing the field alone posts nothing; the change applies only after the form is saved or confirmed." : pageTopic.result.en,
+        safety: disabled ? "This control is currently unavailable because a prerequisite, permission, or required value is missing. Check nearby guidance." : "Review the page summary and visible warnings before saving.",
+      };
+}
+
+function SmartHelpCenter({ lang, onNavigate }: { lang: Lang; onNavigate: (screen: Exclude<Screen, "login">) => void }) {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const journeys = smartHelpJourneys.filter((journey) =>
+    `${journey.title[lang]} ${journey.purpose[lang]} ${journey.result[lang]}`.toLocaleLowerCase().includes(normalizedQuery),
+  );
+  return (
+    <div className="smart-help-center">
+      <section className="smart-help-hero">
+        <span><CircleHelp size={24} /></span>
+        <div>
+          <h2>{lang === "ar" ? "كيف تريد أن تنجز عملك؟" : "What do you want to accomplish?"}</h2>
+          <p>{lang === "ar" ? "ابحث بالمهمة لا باسم الشاشة؛ ستعرف من أين تبدأ وماذا يحدث بعد الحفظ." : "Search by task, not screen name; learn where to start and what happens after saving."}</p>
+        </div>
+        <label>
+          <Search size={19} />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={lang === "ar" ? "ابحث: إسناد، حساب مندوب، مرتجع..." : "Search: assignment, courier account, return..."} />
+        </label>
+      </section>
+      <section className="smart-help-journeys">
+        {journeys.map((journey) => (
+          <article key={journey.target}>
+            <span className="smart-help-journeys__icon"><GitBranch size={20} /></span>
+            <div>
+              <small>{lang === "ar" ? `رحلة تشغيلية · ${journey.path.length} خطوات` : `Operational journey · ${journey.path.length} steps`}</small>
+              <h3>{journey.title[lang]}</h3>
+              <p>{journey.purpose[lang]}</p>
+              <ol className="smart-help-journey-path">
+                {journey.path.map((step, index) => <li key={`${journey.target}-${index}`}><span>{index + 1}</span>{step[lang]}</li>)}
+              </ol>
+              <b>{journey.result[lang]}</b>
+            </div>
+            {journey.target && <button type="button" onClick={() => onNavigate(journey.target!)}>{lang === "ar" ? "اذهب إلى الصفحة" : "Go to page"}<ChevronLeft size={16} /></button>}
+          </article>
+        ))}
+        {journeys.length === 0 && <div className="smart-help-empty"><Search size={24} /><strong>{lang === "ar" ? "لا توجد نتيجة مطابقة" : "No matching result"}</strong><span>{lang === "ar" ? "جرّب اسم العملية مثل الإسناد أو التحصيل." : "Try an operation such as assignment or collection."}</span></div>}
+      </section>
+    </div>
+  );
+}
+
+function SmartHelpLayer({ lang, screen, onNavigate }: { lang: Lang; screen: Exclude<Screen, "login">; onNavigate: (screen: Exclude<Screen, "login">) => void }) {
+  const [panel, setPanel] = useState<{
+    label: string;
+    details: SmartControlHelp;
+    disabled: boolean;
+  } | null>(null);
+  const [customNote, setCustomNote] = useState("");
+  const pageTopic = smartHelpTopics[screen] ?? {
+    title: { ar: "شرح الصفحة الحالية", en: "Current page help" },
+    purpose: { ar: "هذه الصفحة جزء من مساحة التشغيل، واستخدام عناصرها يخضع للصلاحية والسياسة الحالية.", en: "This page is part of the operating workspace; its controls follow current permissions and policy." },
+    result: { ar: "راجع نتيجة الإجراء الظاهرة قبل الحفظ، وافتح شرح العنصر عند الحاجة.", en: "Review the displayed outcome before saving and open control help when needed." },
+  };
+  const noteKey = `tasleem-help-note:${screen}:${panel?.label ?? "page"}`;
+
+  useEffect(() => {
+    const getTarget = (eventTarget: EventTarget | null) => {
+      const element = eventTarget instanceof HTMLElement ? eventTarget : null;
+      return element?.closest<HTMLElement>("[data-help], button, input, select, textarea, summary, label, [role='button'], [role='switch'], a, article, tr, th, td, h1, h2, h3, .status-pill, .policy-switch-row");
+    };
+    const labelFor = (target: HTMLElement | null) =>
+      target?.dataset.help ||
+      target?.getAttribute("aria-label") ||
+      target?.getAttribute("placeholder") ||
+      target?.innerText?.trim().slice(0, 110) ||
+      pageTopic.title[lang];
+    const onContextMenu = (event: globalThis.MouseEvent) => {
+      const target = getTarget(event.target);
+      if (!target || target.closest(".smart-help-layer")) return;
+      event.preventDefault();
+      const label = labelFor(target);
+      const disabled = target.matches(":disabled, [aria-disabled='true']");
+      const elementKind = `${target.tagName.toLocaleLowerCase()} ${target.getAttribute("role") ?? ""}`;
+      setPanel({
+        label,
+        disabled,
+        details: resolveControlHelp(label, lang, pageTopic, elementKind, disabled),
+      });
+      setCustomNote(window.localStorage.getItem(`tasleem-help-note:${screen}:${label}`) ?? "");
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      const target = getTarget(event.target);
+      if (!target || target.closest(".smart-help-layer")) return;
+      const timer = window.setTimeout(() => {
+        const label = labelFor(target);
+        const disabled = target.matches(":disabled, [aria-disabled='true']");
+        const elementKind = `${target.tagName.toLocaleLowerCase()} ${target.getAttribute("role") ?? ""}`;
+        setPanel({ label, disabled, details: resolveControlHelp(label, lang, pageTopic, elementKind, disabled) });
+        setCustomNote(window.localStorage.getItem(`tasleem-help-note:${screen}:${label}`) ?? "");
+      }, 650);
+      const clear = () => { window.clearTimeout(timer); document.removeEventListener("pointerup", clear); document.removeEventListener("pointercancel", clear); };
+      document.addEventListener("pointerup", clear);
+      document.addEventListener("pointercancel", clear);
+    };
+    document.addEventListener("contextmenu", onContextMenu);
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      document.removeEventListener("contextmenu", onContextMenu);
+      document.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [lang, pageTopic, screen]);
+
+  return (
+    <div className="smart-help-layer">
+      {panel && (
+        <aside className="smart-help-panel" aria-label={lang === "ar" ? "المساعدة الذكية" : "Smart help"}>
+          <header>
+            <span><CircleHelp size={21} /></span>
+            <div><small>{pageTopic.title[lang]}</small><h2>{panel.label}</h2></div>
+            <button type="button" aria-label={lang === "ar" ? "إغلاق الشرح" : "Close explanation"} onClick={() => setPanel(null)}><X size={19} /></button>
+          </header>
+          <div className="smart-help-panel__body">
+            {panel.disabled && (
+              <div className="smart-help-disabled-note">
+                <CircleAlert size={18} />
+                <span><strong>{lang === "ar" ? "هذا العنصر غير متاح الآن" : "This control is unavailable"}</strong><small>{panel.details.safety}</small></span>
+              </div>
+            )}
+            <section><span className="smart-help-section-number">1</span><div><h3>{lang === "ar" ? "ما وظيفته؟" : "What does it do?"}</h3><p>{panel.details.purpose}</p></div></section>
+            <section><span className="smart-help-section-number">2</span><div><h3>{lang === "ar" ? "متى أستخدمه؟" : "When should I use it?"}</h3><p>{panel.details.when}</p></div></section>
+            <section><span className="smart-help-section-number">3</span><div><h3>{lang === "ar" ? "ماذا يحدث بعده؟" : "What happens next?"}</h3><p>{panel.details.effect}</p></div></section>
+            {!panel.disabled && <section className="smart-help-safety"><span className="smart-help-section-number"><ShieldCheck size={15} /></span><div><h3>{lang === "ar" ? "تنبيه مهم" : "Important note"}</h3><p>{panel.details.safety}</p></div></section>}
+            <details className="smart-help-company-note" open={Boolean(customNote)}>
+              <summary>{lang === "ar" ? "تعليمات الشركة لهذا العنصر" : "Company instructions for this control"}</summary>
+              <textarea value={customNote} onChange={(event) => setCustomNote(event.target.value)} placeholder={lang === "ar" ? "أضف تعليمات خاصة بموظفي شركتك لهذا العنصر..." : "Add company-specific instructions for this control..."} />
+              <button className="primary-button" type="button" onClick={() => { window.localStorage.setItem(noteKey, customNote.trim()); }}>{lang === "ar" ? "حفظ التعليمات" : "Save instructions"}</button>
+            </details>
+          </div>
+          <footer>
+            <span>{lang === "ar" ? "اضغط كليك يمين على أي عنصر آخر لشرحِه." : "Right-click any other element to explain it."}</span>
+            <button type="button" onClick={() => { setPanel(null); onNavigate("help"); }}>{lang === "ar" ? "دليل العمل الكامل" : "Full work guide"}<ChevronLeft size={16} /></button>
+          </footer>
+        </aside>
+      )}
+      {panel && <button className="smart-help-backdrop" type="button" aria-label={lang === "ar" ? "إغلاق المساعدة" : "Close help"} onClick={() => setPanel(null)} />}
+    </div>
+  );
+}
+
+type SettingsTab = "company" | "brand" | "backup" | "updates";
+
+function colorLuminance(hex: string) {
+  const normalized = hex.replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) return 0;
+  const channels = [0, 2, 4].map((offset) => {
+    const value = Number.parseInt(normalized.slice(offset, offset + 2), 16) / 255;
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+}
+
+function colorContrast(first: string, second: string) {
+  const high = Math.max(colorLuminance(first), colorLuminance(second));
+  const low = Math.min(colorLuminance(first), colorLuminance(second));
+  return (high + 0.05) / (low + 0.05);
+}
+
+function normalizeControlSettings(
+  settings?: Partial<CompanyControlSettings>,
+): CompanyControlSettings {
+  return {
+    ...defaultCompanyControlSettings,
+    ...settings,
+    identity: {
+      ...defaultCompanyControlSettings.identity,
+      ...(settings?.identity ?? {}),
+    },
+    appearance: {
+      ...defaultCompanyControlSettings.appearance,
+      ...(settings?.appearance ?? {}),
+    },
+    backup: {
+      ...defaultCompanyControlSettings.backup,
+      ...(settings?.backup ?? {}),
+    },
+    updates: {
+      ...defaultCompanyControlSettings.updates,
+      ...(settings?.updates ?? {}),
+    },
+    history: Array.isArray(settings?.history) ? settings.history.slice(0, 8) : [],
+  };
+}
+
+/* eslint-disable @next/next/no-img-element */
+function CompanySettingsScreen({
+  lang,
+  theme,
+  settings,
+  onSave,
+  onLang,
+  onTheme,
+  onNavigate,
+  onLogout,
+}: {
+  lang: Lang;
+  theme: Theme;
+  settings: CompanyControlSettings;
+  onSave: (settings: CompanyControlSettings) => void;
+  onLang: () => void;
+  onTheme: () => void;
+  onNavigate: (screen: Exclude<Screen, "login">) => void;
+  onLogout: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [tab, setTab] = useState<SettingsTab>("company");
+  const [draft, setDraft] = useState(() => normalizeControlSettings(settings));
+  const [toast, setToast] = useState("");
+  const [error, setError] = useState("");
+  const [restoreCandidate, setRestoreCandidate] = useState<{
+    name: string;
+    data: string;
+    createdAt: string;
+    version: string;
+  } | null>(null);
+  const [restoreReason, setRestoreReason] = useState("");
+  const [restorePhrase, setRestorePhrase] = useState("");
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const iconInputRef = useRef<HTMLInputElement>(null);
+  const restoreInputRef = useRef<HTMLInputElement>(null);
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(settings);
+  const primaryContrast = colorContrast(draft.appearance.primaryColor, "#ffffff");
+  const backupPathConflict = (() => {
+    const dataRoot = draft.backup.dataRoot.trim().toLocaleLowerCase().replace(/[\\/]+$/, "");
+    const destination = draft.backup.destination.trim().toLocaleLowerCase().replace(/[\\/]+$/, "");
+    return Boolean(dataRoot && destination && (destination === dataRoot || destination.startsWith(`${dataRoot}\\`) || destination.startsWith(`${dataRoot}/`)));
+  })();
+  const identityComplete = [
+    draft.identity.companyNameAr,
+    draft.identity.companyNameEn,
+    draft.identity.branchNameAr,
+    draft.identity.phone,
+    draft.identity.address,
+  ].filter(Boolean).length;
+
+  function notify(message: string) {
+    setToast(message);
+    window.setTimeout(() => setToast(""), 2800);
+  }
+
+  function saveSettings() {
+    setError("");
+    if (!draft.identity.companyNameAr.trim() || !draft.identity.companyNameEn.trim()) {
+      setError(lang === "ar" ? "اسم الشركة بالعربية والإنجليزية مطلوبان." : "Arabic and English company names are required.");
+      return;
+    }
+    if (primaryContrast < 4.5) {
+      setError(lang === "ar" ? "لون الإجراء الأساسي لا يوضح النص الأبيض بما يكفي. اختر لونًا أغمق." : "The primary action color does not provide enough contrast with white text.");
+      setTab("brand");
+      return;
+    }
+    if (backupPathConflict) {
+      setError(lang === "ar" ? "مجلد النسخ الاحتياطي لا يجوز أن يكون داخل مجلد البيانات." : "The backup destination cannot be inside the data folder.");
+      setTab("backup");
+      return;
+    }
+    const changedSections: Localized[] = [];
+    if (JSON.stringify(draft.identity) !== JSON.stringify(settings.identity)) changedSections.push({ ar: "بيانات الشركة والهوية", en: "company profile and identity" });
+    if (JSON.stringify(draft.appearance) !== JSON.stringify(settings.appearance)) changedSections.push({ ar: "المظهر وتجربة الاستخدام", en: "appearance and experience" });
+    if (JSON.stringify(draft.backup) !== JSON.stringify(settings.backup)) changedSections.push({ ar: "سياسة البيانات والنسخ", en: "data and backup policy" });
+    if (JSON.stringify(draft.updates) !== JSON.stringify(settings.updates)) changedSections.push({ ar: "سياسة التحديثات", en: "update policy" });
+    const release = settings.release + 1;
+    const updatedAt = new Date().toISOString();
+    const historyEntry: CompanySettingsHistoryEntry = {
+      id: `company-settings-${Date.now()}`,
+      at: updatedAt,
+      by: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+      summary: {
+        ar: changedSections.map((section) => section.ar).join("، ") || "حفظ الإعدادات",
+        en: changedSections.map((section) => section.en).join(", ") || "settings saved",
+      },
+      release,
+    };
+    const next = {
+      ...draft,
+      release,
+      updatedAt,
+      history: [historyEntry, ...settings.history].slice(0, 8),
+    };
+    setDraft(next);
+    onSave(next);
+    notify(lang === "ar" ? `تم حفظ إعدادات الشركة — الإصدار ${next.release}` : `Company settings saved — release ${next.release}`);
+  }
+
+  function discardChanges() {
+    setDraft(normalizeControlSettings(settings));
+    setError("");
+    notify(lang === "ar" ? "تم تجاهل التعديلات غير المحفوظة." : "Unsaved changes were discarded.");
+  }
+
+  function handleBrandAsset(key: "logoDataUrl" | "iconDataUrl", file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("image/") || file.type.includes("svg") || file.size > 2 * 1024 * 1024) {
+      setError(lang === "ar" ? "استخدم صورة PNG أو JPG أو WEBP آمنة بحجم لا يزيد عن 2 م.ب." : "Use a safe PNG, JPG, or WEBP image no larger than 2 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setDraft((current) => ({
+        ...current,
+        identity: { ...current.identity, [key]: String(reader.result ?? "") },
+      }));
+      setError("");
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function createBackup() {
+    setError("");
+    const source = window.localStorage.getItem("tasleem-control-center-v2") ?? "{}";
+    const parsed = JSON.parse(source);
+    const createdAt = new Date().toISOString();
+    const backup = {
+      schema: "tasleem-backup-v1",
+      createdAt,
+      systemVersion: "prototype-0.1.0",
+      company: draft.identity.companyNameEn,
+      coverage: ["operational-data", "policies", "finance", "audit", "company-settings"],
+      verification: "local-json-structure-only",
+      restoreTest: "not-run",
+      data: { ...parsed, companyControlSettings: draft },
+    };
+    const serialized = JSON.stringify(backup, null, 2);
+    JSON.parse(serialized);
+    const blob = new Blob([serialized], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `tasleem-backup-${createdAt.slice(0, 10)}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    const next = {
+      ...draft,
+      backup: { ...draft.backup, lastRunAt: createdAt, lastRunState: "verified" as const },
+      updatedAt: createdAt,
+    };
+    setDraft(next);
+    onSave(next);
+    notify(lang === "ar" ? "تم تنزيل ملف بيانات النموذج وفحص بنية JSON فقط؛ هذه ليست نسخة إنتاجية." : "Prototype data downloaded and JSON structure checked only; this is not a production backup.");
+  }
+
+  async function inspectRestoreFile(file?: File) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      if (parsed.schema !== "tasleem-backup-v1" || !parsed.data || typeof parsed.data !== "object") throw new Error("invalid");
+      setRestoreCandidate({
+        name: file.name,
+        data: JSON.stringify(parsed.data),
+        createdAt: String(parsed.createdAt ?? ""),
+        version: String(parsed.systemVersion ?? "unknown"),
+      });
+      setRestoreReason("");
+      setRestorePhrase("");
+      setError("");
+    } catch {
+      setError(lang === "ar" ? "الملف ليس نسخة Tasleem سليمة أو لا يحتوي بيانات قابلة للفحص." : "This is not a valid Tasleem backup or it cannot be inspected.");
+    }
+  }
+
+  function commitRestore() {
+    if (!restoreCandidate || restoreReason.trim().length < 8 || restorePhrase.trim() !== (lang === "ar" ? "استعادة" : "RESTORE")) return;
+    const current = window.localStorage.getItem("tasleem-control-center-v2") ?? "{}";
+    const safetyPointAt = new Date().toISOString();
+    window.localStorage.setItem("tasleem-control-center-safety-point", current);
+    const restored = JSON.parse(restoreCandidate.data) as { companyControlSettings?: CompanyControlSettings };
+    if (restored.companyControlSettings) {
+      restored.companyControlSettings = normalizeControlSettings({
+        ...restored.companyControlSettings,
+        backup: { ...restored.companyControlSettings.backup, lastSafetyPointAt: safetyPointAt },
+      });
+    }
+    window.localStorage.setItem("tasleem-control-center-v2", JSON.stringify(restored));
+    window.location.reload();
+  }
+
+  function checkUpdates() {
+    const checkedAt = new Date().toISOString();
+    const next = { ...draft, updates: { ...draft.updates, lastCheckedAt: checkedAt } };
+    setDraft(next);
+    onSave(next);
+    notify(lang === "ar" ? "تمت محاكاة الفحص فقط؛ خدمة التحديثات غير متصلة في النموذج." : "Check simulated only; the prototype is not connected to an update service.");
+  }
+
+  const tabs: { id: SettingsTab; label: Localized; icon: typeof Building2 }[] = [
+    { id: "company", label: { ar: "الشركة والفرع", en: "Company & branch" }, icon: Building2 },
+    { id: "brand", label: { ar: "الهوية والمظهر", en: "Brand & appearance" }, icon: Palette },
+    { id: "backup", label: { ar: "البيانات والنسخ", en: "Data & backups" }, icon: Database },
+    { id: "updates", label: { ar: "التحديثات والاستمرارية", en: "Updates & continuity" }, icon: RefreshCw },
+  ];
+
+  return (
+    <div className={`erp-shell settings-control-shell${collapsed ? " erp-shell--collapsed" : ""}`}>
+      <Sidebar lang={lang} activeScreen="settings" collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onMobileClose={() => setMobileOpen(false)} onNavigate={onNavigate} onLogout={onLogout} />
+      <div className="erp-main">
+        <header className="topbar system-hub-topbar">
+          <button className="square-button mobile-menu" type="button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button>
+          <span className="workspace-title"><strong>{lang === "ar" ? draft.identity.companyNameAr : draft.identity.companyNameEn}</strong><small>{lang === "ar" ? draft.identity.branchNameAr : draft.identity.branchNameEn}</small></span>
+          <div className="topbar__actions"><LanguageThemeControls lang={lang} theme={theme} onLang={onLang} onTheme={onTheme} subtle /></div>
+        </header>
+        <main className="page-content settings-control-page">
+          <div className="welcome-row page-heading-row settings-heading">
+            <div><span className="status-badge status-badge--ready">{lang === "ar" ? `إصدار إعدادات الشركة ${settings.release}` : `Company settings release ${settings.release}`}</span><h1>{lang === "ar" ? "إعدادات الشركة" : "Company settings"}</h1><p>{lang === "ar" ? "بيانات الشركة، هويتها، وسياسات حماية النموذج في مكان واحد." : "Company profile, brand, and prototype protection policies in one place."}</p></div>
+            <span className="settings-owner-badge"><ShieldCheck size={17} />{lang === "ar" ? "صلاحية مطلوبة: مالك النظام" : "Required role: system owner"}</span>
+          </div>
+          {error && <div className="settings-alert settings-alert--danger"><CircleAlert size={19} /><span>{error}</span></div>}
+          <section className="settings-health-grid settings-health-grid--compact">
+            <article><Building2 size={20} /><span><small>{lang === "ar" ? "اكتمال بيانات الشركة" : "Company profile"}</small><strong>{identityComplete}/5</strong><b>{identityComplete === 5 ? (lang === "ar" ? "مكتملة" : "Complete") : (lang === "ar" ? "تحتاج استكمال" : "Needs attention")}</b></span></article>
+            <article><Database size={20} /><span><small>{lang === "ar" ? "تخزين البيانات الآن" : "Current data storage"}</small><strong>{lang === "ar" ? "محلي تجريبي" : "Local prototype"}</strong><b>{lang === "ar" ? "غير متصل بقاعدة إنتاج" : "No production database connected"}</b></span></article>
+            <article><HardDrive size={20} /><span><small>{lang === "ar" ? "آخر تنزيل محلي" : "Last local download"}</small><strong>{draft.backup.lastRunState === "verified" ? (lang === "ar" ? "JSON مقروء" : "Readable JSON") : (lang === "ar" ? "لم يُنزّل" : "Not downloaded")}</strong><b>{draft.backup.lastRunAt ? new Date(draft.backup.lastRunAt).toLocaleString(lang === "ar" ? "ar-EG" : "en-EG") : (lang === "ar" ? "لا توجد نسخة إنتاجية" : "No production backup")}</b></span></article>
+          </section>
+          <nav className="settings-tabs" aria-label={lang === "ar" ? "أقسام الإعدادات" : "Settings sections"}>{tabs.map((item) => { const Icon = item.icon; return <button key={item.id} className={tab === item.id ? "is-active" : ""} type="button" onClick={() => { setTab(item.id); setError(""); }}><Icon size={18} />{item.label[lang]}</button>; })}</nav>
+
+          {tab === "company" && <section className="settings-panel">
+            <header><span><Building2 size={21} /></span><div><h2>{lang === "ar" ? "بيانات الشركة والفرع" : "Company and branch profile"}</h2><p>{lang === "ar" ? "هذه البيانات تظهر في رأس النظام والمستندات الجديدة فقط." : "These details appear in the system header and new documents only."}</p></div></header>
+            <div className="settings-form-grid">
+              <label><span>{lang === "ar" ? "اسم الشركة بالعربية" : "Arabic company name"}</span><input value={draft.identity.companyNameAr} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, companyNameAr: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "اسم الشركة بالإنجليزية" : "English company name"}</span><input dir="ltr" value={draft.identity.companyNameEn} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, companyNameEn: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "الاسم المختصر بالعربية" : "Arabic short name"}</span><input value={draft.identity.shortNameAr} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, shortNameAr: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "الاسم المختصر بالإنجليزية" : "English short name"}</span><input dir="ltr" value={draft.identity.shortNameEn} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, shortNameEn: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "اسم الفرع بالعربية" : "Arabic branch name"}</span><input value={draft.identity.branchNameAr} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, branchNameAr: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "اسم الفرع بالإنجليزية" : "English branch name"}</span><input dir="ltr" value={draft.identity.branchNameEn} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, branchNameEn: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "هاتف الشركة" : "Company phone"}</span><input dir="ltr" value={draft.identity.phone} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, phone: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "البريد التشغيلي" : "Operations email"}</span><input dir="ltr" type="email" value={draft.identity.email} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, email: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "العنوان" : "Address"}</span><input value={draft.identity.address} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, address: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "السجل التجاري (اختياري)" : "Commercial register (optional)"}</span><input value={draft.identity.commercialRegister} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, commercialRegister: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "الرقم الضريبي (اختياري)" : "Tax number (optional)"}</span><input value={draft.identity.taxNumber} onChange={(event) => setDraft((current) => ({ ...current, identity: { ...current.identity, taxNumber: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "المنطقة الزمنية" : "Timezone"}</span><select value={draft.identity.timezone} disabled><option value="Africa/Cairo">Africa/Cairo (UTC+2/+3)</option></select><small>{lang === "ar" ? "ثابتة للنسخة الأولى داخل مصر." : "Fixed for the Egypt-first release."}</small></label>
+              <label><span>{lang === "ar" ? "عملة التشغيل" : "Operating currency"}</span><select value={draft.identity.currency} disabled><option value="EGP">EGP — {lang === "ar" ? "جنيه مصري" : "Egyptian pound"}</option></select></label>
+            </div>
+            <div className="settings-history"><h3>{lang === "ar" ? "آخر تعديلات إعدادات الشركة" : "Recent company settings changes"}</h3>{settings.history.length ? settings.history.slice(0, 3).map((entry) => <article key={entry.id}><History size={16} /><span><strong>{entry.summary[lang]}</strong><small>{entry.by[lang]} · {new Date(entry.at).toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")} · {lang === "ar" ? `الإصدار ${entry.release}` : `release ${entry.release}`}</small></span></article>) : <p>{lang === "ar" ? "لم تُحفظ تعديلات بعد." : "No saved changes yet."}</p>}</div>
+          </section>}
+
+          {tab === "brand" && <section className="settings-panel settings-brand-layout">
+            <div className="settings-brand-controls"><header><span><Palette size={21} /></span><div><h2>{lang === "ar" ? "الهوية والمظهر" : "Brand and appearance"}</h2><p>{lang === "ar" ? "اختيارات آمنة فقط؛ لا CSS أو أكواد حرة." : "Safe choices only; no custom CSS or scripts."}</p></div></header>
+              <div className="brand-assets-grid">
+                <div className="brand-upload-row"><div className="brand-upload-preview">{draft.identity.logoDataUrl ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={draft.identity.logoDataUrl} alt="" /> : <Brand lang={lang} />}</div><div><strong>{lang === "ar" ? "الشعار الكامل" : "Full logo"}</strong><small>{lang === "ar" ? "للدخول والمستندات" : "Login and documents"}</small><input ref={logoInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleBrandAsset("logoDataUrl", event.target.files?.[0])} /><button className="secondary-button" type="button" onClick={() => logoInputRef.current?.click()}><Upload size={17} />{lang === "ar" ? "رفع الشعار" : "Upload logo"}</button></div></div>
+                <div className="brand-upload-row"><div className="brand-upload-preview brand-upload-preview--icon">{draft.identity.iconDataUrl ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={draft.identity.iconDataUrl} alt="" /> : <Brand compact lang={lang} />}</div><div><strong>{lang === "ar" ? "الأيقونة المبسطة" : "Simplified icon"}</strong><small>{lang === "ar" ? "للقائمة واختصار التطبيق" : "Sidebar and app shortcut"}</small><input ref={iconInputRef} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => handleBrandAsset("iconDataUrl", event.target.files?.[0])} /><button className="secondary-button" type="button" onClick={() => iconInputRef.current?.click()}><Upload size={17} />{lang === "ar" ? "رفع الأيقونة" : "Upload icon"}</button></div></div>
+              </div>
+              <div className="settings-color-grid">
+                <label><span>{lang === "ar" ? "لون الإجراءات" : "Action color"}</span><input type="color" value={draft.appearance.primaryColor} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, primaryColor: event.target.value } }))} /><b>{draft.appearance.primaryColor}</b></label>
+                <label><span>{lang === "ar" ? "اللون المميز" : "Accent color"}</span><input type="color" value={draft.appearance.accentColor} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, accentColor: event.target.value } }))} /><b>{draft.appearance.accentColor}</b></label>
+                <label><span>{lang === "ar" ? "لون النجاح" : "Success color"}</span><input type="color" value={draft.appearance.successColor} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, successColor: event.target.value } }))} /><b>{draft.appearance.successColor}</b></label>
+              </div>
+              <div className={`settings-contrast ${primaryContrast >= 4.5 ? "is-safe" : "is-danger"}`}><ShieldCheck size={17} /><span>{lang === "ar" ? `وضوح النص على اللون الأساسي: ${primaryContrast.toFixed(1)}:1` : `Primary text contrast: ${primaryContrast.toFixed(1)}:1`}</span><b>{primaryContrast >= 4.5 ? (lang === "ar" ? "آمن للنشر" : "Safe to publish") : (lang === "ar" ? "غير كافٍ" : "Insufficient")}</b></div>
+              <div className="settings-form-grid settings-form-grid--compact">
+                <label><span>{lang === "ar" ? "حجم الخط" : "Font size"}</span><select value={draft.appearance.fontScale} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, fontScale: event.target.value as CompanyControlSettings["appearance"]["fontScale"] } }))}><option value="standard">{lang === "ar" ? "قياسي" : "Standard"}</option><option value="large">{lang === "ar" ? "كبير وواضح" : "Large and clear"}</option></select></label>
+                <label><span>{lang === "ar" ? "كثافة الواجهة" : "Interface density"}</span><select value={draft.appearance.density} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, density: event.target.value as CompanyControlSettings["appearance"]["density"] } }))}><option value="comfortable">{lang === "ar" ? "مريحة" : "Comfortable"}</option><option value="compact">{lang === "ar" ? "مدمجة" : "Compact"}</option></select></label>
+                <label><span>{lang === "ar" ? "لغة الشركة الافتراضية" : "Default company language"}</span><select value={draft.appearance.defaultLanguage} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, defaultLanguage: event.target.value as Lang } }))}><option value="ar">العربية</option><option value="en">English</option></select></label>
+                <label><span>{lang === "ar" ? "المظهر الافتراضي" : "Default theme"}</span><select value={draft.appearance.defaultTheme} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, defaultTheme: event.target.value as CompanyControlSettings["appearance"]["defaultTheme"] } }))}><option value="light">{lang === "ar" ? "فاتح" : "Light"}</option><option value="dark">{lang === "ar" ? "داكن" : "Dark"}</option><option value="system">{lang === "ar" ? "حسب الجهاز" : "System"}</option></select></label>
+                <label><span>{lang === "ar" ? "الخط العربي" : "Arabic font"}</span><select value={draft.appearance.arabicFont} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, arabicFont: event.target.value as CompanyControlSettings["appearance"]["arabicFont"] } }))}><option value="tajawal">Tajawal</option><option value="system">{lang === "ar" ? "خط الجهاز" : "System font"}</option></select></label>
+                <label><span>{lang === "ar" ? "الخط الإنجليزي" : "English font"}</span><select value={draft.appearance.englishFont} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, englishFont: event.target.value as CompanyControlSettings["appearance"]["englishFont"] } }))}><option value="inter">Inter</option><option value="system">{lang === "ar" ? "خط الجهاز" : "System font"}</option></select></label>
+              </div>
+              <label className="settings-policy-toggle"><input type="checkbox" checked={draft.appearance.allowUserTheme} onChange={(event) => setDraft((current) => ({ ...current, appearance: { ...current.appearance, allowUserTheme: event.target.checked } }))} /><span><strong>{lang === "ar" ? "السماح للموظف بتغيير الوضع" : "Allow employees to switch theme"}</strong><small>{lang === "ar" ? "عند إيقافه يلتزم الجميع بالمظهر الافتراضي بعد الدخول التالي." : "When off, everyone uses the default theme after the next sign-in."}</small></span></label>
+            </div>
+            <aside className="settings-live-preview"><small>{lang === "ar" ? "معاينة قبل النشر" : "Preview before publishing"}</small><div className="settings-preview-sidebar"><Brand compact lang={lang} /><span className="is-active"><Boxes size={17} />{lang === "ar" ? "الشحنات" : "Shipments"}</span><span><Warehouse size={17} />{lang === "ar" ? "المخزن" : "Warehouse"}</span></div><div className="settings-preview-surface"><b>{lang === "ar" ? "شحنة جاهزة للإسناد" : "Shipment ready for assignment"}</b><p>{lang === "ar" ? "محمد عادل · مدينة نصر" : "Mohamed Adel · Nasr City"}</p><button style={{ background: draft.appearance.primaryColor }}>{lang === "ar" ? "فتح الشحنة" : "Open shipment"}</button></div></aside>
+          </section>}
+
+          {tab === "backup" && <section className="settings-panel"><header><span><Database size={21} /></span><div><h2>{lang === "ar" ? "البيانات والنسخ الاحتياطي" : "Data and backups"}</h2><p>{lang === "ar" ? "هنا نجهز سياسة الحماية؛ التنفيذ التلقائي يحتاج خدمة نسخ على جهاز الشركة." : "Configure protection policy here; automation requires the company-device backup service."}</p></div><span className="settings-connection-badge is-offline">{lang === "ar" ? "الخدمة غير متصلة" : "Service not connected"}</span></header>
+            <div className="storage-boundaries"><article><span><RefreshCw size={20} /></span><strong>{lang === "ar" ? "ملفات النظام" : "Application files"}</strong><small>{lang === "ar" ? "حدود الفصل مصممة" : "Separation boundary designed"}</small></article><i>←</i><article><span><Database size={20} /></span><strong>{lang === "ar" ? "بيانات النموذج" : "Prototype data"}</strong><small>{lang === "ar" ? "محلية في المتصفح حاليًا" : "Currently local in the browser"}</small></article><i>←</i><article><span><HardDrive size={20} /></span><strong>{lang === "ar" ? "خدمة النسخ" : "Backup service"}</strong><small>{lang === "ar" ? "ستُوصل عند التطوير الخلفي" : "Connected during backend development"}</small></article></div>
+            <div className="settings-form-grid backup-policy-grid">
+              <label><span>{lang === "ar" ? "مجلد البيانات المخطط" : "Planned data folder"}</span><input dir="ltr" value={draft.backup.dataRoot} onChange={(event) => setDraft((current) => ({ ...current, backup: { ...current.backup, dataRoot: event.target.value } }))} /><small>{lang === "ar" ? "إعداد محفوظ فقط إلى أن تتصل خدمة الجهاز." : "Saved as configuration until the device service connects."}</small></label>
+              <label className={backupPathConflict ? "has-error" : ""}><span>{lang === "ar" ? "وجهة النسخ المخططة" : "Planned backup destination"}</span><input dir="ltr" value={draft.backup.destination} onChange={(event) => setDraft((current) => ({ ...current, backup: { ...current.backup, destination: event.target.value } }))} /><small>{backupPathConflict ? (lang === "ar" ? "هذه الوجهة داخل مجلد البيانات وغير مسموحة." : "This destination is inside the data folder and is not allowed.") : (lang === "ar" ? "لن تُكتب ملفات هنا من المتصفح؛ تحتاج خدمة الجهاز." : "The browser will not write here; the device service is required.")}</small></label>
+              <label><span>{lang === "ar" ? "جدول النسخ" : "Backup schedule"}</span><select value={draft.backup.schedule} onChange={(event) => setDraft((current) => ({ ...current, backup: { ...current.backup, schedule: event.target.value as CompanyControlSettings["backup"]["schedule"] } }))}><option value="daily">{lang === "ar" ? "يومي" : "Daily"}</option><option value="weekly">{lang === "ar" ? "أسبوعي" : "Weekly"}</option><option value="manual">{lang === "ar" ? "يدوي فقط" : "Manual only"}</option></select></label>
+              <label><span>{lang === "ar" ? "وقت التشغيل" : "Run time"}</span><input dir="ltr" type="time" value={draft.backup.runAt} onChange={(event) => setDraft((current) => ({ ...current, backup: { ...current.backup, runAt: event.target.value } }))} /></label>
+              <label><span>{lang === "ar" ? "عدد النسخ المحتفظ بها" : "Retention count"}</span><input min={3} max={90} type="number" value={draft.backup.retention} onChange={(event) => setDraft((current) => ({ ...current, backup: { ...current.backup, retention: Math.max(3, Number(event.target.value)) } }))} /></label>
+            </div>
+            <div className="backup-actions"><div><strong>{lang === "ar" ? "تنزيل بيانات النموذج" : "Download prototype data"}</strong><small>{lang === "ar" ? "ملف JSON محلي للمراجعة والتجربة، وليس نسخة إنتاجية تلقائية." : "A local JSON file for review and testing, not an automated production backup."}</small></div><button className="primary-button" type="button" onClick={createBackup}><Download size={18} />{lang === "ar" ? "تنزيل ملف النموذج" : "Download prototype file"}</button></div>
+            <div className="backup-status-row"><article className={draft.backup.lastRunState === "verified" ? "is-safe" : ""}><Check size={18} /><span><strong>{lang === "ar" ? "فحص JSON المحلي" : "Local JSON check"}</strong><small>{draft.backup.lastRunState === "verified" ? (lang === "ar" ? "الملف قابل للقراءة فقط" : "File is readable only") : (lang === "ar" ? "لم يُنزّل ملف" : "No file downloaded")}</small></span></article><article className="is-warning"><History size={18} /><span><strong>{lang === "ar" ? "اختبار استعادة إنتاجي" : "Production restore test"}</strong><small>{lang === "ar" ? "غير متاح قبل توصيل قاعدة البيانات وخدمة النسخ" : "Unavailable until database and backup service are connected"}</small></span></article>{draft.backup.lastSafetyPointAt && <article className="is-safe"><ShieldCheck size={18} /><span><strong>{lang === "ar" ? "آخر نقطة أمان محلية" : "Last local safety point"}</strong><small>{new Date(draft.backup.lastSafetyPointAt).toLocaleString(lang === "ar" ? "ar-EG" : "en-EG")}</small></span></article>}</div>
+            <div className="restore-zone"><div><FileUp size={21} /><span><strong>{lang === "ar" ? "استعادة نسخة" : "Restore a backup"}</strong><small>{lang === "ar" ? "يُفحص الملف أولًا، ثم تُعرض خطوة مستقلة بالسبب والتأكيد. لا توجد استعادة لشحنة واحدة." : "The file is inspected first, then a separate reasoned confirmation is required. Single-shipment restore is unavailable."}</small></span></div><input ref={restoreInputRef} hidden type="file" accept="application/json,.json" onChange={(event) => inspectRestoreFile(event.target.files?.[0])} /><button className="secondary-button" type="button" onClick={() => restoreInputRef.current?.click()}>{lang === "ar" ? "اختيار نسخة وفحصها" : "Choose and inspect backup"}</button></div>
+          </section>}
+
+          {tab === "updates" && <section className="settings-panel"><header><span><RefreshCw size={21} /></span><div><h2>{lang === "ar" ? "التحديثات واستمرارية العمل" : "Updates and continuity"}</h2><p>{lang === "ar" ? "لا يبدأ أي تحديث حساس قبل اجتياز حواجز البيانات." : "No sensitive update starts before data-safety guards pass."}</p></div></header>
+            <div className="update-release-card"><div><span className="source-icon"><Info size={20} /></span><span><small>{lang === "ar" ? "نسخة التصميم الحالية" : "Current design build"}</small><strong>Tasleem ERP prototype 0.1.0</strong><b>{lang === "ar" ? "غير متصل بخدمة تحديثات" : "Update service not connected"}</b></span></div><button className="secondary-button" type="button" onClick={checkUpdates}><RefreshCw size={17} />{lang === "ar" ? "تجربة فحص" : "Simulate check"}</button></div>
+            <div className="update-guard-list"><article className="is-blocked"><span><CircleAlert size={18} /></span><div><strong>{lang === "ar" ? "نسخة إنتاجية حديثة" : "Recent production backup"}</strong><small>{lang === "ar" ? "غير متاحة قبل توصيل خدمة النسخ" : "Unavailable until the backup service is connected"}</small></div></article><article className="is-warning"><span><CircleAlert size={18} /></span><div><strong>{lang === "ar" ? "اختبار استعادة إنتاجي" : "Production restore test"}</strong><small>{lang === "ar" ? "لم يُنفذ؛ تنزيل JSON المحلي لا يلغيه" : "Not run; a local JSON download does not satisfy it"}</small></div></article><article className="is-warning"><span><ShieldCheck size={18} /></span><div><strong>{lang === "ar" ? "حدود التخزين" : "Storage boundaries"}</strong><small>{lang === "ar" ? "مصممة في المعمارية وتحتاج تحققًا عند بناء الخدمة الخلفية" : "Designed in the architecture and must be verified with the backend service"}</small></div></article></div>
+            <div className="settings-form-grid settings-form-grid--compact"><label><span>{lang === "ar" ? "يوم الصيانة المفضل" : "Preferred maintenance day"}</span><select value={draft.updates.maintenanceDay} onChange={(event) => setDraft((current) => ({ ...current, updates: { ...current.updates, maintenanceDay: event.target.value } }))}><option value="friday">{lang === "ar" ? "الجمعة" : "Friday"}</option><option value="saturday">{lang === "ar" ? "السبت" : "Saturday"}</option><option value="sunday">{lang === "ar" ? "الأحد" : "Sunday"}</option></select></label><label><span>{lang === "ar" ? "وقت الصيانة" : "Maintenance time"}</span><input dir="ltr" type="time" value={draft.updates.maintenanceTime} onChange={(event) => setDraft((current) => ({ ...current, updates: { ...current.updates, maintenanceTime: event.target.value } }))} /></label></div>
+            <div className="settings-alert"><Info size={18} /><span>{lang === "ar" ? "النموذج يعرض سياسة التحديث وحواجزه فقط. التثبيت الإنتاجي سيستخدم حزمة موقعة، ترحيلات مرقمة، فحصًا بعد التحديث، ورجوعًا من نقطة الأمان عند الحاجة." : "This prototype shows the update policy and guards. Production updates use signed packages, versioned migrations, post-checks, and safety-point recovery when needed."}</span></div>
+          </section>}
+
+          {isDirty && <div className="settings-dirty-bar" role="status"><span><CircleAlert size={18} /><span><strong>{lang === "ar" ? "لديك تعديلات غير محفوظة" : "You have unsaved changes"}</strong><small>{lang === "ar" ? "لن تُطبق على النظام قبل الحفظ." : "They will not apply until saved."}</small></span></span><div><button className="secondary-button" type="button" onClick={discardChanges}><RotateCcw size={17} />{lang === "ar" ? "تجاهل" : "Discard"}</button><button className="primary-button" type="button" onClick={saveSettings}><Save size={18} />{lang === "ar" ? "حفظ الإعدادات" : "Save settings"}</button></div></div>}
+        </main>
+      </div>
+      {restoreCandidate && <div className="dialog-layer settings-restore-layer" role="dialog" aria-modal="true"><section className="dialog-card settings-restore-dialog"><header><span><CircleAlert size={22} /></span><div><small>{lang === "ar" ? "عملية حساسة" : "Sensitive operation"}</small><h2>{lang === "ar" ? "مراجعة الاستعادة" : "Review restore"}</h2></div><button className="square-button" type="button" onClick={() => setRestoreCandidate(null)}><X size={18} /></button></header><div className="restore-preview-facts"><span><small>{lang === "ar" ? "الملف" : "File"}</small><strong>{restoreCandidate.name}</strong></span><span><small>{lang === "ar" ? "وقت النسخة" : "Backup time"}</small><strong>{restoreCandidate.createdAt ? new Date(restoreCandidate.createdAt).toLocaleString(lang === "ar" ? "ar-EG" : "en-EG") : "—"}</strong></span><span><small>{lang === "ar" ? "إصدار النظام" : "System version"}</small><strong>{restoreCandidate.version}</strong></span></div><div className="settings-alert settings-alert--danger"><CircleAlert size={18} /><span>{lang === "ar" ? "سيُحفظ الوضع الحالي كنقطة أمان، ثم تُستبدل بيانات النموذج كاملة ويعاد فتح النظام. هذه ليست استعادة لراسل أو شحنة منفردة." : "The current state will be saved as a safety point, then all prototype data will be replaced and the system reopened. This is not a single-record restore."}</span></div><label><span>{lang === "ar" ? "سبب الاستعادة" : "Restore reason"}</span><textarea value={restoreReason} onChange={(event) => setRestoreReason(event.target.value)} placeholder={lang === "ar" ? "اكتب سببًا واضحًا لا يقل عن 8 أحرف" : "Enter a clear reason of at least 8 characters"} /></label><label><span>{lang === "ar" ? "اكتب «استعادة» للتأكيد" : "Type RESTORE to confirm"}</span><input value={restorePhrase} onChange={(event) => setRestorePhrase(event.target.value)} /></label><footer><button className="secondary-button" type="button" onClick={() => setRestoreCandidate(null)}>{lang === "ar" ? "إلغاء" : "Cancel"}</button><button className="danger-button" type="button" disabled={restoreReason.trim().length < 8 || restorePhrase.trim() !== (lang === "ar" ? "استعادة" : "RESTORE")} onClick={commitRestore}>{lang === "ar" ? "إنشاء نقطة أمان ثم الاستعادة" : "Create safety point and restore"}</button></footer></section></div>}
+      {toast && <div className="toast" role="status"><Check size={17} />{toast}</div>}
+    </div>
+  );
+}
+/* eslint-enable @next/next/no-img-element */
+
 function SystemHubScreen({
   lang,
   theme,
   screen,
+  shipmentRecords,
+  courierDebts,
+  senderBalances,
+  treasuryAccounts,
+  treasuryMovements,
   onLang,
   onTheme,
   onNavigate,
@@ -45418,6 +48956,11 @@ function SystemHubScreen({
   lang: Lang;
   theme: Theme;
   screen: "dashboard" | "reports" | "settings" | "help";
+  shipmentRecords: Shipment[];
+  courierDebts: CourierDebt[];
+  senderBalances: SenderBalance[];
+  treasuryAccounts: TreasuryAccount[];
+  treasuryMovements: TreasuryMovement[];
   onLang: () => void;
   onTheme: () => void;
   onNavigate: (screen: Exclude<Screen, "login">) => void;
@@ -45425,6 +48968,24 @@ function SystemHubScreen({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const liveCounts = {
+    warehouse: shipmentRecords.filter((shipment) => shipment.custodyType === "warehouse").length,
+    courier: shipmentRecords.filter((shipment) => shipment.custodyType === "courier").length,
+    incomplete: shipmentRecords.filter((shipment) => shipment.requiredType === "incomplete").length,
+    followUp: shipmentRecords.filter((shipment) => shipment.requiredType === "attention").length,
+    pendingCourierReceipt: shipmentRecords.filter((shipment) => shipment.custodyType === "return_route").length,
+    courierDebt: courierDebts.filter((debt) => debt.state === "active").reduce((sum, debt) => sum + debt.balance, 0),
+    senderBalance: senderBalances.filter((balance) => balance.state === "active").reduce((sum, balance) => sum + balance.balance, 0),
+  };
+  const totalTreasury = treasuryAccounts.reduce(
+    (sum, account) =>
+      sum + treasuryMovements.filter((movement) => movement.accountId === account.id).reduce(
+        (balance, movement) => balance + (movement.direction === "in" ? movement.amount : -movement.amount),
+        account.openingBalance,
+      ),
+    0,
+  );
+  const money = new Intl.NumberFormat(lang === "ar" ? "ar-EG" : "en-EG", { style: "currency", currency: "EGP", maximumFractionDigits: 0 });
   const content = {
     dashboard: {
       title: { ar: "الرئيسية", en: "Dashboard" },
@@ -45448,28 +49009,44 @@ function SystemHubScreen({
       title: { ar: "الإعدادات العامة", en: "General settings" },
       subtitle: { ar: "إدارة شكل الشركة والسياسات العامة دون تغيير كود.", en: "Manage company appearance and base policies without changing code." },
       cards: [
-        { title: { ar: "سياسات الشحن", en: "Shipment policies" }, body: { ar: "الحقول، الإلزام، الاستكمال والتأكيد.", en: "Fields, requirements, completion, and confirmation." }, target: "shipmentPolicies" as const },
+        { title: { ar: "الرسل وسياسات الشحن", en: "Senders & shipment policies" }, body: { ar: "كل راسل وبياناته وسياسته في ملف واحد.", en: "Each sender, profile and policy in one place." }, target: "senders" as const },
         { title: { ar: "الحالات والتسعير", en: "Statuses & pricing" }, body: { ar: "الحالات، المحافظات، المناطق وقوائم الأسعار.", en: "Statuses, governorates, areas, and price lists." }, target: "statuses" as const },
         { title: { ar: "الأدوار والصلاحيات", en: "Roles & permissions" }, body: { ar: "من يرى ومن ينفذ ومن يعتمد.", en: "Who sees, acts, and approves." }, target: "roles" as const },
       ],
     },
     help: {
-      title: { ar: "مركز المساعدة", en: "Help center" },
-      subtitle: { ar: "شرح بسيط لكل جزء من النظام حسب العمل الحقيقي داخل شركة الشحن.", en: "Plain guidance for each area based on real shipping-company work." },
-      cards: [
-        { title: { ar: "كيف تسجل شحنة؟", en: "How do I register a shipment?" }, body: { ar: "أضف الشحنة الموجودة فعليًا بالشركة، ثم تتجه للمخزن أو الاستكمال حسب سياسة الراسل.", en: "Add a shipment physically at the company, then it moves to warehouse or completion based on sender policy." }, target: "addShipment" as const },
-        { title: { ar: "كيف أجهز حساب مندوب؟", en: "How do I settle a courier?" }, body: { ar: "راجع شحنات المندوب أولًا ثم نفذ التسوية من حسابه.", en: "Review courier shipments first, then settle from the courier account." }, target: "courierAccount" as const },
-        { title: { ar: "كيف أراجع حساب راسل؟", en: "How do I settle a sender?" }, body: { ar: "اختر الشحنات في تجهيز الحساب قبل أي دفع أو مرتجع.", en: "Select shipments in account preparation before any payment or return." }, target: "senderAccountPrep" as const },
-      ],
+      title: { ar: "المساعدة الذكية", en: "Smart help" },
+      subtitle: { ar: "رحلات تشغيلية وشرح سياقي لكل صفحة وعنصر داخل النظام.", en: "Operational journeys and contextual guidance for every page and control." },
+      cards: [],
     },
   }[screen];
-  return <div className="app-shell"><Sidebar lang={lang} activeScreen={screen} collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onMobileClose={() => setMobileOpen(false)} onNavigate={onNavigate} onLogout={onLogout} /><div className="workspace"><header className="topbar"><button className="square-button" type="button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><span className="workspace-title"><strong>{content.title[lang]}</strong><small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small></span><div className="topbar__actions"><LanguageThemeControls lang={lang} theme={theme} onLang={onLang} onTheme={onTheme} subtle /></div></header><main className="page-content"><div className="welcome-row page-heading-row"><div><h1>{content.title[lang]}</h1><p>{content.subtitle[lang]}</p></div></div><section className="treasury-reconciliation-accounts">{content.cards.map((card) => <article key={card.target}><span className="source-icon"><LayoutDashboard size={20} /></span><span><small>{content.title[lang]}</small><strong>{card.title[lang]}</strong><b>{card.body[lang]}</b></span><button className="primary-button" type="button" onClick={() => onNavigate(card.target)}>{lang === "ar" ? "فتح" : "Open"}<ChevronLeft size={16} /></button></article>)}</section></main></div></div>;
+  const cards = screen === "dashboard"
+    ? [
+        { title: { ar: "جاهز للإسناد", en: "Ready for assignment" }, body: { ar: `${liveCounts.warehouse} شحنة داخل المخزن`, en: `${liveCounts.warehouse} shipment(s) in warehouse` }, target: "assignment" as const },
+        { title: { ar: "مع المناديب", en: "With couriers" }, body: { ar: `${liveCounts.courier} شحنة في الحيازة`, en: `${liveCounts.courier} shipment(s) in custody` }, target: "courierShipments" as const },
+        { title: { ar: "تحتاج إجراء", en: "Need action" }, body: { ar: `${liveCounts.incomplete + liveCounts.followUp} شحنة ناقصة أو للمتابعة`, en: `${liveCounts.incomplete + liveCounts.followUp} incomplete or follow-up shipment(s)` }, target: "shipments" as const },
+        { title: { ar: "بانتظار استلام الشركة", en: "Await company receipt" }, body: { ar: `${liveCounts.pendingCourierReceipt} نتيجة من المندوب`, en: `${liveCounts.pendingCourierReceipt} courier result(s)` }, target: "courierAccount" as const },
+      ]
+    : screen === "reports"
+      ? [
+          { title: { ar: "تقرير التحصيل", en: "Collection report" }, body: { ar: `مديونيات المناديب: ${money.format(liveCounts.courierDebt)}`, en: `Courier debt: ${money.format(liveCounts.courierDebt)}` }, target: "courierAccount" as const },
+          { title: { ar: "تقرير الرواسل", en: "Sender accounts report" }, body: { ar: `أرصدة مستحقة للرواسل: ${money.format(liveCounts.senderBalance)}`, en: `Sender balances due: ${money.format(liveCounts.senderBalance)}` }, target: "senderAccountHistory" as const },
+          { title: { ar: "تقرير الخزنة", en: "Treasury report" }, body: { ar: `إجمالي الأرصدة: ${money.format(totalTreasury)}`, en: `Total balances: ${money.format(totalTreasury)}` }, target: "treasury" as const },
+          { title: { ar: "تقرير التشغيل", en: "Operations report" }, body: { ar: `شحنات المتابعة: ${liveCounts.followUp}`, en: `Follow-up shipments: ${liveCounts.followUp}` }, target: "shipments" as const },
+        ]
+      : content.cards;
+  return <div className={`erp-shell${collapsed ? " erp-shell--collapsed" : ""}`}><Sidebar lang={lang} activeScreen={screen} collapsed={collapsed} mobileOpen={mobileOpen} onCollapse={() => setCollapsed((value) => !value)} onMobileClose={() => setMobileOpen(false)} onNavigate={onNavigate} onLogout={onLogout} /><div className="erp-main"><header className="topbar system-hub-topbar"><button className="square-button mobile-menu" type="button" onClick={() => setMobileOpen(true)}><Menu size={20} /></button><span className="workspace-title"><strong>{content.title[lang]}</strong><small>{lang === "ar" ? "الفرع الرئيسي" : "Main branch"}</small></span><div className="topbar__actions"><LanguageThemeControls lang={lang} theme={theme} onLang={onLang} onTheme={onTheme} subtle /></div></header><main className={`page-content${screen === "help" ? " page-content--help" : ""}`}><div className="welcome-row page-heading-row"><div><h1>{content.title[lang]}</h1><p>{content.subtitle[lang]}</p></div></div>{screen === "help" ? <SmartHelpCenter lang={lang} onNavigate={onNavigate} /> : <section className="treasury-reconciliation-accounts">{cards.map((card) => <article key={card.target}><span className="source-icon"><LayoutDashboard size={20} /></span><span><small>{content.title[lang]}</small><strong>{card.title[lang]}</strong><b>{card.body[lang]}</b></span><button className="primary-button" type="button" onClick={() => onNavigate(card.target)}>{lang === "ar" ? "فتح" : "Open"}<ChevronLeft size={16} /></button></article>)}</section>}</main></div></div>;
 }
 
 export default function Home() {
   const [lang, setLang] = useState<Lang>("ar");
   const [theme, setTheme] = useState<Theme>("light");
   const [screen, setScreen] = useState<Screen>("login");
+
+  useEffect(() => {
+    if (screen === "shipmentPolicies") setScreen("senders");
+    if (screen === "courierRates") setScreen("couriers");
+  }, [screen]);
   const [sharedStatuses, setSharedStatuses] = useState(statusPolicies);
   const [sharedServiceTypes, setSharedServiceTypes] = useState(
     shipmentServiceTypesData,
@@ -45484,6 +49061,8 @@ export default function Home() {
   const [sharedAccessActivities, setSharedAccessActivities] =
     useState(accessActivityData);
   const [sharedGovernorates, setSharedGovernorates] = useState(governoratesData);
+  const [sharedWarehouseLocations, setSharedWarehouseLocations] = useState(warehouseLocations);
+  const [sharedWarehouseStocktakes, setSharedWarehouseStocktakes] = useState<WarehouseStocktake[]>([]);
   const [sharedPriceLists, setSharedPriceLists] = useState(priceListsData);
   const [sharedCourierPlans, setSharedCourierPlans] = useState(
     normalizeCourierPlans(courierRatePlansData, courierRecordsData),
@@ -45520,6 +49099,9 @@ export default function Home() {
   const [sharedTreasuryMovements, setSharedTreasuryMovements] = useState(
     treasuryMovementsData,
   );
+  const [sharedTreasuryAccounts, setSharedTreasuryAccounts] = useState(
+    treasuryAccountsData,
+  );
   const [sharedTreasuryCashSession, setSharedTreasuryCashSession] =
     useState<TreasuryCashSession>(treasuryCashSessionDefault);
   const [
@@ -45550,6 +49132,8 @@ export default function Home() {
   const [sharedTrusts, setSharedTrusts] = useState(trustRecordsDemoData);
   const [sharedTrustPolicy, setSharedTrustPolicy] =
     useState<TrustPolicy>(trustPolicyDefault);
+  const [sharedCompanyControlSettings, setSharedCompanyControlSettings] =
+    useState<CompanyControlSettings>(defaultCompanyControlSettings);
   const [trustConversionTarget, setTrustConversionTarget] =
     useState<TrustRecord | null>(null);
   const [shipmentFileTargetId, setShipmentFileTargetId] = useState("");
@@ -45560,11 +49144,79 @@ export default function Home() {
     tab: "profile" | "policy";
   } | null>(null);
   const [controlCenterReady, setControlCenterReady] = useState(false);
+  const currentOperator: Localized =
+    sharedEmployees.find(
+      (employee) =>
+        employee.id ===
+        sharedUsers.find(
+          (user) =>
+            user.state === "active" && user.invitationState === "accepted",
+        )?.employeeId,
+    )?.name ?? { ar: "مستخدم النظام", en: "System user" };
+  const currentUserRoleIds =
+    sharedUsers.find(
+      (user) => user.state === "active" && user.invitationState === "accepted",
+    )?.roleIds ?? ["role-owner"];
 
   useEffect(() => {
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
   }, [lang]);
+
+  useEffect(() => {
+    const quickRoutes: Array<{ terms: string[]; screen: Exclude<Screen, "login"> }> = [
+      { terms: ["شحنة", "شحنات", "shipment"], screen: "shipments" },
+      { terms: ["إضافة شحنة", "تسجيل شحنة", "add shipment"], screen: "addShipment" },
+      { terms: ["حالة", "حالات", "status"], screen: "statuses" },
+      { terms: ["منطقة", "محافظة", "area", "governorate"], screen: "areas" },
+      { terms: ["سعر", "أسعار", "price"], screen: "priceLists" },
+      { terms: ["سياسة راسل", "سياسات الرسل", "sender policy"], screen: "senders" },
+      { terms: ["مندوب", "مناديب", "courier"], screen: "couriers" },
+      { terms: ["عمولة", "عمولات", "commission"], screen: "couriers" },
+      { terms: ["مخزن", "warehouse"], screen: "warehouse" },
+      { terms: ["خزنة", "treasury"], screen: "treasury" },
+      { terms: ["تنبيه", "تنبيهات", "alert"], screen: "alerts" },
+      { terms: ["مستخدم", "مستخدمين", "user"], screen: "users" },
+      { terms: ["صلاحية", "صلاحيات", "role"], screen: "roles" },
+      { terms: ["مساعدة", "help"], screen: "help" },
+    ];
+    const navigateFromQuery = (value: string) => {
+      const query = value.trim().toLocaleLowerCase();
+      const match = quickRoutes.find(({ terms }) =>
+        terms.some((term) => query.includes(term.toLocaleLowerCase())),
+      );
+      if (match) setScreen(match.screen);
+    };
+    const onDocumentClick = (event: globalThis.MouseEvent) => {
+      const element = event.target instanceof HTMLElement ? event.target : null;
+      if (element?.closest(".notification-button")) {
+        setScreen("alerts");
+      } else if (element?.closest(".topbar-user")) {
+        setScreen("users");
+      }
+    };
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+        const search = document.querySelector<HTMLInputElement>(".command-search input");
+        if (search) {
+          event.preventDefault();
+          search.focus();
+          search.select();
+        }
+        return;
+      }
+      const target = event.target instanceof HTMLInputElement ? event.target : null;
+      if (event.key === "Enter" && target?.closest(".command-search")) {
+        navigateFromQuery(target.value);
+      }
+    };
+    document.addEventListener("click", onDocumentClick);
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => {
+      document.removeEventListener("click", onDocumentClick);
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -45581,6 +49233,8 @@ export default function Home() {
           accessRoles?: AccessRole[];
           accessActivities?: AccessActivity[];
           governorates?: GovernorateRecord[];
+          warehouseLocations?: WarehouseLocation[];
+          warehouseStocktakes?: WarehouseStocktake[];
           priceLists?: PriceListRecord[];
           courierPlans?: CourierRatePlan[];
           shipmentFields?: ShipmentFieldPolicy[];
@@ -45595,6 +49249,7 @@ export default function Home() {
           senderBalances?: SenderBalance[];
           senderDrafts?: SenderSettlementDraft[];
           senderReceipts?: SenderSettlementReceipt[];
+          treasuryAccounts?: TreasuryAccount[];
           treasuryMovements?: TreasuryMovement[];
           treasuryCashSession?: TreasuryCashSession;
           treasuryCashSessionHistory?: TreasuryCashSession[];
@@ -45606,25 +49261,53 @@ export default function Home() {
           financialDayCloses?: FinancialDayCloseSnapshot[];
           trusts?: TrustRecord[];
           trustPolicy?: TrustPolicy;
+          companyControlSettings?: CompanyControlSettings;
         };
+        if (parsed.companyControlSettings) {
+          const normalizedCompanySettings = normalizeControlSettings(parsed.companyControlSettings);
+          setSharedCompanyControlSettings(normalizedCompanySettings);
+          setLang(normalizedCompanySettings.appearance.defaultLanguage);
+          const preferredTheme = normalizedCompanySettings.appearance.defaultTheme === "system"
+            ? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+            : normalizedCompanySettings.appearance.defaultTheme;
+          setTheme(preferredTheme);
+        }
         if (Array.isArray(parsed.statuses)) {
-          setSharedStatuses(
-            parsed.statuses.map((status) =>
+          const normalizedSavedStatuses = parsed.statuses.map((status) =>
               normalizeStatusPolicy({
                 ...status,
                 appearsInAssignment: status.appearsInAssignment ?? false,
                 appearsInCourierRates:
                   status.appearsInCourierRates ?? status.appearsInPricing,
               }),
-            ),
+            );
+          const missingBuiltInStatuses = statusPolicies.filter(
+            (status) =>
+              !normalizedSavedStatuses.some(
+                (savedStatus) => savedStatus.id === status.id,
+              ),
           );
+          setSharedStatuses([
+            ...normalizedSavedStatuses,
+            ...missingBuiltInStatuses.map(normalizeStatusPolicy),
+          ]);
         }
         if (
           Array.isArray(parsed.serviceTypes) &&
           parsed.serviceTypes.length > 0
         ) {
           setSharedServiceTypes(
-            parsed.serviceTypes.map(normalizeShipmentServiceType),
+            parsed.serviceTypes
+              .map(normalizeShipmentServiceType)
+              .filter(
+                (service) =>
+                  !(
+                    service.state === "draft" &&
+                    service.code === "NEW_SERVICE" &&
+                    service.name.ar === "خدمة جديدة" &&
+                    service.name.en === "New service"
+                  ),
+              ),
           );
         }
         if (Array.isArray(parsed.senders) && parsed.senders.length > 0) {
@@ -45673,6 +49356,10 @@ export default function Home() {
         if (Array.isArray(parsed.governorates)) {
           setSharedGovernorates(parsed.governorates);
         }
+        if (Array.isArray(parsed.warehouseLocations) && parsed.warehouseLocations.length > 0) {
+          setSharedWarehouseLocations(parsed.warehouseLocations.map((location) => ({ ...location, state: location.state ?? "active" })));
+        }
+        if (Array.isArray(parsed.warehouseStocktakes)) setSharedWarehouseStocktakes(parsed.warehouseStocktakes);
         if (Array.isArray(parsed.priceLists)) setSharedPriceLists(parsed.priceLists);
         if (Array.isArray(parsed.courierPlans)) {
           setSharedCourierPlans(
@@ -45726,8 +49413,21 @@ export default function Home() {
                 state: policy.state ?? "published",
                 version: policy.version ?? 1,
                 servicePolicyMode: policy.servicePolicyMode ?? "inherit",
-                allowedServiceTypeIds: policy.allowedServiceTypeIds,
-                defaultServiceTypeId: policy.defaultServiceTypeId,
+                allowedServiceTypeIds:
+                  policy.allowedServiceTypeIds?.length
+                    ? policy.allowedServiceTypeIds
+                    : shipmentServiceTypesData
+                        .filter((service) => service.state === "published")
+                        .map((service) => service.id),
+                defaultServiceTypeId:
+                  policy.defaultServiceTypeId ??
+                  shipmentServiceTypesData.find(
+                    (service) =>
+                      service.state === "published" && service.isCompanyDefault,
+                  )?.id ??
+                  shipmentServiceTypesData.find(
+                    (service) => service.state === "published",
+                  )?.id,
                 fields: (policy.fields ?? shipmentFieldPoliciesData).map(
                   normalizeShipmentField,
                 ),
@@ -45740,11 +49440,10 @@ export default function Home() {
                   policy.recipientAreaRates ??
                   demoPolicy?.recipientAreaRates ??
                   {},
-                overrideKeys: policy.overrideKeys?.filter(
-                  (key) =>
-                    key !== "shippingChargeMode" &&
-                    key !== "shippingChargeValue",
-                ),
+                recipientServiceAreaRates:
+                  policy.recipientServiceAreaRates ?? {},
+                overrideKeys: policy.overrideKeys ?? [],
+                fieldOverrideCodes: policy.fieldOverrideCodes ?? [],
                 history: (policy.history ?? []).map((entry) => ({
                   ...entry,
                   fields: (entry.fields ?? shipmentFieldPoliciesData).map(
@@ -45799,6 +49498,9 @@ export default function Home() {
           parsed.senderReceipts.length > 0
         ) {
           setSharedSenderReceipts(parsed.senderReceipts);
+        }
+        if (Array.isArray(parsed.treasuryAccounts) && parsed.treasuryAccounts.length > 0) {
+          setSharedTreasuryAccounts(parsed.treasuryAccounts);
         }
         if (
           Array.isArray(parsed.treasuryMovements) &&
@@ -45964,11 +49666,25 @@ export default function Home() {
     const areaIds = sharedGovernorates.flatMap((governorate) =>
       governorate.areas.map((area) => area.id),
     );
+    const serviceIds = sharedServiceTypes
+      .filter((service) => service.state === "published")
+      .map((service) => service.id);
 
     setSharedPriceLists((current) => {
       let anyListChanged = false;
+      const senderOwner = new Map<string, string>();
+      current.forEach((priceList) => {
+        priceList.senders.forEach((sender) => {
+          const previousId = senderOwner.get(sender.en);
+          const previous = current.find((candidate) => candidate.id === previousId);
+          if (!previous || (previous.isDefault && !priceList.isDefault)) {
+            senderOwner.set(sender.en, priceList.id);
+          }
+        });
+      });
       const next = current.map((priceList) => {
         let nextPrices = priceList.prices;
+        let nextServicePrices = { ...(priceList.servicePrices ?? {}) };
         let listChanged = false;
 
         areaIds.forEach((areaId) => {
@@ -45995,14 +49711,112 @@ export default function Home() {
           }
         });
 
+        serviceIds.forEach((serviceId) => {
+          const existingServiceMatrix = nextServicePrices[serviceId];
+          let serviceMatrix = existingServiceMatrix ?? Object.fromEntries(
+            Object.entries(nextPrices).map(([areaId, values]) => [
+              areaId,
+              { ...values },
+            ]),
+          );
+          let serviceChanged = !existingServiceMatrix;
+          areaIds.forEach((areaId) => {
+            const currentArea = serviceMatrix[areaId];
+            if (!currentArea) {
+              if (!serviceChanged) serviceMatrix = { ...serviceMatrix };
+              serviceMatrix[areaId] = Object.fromEntries(
+                pricingStatusIds.map((statusId) => [statusId, null]),
+              );
+              serviceChanged = true;
+              return;
+            }
+            const missingStatuses = pricingStatusIds.filter(
+              (statusId) => !(statusId in currentArea),
+            );
+            if (missingStatuses.length) {
+              if (!serviceChanged) serviceMatrix = { ...serviceMatrix };
+              serviceMatrix[areaId] = { ...currentArea };
+              missingStatuses.forEach((statusId) => {
+                serviceMatrix[areaId][statusId] = null;
+              });
+              serviceChanged = true;
+            }
+          });
+          if (serviceChanged) {
+            nextServicePrices[serviceId] = serviceMatrix;
+            listChanged = true;
+          }
+        });
+
+        const uniqueSenders = priceList.senders.filter(
+          (sender) => senderOwner.get(sender.en) === priceList.id,
+        );
+        if (uniqueSenders.length !== priceList.senders.length) {
+          listChanged = true;
+        }
+
         if (!listChanged) return priceList;
         anyListChanged = true;
-        return { ...priceList, prices: nextPrices };
+        return {
+          ...priceList,
+          prices: nextPrices,
+          servicePrices: nextServicePrices,
+          senders: uniqueSenders,
+        };
       });
 
       return anyListChanged ? next : current;
     });
-  }, [sharedGovernorates, sharedStatuses]);
+  }, [sharedGovernorates, sharedStatuses, sharedServiceTypes]);
+
+  useEffect(() => {
+    if (!controlCenterReady) return;
+    setSharedSenderPolicies((current) => {
+      const missingSenders = sharedSenders.filter(
+        (sender) => !findSenderShipmentPolicy(sender.name, current),
+      );
+      if (!missingSenders.length) return current;
+      const availableServiceIds = sharedServiceTypes
+        .filter((service) => service.state === "published")
+        .map((service) => service.id);
+      const defaultServiceId =
+        sharedServiceTypes.find(
+          (service) => service.state === "published" && service.isCompanyDefault,
+        )?.id ?? availableServiceIds[0] ?? "";
+      const createdAt: Localized = { ar: "أُنشئت تلقائيًا", en: "Created automatically" };
+      return [
+        ...current,
+        ...missingSenders.map<SenderShipmentPolicy>((sender) => ({
+          sender: sender.name,
+          fields: sharedShipmentFields.map((field) => ({
+            ...normalizeShipmentField(field),
+            name: { ...field.name },
+            description: { ...field.description },
+            placements: [...(field.placements ?? [])],
+          })),
+          settings: normalizeShipmentDataSettings(sharedShipmentSettings),
+          recipientAreaRates: {},
+          recipientServiceAreaRates: {},
+          state: "published",
+          version: 1,
+          updatedAt: createdAt,
+          updatedBy: { ar: "النظام", en: "System" },
+          history: [],
+          overrideKeys: [],
+          fieldOverrideCodes: [],
+          servicePolicyMode: "inherit",
+          allowedServiceTypeIds: availableServiceIds,
+          defaultServiceTypeId: defaultServiceId,
+        })),
+      ];
+    });
+  }, [
+    controlCenterReady,
+    sharedSenders,
+    sharedServiceTypes,
+    sharedShipmentFields,
+    sharedShipmentSettings,
+  ]);
 
   useEffect(() => {
     const courierStatusIds = sharedStatuses
@@ -46070,18 +49884,28 @@ export default function Home() {
         }
         additions.push({
           id,
-          accountId: "main-cash",
-          direction: "in",
-          category: "courier_collection",
+          accountId: settlement.treasuryAccountId ?? "main-cash",
+          direction: settlement.cashDirection ?? "in",
+          category:
+            (settlement.cashDirection ?? "in") === "out"
+              ? "courier_payment"
+              : "courier_collection",
           amount: settlement.actualCash,
           party: settlement.courier,
           description: {
-            ar: `تحصيل مثبت من حساب المندوب ${settlement.courier.ar}`,
-            en: `Posted collection from ${settlement.courier.en}'s account`,
+            ar:
+              (settlement.cashDirection ?? "in") === "out"
+                ? `رد مبالغ دفعها المندوب ${settlement.courier.ar} للمستلمين`
+                : `تحصيل مثبت من حساب المندوب ${settlement.courier.ar}`,
+            en:
+              (settlement.cashDirection ?? "in") === "out"
+                ? `Reimbursement of recipient payments made by ${settlement.courier.en}`
+                : `Posted collection from ${settlement.courier.en}'s account`,
           },
           reference: settlement.id,
           source: "system",
-          createdBy: { ar: "أحمد حسن", en: "Ahmed Hassan" },
+          createdBy:
+            settlement.receivedBy ?? { ar: "أحمد حسن", en: "Ahmed Hassan" },
           timestamp: settlement.timestamp,
           sequence: Date.now() + index,
           linkedScreen: "courierAccount",
@@ -46090,19 +49914,35 @@ export default function Home() {
             id: settlement.id,
           },
           breakdown: [
-            {
-              kind: "shipment_collection" as const,
-              amount: Math.max(
-                0,
-                settlement.actualCash -
-                  settlement.debtPayment -
-                  Math.max(0, settlement.difference),
-              ),
-              label: {
-                ar: "تحصيل الشحنات المستلم فعليًا",
-                en: "Actual shipment collection",
-              },
-            },
+            ...((settlement.recipientDisbursement ?? 0) > 0
+              ? [
+                  {
+                    kind: "recipient_disbursement" as const,
+                    amount: settlement.recipientDisbursement ?? 0,
+                    label: {
+                      ar: "مبالغ دفعها المندوب للمستلمين",
+                      en: "Amounts paid by courier to recipients",
+                    },
+                  },
+                ]
+              : []),
+            ...((settlement.cashDirection ?? "in") === "in"
+              ? [
+                  {
+                    kind: "shipment_collection" as const,
+                    amount: Math.max(
+                      0,
+                      settlement.actualCash -
+                        settlement.debtPayment -
+                        Math.max(0, settlement.difference),
+                    ),
+                    label: {
+                      ar: "تحصيل الشحنات المستلم فعليًا",
+                      en: "Actual shipment collection",
+                    },
+                  },
+                ]
+              : []),
             ...(settlement.debtPayment > 0
               ? [
                   {
@@ -46187,6 +50027,8 @@ export default function Home() {
         accessRoles: sharedAccessRoles,
         accessActivities: sharedAccessActivities,
         governorates: sharedGovernorates,
+        warehouseLocations: sharedWarehouseLocations,
+        warehouseStocktakes: sharedWarehouseStocktakes,
         priceLists: sharedPriceLists,
         courierPlans: sharedCourierPlans,
         shipmentFields: sharedShipmentFields,
@@ -46201,6 +50043,7 @@ export default function Home() {
         senderBalances: sharedSenderBalances,
         senderDrafts: sharedSenderDrafts,
         senderReceipts: sharedSenderReceipts,
+        treasuryAccounts: sharedTreasuryAccounts,
         treasuryMovements: sharedTreasuryMovements,
         treasuryCashSession: sharedTreasuryCashSession,
         treasuryCashSessionHistory: sharedTreasuryCashSessionHistory,
@@ -46214,11 +50057,14 @@ export default function Home() {
         financialDayCloses: sharedFinancialDayCloses,
         trusts: sharedTrusts,
         trustPolicy: sharedTrustPolicy,
+        companyControlSettings: sharedCompanyControlSettings,
       }),
     );
   }, [
     controlCenterReady,
     sharedGovernorates,
+    sharedWarehouseLocations,
+    sharedWarehouseStocktakes,
     sharedCourierDebts,
     sharedCourierPlans,
     sharedCourierSettlements,
@@ -46229,6 +50075,7 @@ export default function Home() {
     sharedSenderBalances,
     sharedSenderDrafts,
     sharedSenderReceipts,
+    sharedTreasuryAccounts,
     sharedTreasuryMovements,
     sharedTreasuryCashSession,
     sharedTreasuryCashSessionHistory,
@@ -46240,6 +50087,7 @@ export default function Home() {
     sharedFinancialDayCloses,
     sharedTrustPolicy,
     sharedTrusts,
+    sharedCompanyControlSettings,
     sharedShipmentFields,
     sharedShipmentSettings,
     sharedSenderPolicies,
@@ -46353,8 +50201,26 @@ export default function Home() {
     setScreen("trusts");
   }
 
+  const companyRootStyle = {
+    "--primary": sharedCompanyControlSettings.appearance.primaryColor,
+    "--blue-600": sharedCompanyControlSettings.appearance.primaryColor,
+    "--orange-500": sharedCompanyControlSettings.appearance.accentColor,
+    "--success": sharedCompanyControlSettings.appearance.successColor,
+    "--green-600": sharedCompanyControlSettings.appearance.successColor,
+  } as CSSProperties;
+
   return (
-    <div className="app-root" data-theme={theme} dir={lang === "ar" ? "rtl" : "ltr"}>
+    <CompanyBrandContext.Provider value={sharedCompanyControlSettings}>
+    <div
+      className="app-root"
+      data-theme={theme}
+      data-font-scale={sharedCompanyControlSettings.appearance.fontScale}
+      data-density={sharedCompanyControlSettings.appearance.density}
+      data-arabic-font={sharedCompanyControlSettings.appearance.arabicFont}
+      data-english-font={sharedCompanyControlSettings.appearance.englishFont}
+      dir={lang === "ar" ? "rtl" : "ltr"}
+      style={companyRootStyle}
+    >
       {screen === "login" ? (
         <LoginScreen
           lang={lang}
@@ -46365,11 +50231,27 @@ export default function Home() {
           }
           onEnter={() => setScreen("shipments")}
         />
-      ) : screen === "dashboard" || screen === "reports" || screen === "settings" || screen === "help" ? (
+      ) : screen === "settings" ? (
+        <CompanySettingsScreen
+          lang={lang}
+          theme={theme}
+          settings={sharedCompanyControlSettings}
+          onSave={setSharedCompanyControlSettings}
+          onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
+          onTheme={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
+          onNavigate={setScreen}
+          onLogout={() => setScreen("login")}
+        />
+      ) : screen === "dashboard" || screen === "reports" || screen === "help" ? (
         <SystemHubScreen
           lang={lang}
           theme={theme}
           screen={screen}
+          shipmentRecords={sharedShipments}
+          courierDebts={sharedCourierDebts}
+          senderBalances={sharedSenderBalances}
+          treasuryAccounts={sharedTreasuryAccounts}
+          treasuryMovements={sharedTreasuryMovements}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() => setTheme((value) => (value === "light" ? "dark" : "light"))}
           onNavigate={setScreen}
@@ -46381,6 +50263,10 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           serviceTypes={sharedServiceTypes}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
+          settings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -46402,11 +50288,17 @@ export default function Home() {
             ) ?? null
           }
           serviceTypes={sharedServiceTypes}
+          statuses={sharedStatuses}
+          roles={sharedAccessRoles}
+          currentRoleIds={currentUserRoleIds}
+          priceLists={sharedPriceLists}
           courierPlans={sharedCourierPlans}
           governorates={sharedGovernorates}
           courierSettlements={sharedCourierSettlements}
           senderDrafts={sharedSenderDrafts}
           senderReceipts={sharedSenderReceipts}
+          companySettings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -46416,6 +50308,7 @@ export default function Home() {
             setRecipientProfileTargetId(recipientId);
             setScreen("recipients");
           }}
+          onShipmentChange={(nextShipment) => setSharedShipments((current) => current.map((shipment) => shipment.id === nextShipment.id ? nextShipment : shipment))}
           onBack={() => setScreen("shipments")}
           onLogout={() => setScreen("login")}
         />
@@ -46475,6 +50368,8 @@ export default function Home() {
           plans={sharedCourierPlans}
           shipmentRecords={sharedShipments}
           debts={sharedCourierDebts}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
           onRecordsChange={setSharedCouriers}
           onPlansChange={setSharedCourierPlans}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
@@ -46540,6 +50435,8 @@ export default function Home() {
           debts={sharedCourierDebts}
           settlements={sharedCourierSettlements}
           payouts={sharedCourierPayouts}
+          accounts={sharedTreasuryAccounts}
+          operator={currentOperator}
           onShipmentsChange={setSharedShipments}
           onDebtsChange={setSharedCourierDebts}
           onSettlementsChange={setSharedCourierSettlements}
@@ -46560,9 +50457,11 @@ export default function Home() {
           fixedEntitlements={sharedCourierFixedEntitlements}
           payouts={sharedCourierPayouts}
           debts={sharedCourierDebts}
-          accounts={treasuryAccountsData}
+          accounts={sharedTreasuryAccounts}
           movements={sharedTreasuryMovements}
           onPayoutsChange={setSharedCourierPayouts}
+          onFixedEntitlementsChange={setSharedCourierFixedEntitlements}
+          onDebtsChange={setSharedCourierDebts}
           onMovementsChange={setSharedTreasuryMovements}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
@@ -46605,6 +50504,7 @@ export default function Home() {
           drafts={sharedSenderDrafts}
           receipts={sharedSenderReceipts}
           activeDraftId={activeSenderDraftId}
+          operator={currentOperator}
           onShipmentsChange={setSharedShipments}
           onBalancesChange={setSharedSenderBalances}
           onDraftsChange={setSharedSenderDrafts}
@@ -46633,7 +50533,7 @@ export default function Home() {
         <TreasuryScreen
           lang={lang}
           theme={theme}
-          accounts={treasuryAccountsData}
+          accounts={sharedTreasuryAccounts}
           movements={sharedTreasuryMovements}
           employees={sharedEmployees}
           users={sharedUsers}
@@ -46650,6 +50550,9 @@ export default function Home() {
           }
           statementLines={sharedTreasuryStatementLines}
           dayCloseSnapshots={sharedFinancialDayCloses}
+          courierSettlements={sharedCourierSettlements}
+          senderReceipts={sharedSenderReceipts}
+          onAccountsChange={setSharedTreasuryAccounts}
           onMovementsChange={setSharedTreasuryMovements}
           onCashSessionChange={setSharedTreasuryCashSession}
           onCashSessionHistoryChange={setSharedTreasuryCashSessionHistory}
@@ -46695,6 +50598,9 @@ export default function Home() {
           couriers={sharedCouriers}
           courierPlans={sharedCourierPlans}
           governorates={sharedGovernorates}
+          priceLists={sharedPriceLists}
+          companySettings={sharedShipmentSettings}
+          senderPolicies={sharedSenderPolicies}
           onShipmentsChange={setSharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
@@ -46778,7 +50684,6 @@ export default function Home() {
           theme={theme}
           shipmentRecords={sharedShipments}
           fields={sharedShipmentFields}
-          senders={sharedSenders}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           governorates={sharedGovernorates}
@@ -46795,10 +50700,16 @@ export default function Home() {
           lang={lang}
           theme={theme}
           shipmentRecords={sharedShipments}
+          locations={sharedWarehouseLocations}
+          stocktakes={sharedWarehouseStocktakes}
           serviceTypes={sharedServiceTypes}
+          statuses={sharedStatuses}
+          governorates={sharedGovernorates}
           settings={sharedShipmentSettings}
           senderPolicies={sharedSenderPolicies}
           onShipmentsChange={setSharedShipments}
+          onLocationsChange={setSharedWarehouseLocations}
+          onStocktakesChange={setSharedWarehouseStocktakes}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -46813,6 +50724,7 @@ export default function Home() {
           enabled={sharedShipmentSettings.trustsEnabled}
           policy={sharedTrustPolicy}
           records={sharedTrusts}
+          locations={sharedWarehouseLocations}
           shipmentRecords={sharedShipments}
           onEnabledChange={(enabled) =>
             setSharedShipmentSettings((current) => ({
@@ -46887,6 +50799,7 @@ export default function Home() {
           theme={theme}
           policies={sharedStatuses}
           services={sharedServiceTypes}
+          roles={sharedAccessRoles}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -46920,6 +50833,7 @@ export default function Home() {
           governorates={sharedGovernorates}
           priceLists={sharedPriceLists}
           policies={sharedStatuses}
+          shipmentRecords={sharedShipments}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -46936,6 +50850,7 @@ export default function Home() {
           statuses={sharedStatuses}
           governorates={sharedGovernorates}
           senders={sharedSenders}
+          serviceTypes={sharedServiceTypes}
           onLang={() => setLang((value) => (value === "ar" ? "en" : "ar"))}
           onTheme={() =>
             setTheme((value) => (value === "light" ? "dark" : "light"))
@@ -47009,6 +50924,14 @@ export default function Home() {
           onLogout={() => setScreen("login")}
         />
       ) : null}
+      {screen !== "login" && (
+        <SmartHelpLayer
+          lang={lang}
+          screen={screen}
+          onNavigate={setScreen}
+        />
+      )}
     </div>
+    </CompanyBrandContext.Provider>
   );
 }
